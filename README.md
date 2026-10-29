@@ -13,11 +13,6 @@ a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
 The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
-This private repository is `migrate-v2v`; its public counterpart is
-`migrate-v2v`. Run the commands below from your checkout's root directory.
-Runtime artifact paths such as `/var/tmp/migrate-v2v` are independent of the
-checkout directory name and do not need to change when the repository is renamed.
-
 ## Prerequisites
 
 - VMware OVF Tool. This repository is tested with the 5.1.0 Linux ZIP;
