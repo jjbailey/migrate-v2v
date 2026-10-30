@@ -12,7 +12,6 @@ stops only this run's servers.
 
 import json
 import shutil
-import signal
 import subprocess
 import tempfile
 import time

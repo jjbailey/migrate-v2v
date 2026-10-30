@@ -194,11 +194,6 @@ def main():
     if not project_id:
         raise SystemExit(f"vault entry '{key}' has no gcp_project")
 
-    try:
-        import google.auth.exceptions  # noqa: F401
-    except ImportError:
-        raise SystemExit("google-auth is required (see README)")
-
     modes = [name for name, wanted in (
         ("zones", args.list_zones), ("machine_types", args.list_types),
         ("networks", args.list_networks),
@@ -212,7 +207,10 @@ def main():
     region = str(args.region or "").strip() or (
         region_from_zone(zone) if zone else "")
 
-    session = make_session(entry)
+    try:
+        session = make_session(entry)
+    except ImportError as error:
+        raise SystemExit("google-auth is required (see README)") from error
     try:
         if mode == "zones":
             rows = gather_zones(session, project_id)
