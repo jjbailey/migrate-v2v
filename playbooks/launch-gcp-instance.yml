@@ -190,7 +190,7 @@
               - "{{ gcp_instance_name }}"
               - "--zone={{ gcp_zone }}"
               - "--project={{ gcp_project }}"
-              - "--format=value(name)"
+              - "--format=json(name,metadata.items)"
           environment: "{{ gcp_gcloud_env }}"
           register: gcp_instance_check
           changed_when: false
@@ -198,6 +198,25 @@
             gcp_instance_check.rc != 0 and
             ('not found' not in (gcp_instance_check.stderr | lower)) and
             ('does not exist' not in (gcp_instance_check.stderr | lower))
+
+        - name: Refuse to reuse an instance from another migration
+          ansible.builtin.assert:
+            that:
+              - gcp_migration_id | length > 0
+              - >-
+                (((gcp_instance_check.stdout | from_json).get('metadata') | default({}, true)).get('items', [])
+                 | selectattr('key', 'equalto', 'MigratedFrom')
+                 | map(attribute='value') | list) == [vm_name]
+              - >-
+                (((gcp_instance_check.stdout | from_json).get('metadata') | default({}, true)).get('items', [])
+                 | selectattr('key', 'equalto', 'SourceMigrationId')
+                 | map(attribute='value') | list) == [gcp_migration_id]
+            fail_msg: >-
+              Existing instance {{ gcp_instance_name }} is not marked as a
+              launch of migration {{ gcp_migration_id | default('manual', true) }}.
+              Inspect it before retrying; choose another instance name or
+              remove the stale instance.
+          when: gcp_instance_check.rc == 0
 
         - name: Create the GCP instance
           ansible.builtin.command:

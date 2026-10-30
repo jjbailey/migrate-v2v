@@ -589,6 +589,10 @@ environment variable; pass them with `-e`). GCP launch accepts `instance_name`,
 `assign_public_ip` and `extra_tags`. When manually supplying multiple
 OpenStack image IDs, also supply `source_artifact_manifest` with a
 `capacity_bytes` entry for every disk.
+On a GCP launch retry, an existing instance is reused only when its metadata
+identifies the same VM and migration; existing data disks must come from the
+selected images. A manually selected GCP boot image requires a new instance
+name if an instance with that name already exists.
 Successful migrations always delete their staging object.
 AWS also refuses to upload when the boot disk is not the first disk listed in
 the OVF, because VM Import picks the root volume from the descriptor order (see

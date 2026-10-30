@@ -4,10 +4,21 @@
 
 # Create and attach one GCP data disk from a migrated Compute image.
 
+- name: Reserve space for the GCP data disk suffix
+  ansible.builtin.set_fact:
+    gcp_data_disk_suffix: "-data-{{ gcp_data_disk_index | int + 1 }}"
+    gcp_data_device_name: "data-disk-{{ gcp_data_disk_index | int + 1 }}"
+
 - name: Derive the GCP data disk name
   ansible.builtin.set_fact:
-    gcp_data_disk_name: "{{ ((gcp_instance_name ~ '-data-' ~ (gcp_data_disk_index | int + 1))[:63]) | regex_replace('-+$', '') }}"
-    gcp_data_device_name: "data-disk-{{ gcp_data_disk_index | int + 1 }}"
+    # Preserve the established name for short instances. A long instance name
+    # needs a digest of its full name; truncation alone can collide with a
+    # different instance whose name has the same prefix.
+    gcp_data_disk_name: >-
+      {{ (gcp_instance_name ~ gcp_data_disk_suffix)
+         if (gcp_instance_name | length) + (gcp_data_disk_suffix | length) <= 63
+         else ((gcp_instance_name[:63 - (gcp_data_disk_suffix | length) - 13] | regex_replace('-+$', ''))
+               ~ '-' ~ (gcp_instance_name | hash('sha1'))[:12] ~ gcp_data_disk_suffix) }}
 
 - name: Check whether the GCP data disk already exists
   ansible.builtin.command:
@@ -19,7 +30,7 @@
       - "{{ gcp_data_disk_name }}"
       - "--zone={{ gcp_zone }}"
       - "--project={{ gcp_project }}"
-      - "--format=value(name)"
+      - "--format=json(name,sourceImage)"
   environment: "{{ gcp_gcloud_env }}"
   register: gcp_data_disk_check
   changed_when: false
@@ -27,6 +38,17 @@
     gcp_data_disk_check.rc != 0 and
     ('not found' not in (gcp_data_disk_check.stderr | lower)) and
     ('does not exist' not in (gcp_data_disk_check.stderr | lower))
+
+- name: Refuse a data disk made from another image
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((gcp_data_disk_check.stdout | from_json).get('sourceImage') | default('', true)).endswith(
+          'projects/' ~ gcp_project ~ '/global/images/' ~ gcp_data_image.split('/')[-1])
+    fail_msg: >-
+      Existing disk {{ gcp_data_disk_name }} was not created from image
+      {{ gcp_data_image }}. Remove or rename the stale disk before retrying.
+  when: gcp_data_disk_check.rc == 0
 
 - name: Create the GCP data disk from its migrated image
   ansible.builtin.command:
@@ -62,6 +84,18 @@
   environment: "{{ gcp_gcloud_env }}"
   register: gcp_attached_disks
   changed_when: false
+
+- name: Refuse a different disk at the expected device name
+  ansible.builtin.assert:
+    that:
+      - >-
+        ((gcp_attached_disks.stdout | from_json).disks | default([], true)
+         | selectattr('deviceName', 'equalto', gcp_data_device_name)
+         | map(attribute='source') | map('regex_replace', '^.*/', '') | list)
+        in [[], [gcp_data_disk_name]]
+    fail_msg: >-
+      Instance {{ gcp_instance_name }} already has a different disk at
+      device {{ gcp_data_device_name }}.
 
 - name: Attach the GCP data disk
   ansible.builtin.command:

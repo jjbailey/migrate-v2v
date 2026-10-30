@@ -19,10 +19,10 @@ collections:
   - name: openstack.cloud
     version: "2.6.0"
 
-# azure.azcollection 3.21.0 is deliberately not required yet. vaults/azure.yml
+# azure.azcollection 4.1.0 is deliberately not required yet. vaults/azure.yml
 # and bin/azure-vault.sh are reserved for the in-progress Azure work, which has
 # no playbook or wrapper, so nothing here may depend on the collection. Install
 # it separately (and restore this pin and the README prerequisites) when the
 # Azure workflow lands.
 #  - name: azure.azcollection
-#    version: "3.21.0"
+#    version: "4.1.0"
