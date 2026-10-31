@@ -2,9 +2,9 @@
 
 <!-- markdownlint-disable MD013 -->
 
-Migrate a vSphere VM to AWS, OpenStack, or GCP. The standard migration workflow
-uses a quiesced snapshot, a full clone, and an OVF/OVA export; each target then
-imports the resulting disk artifacts using its native image workflow.
+Migrate a vSphere VM to AWS, Azure, OpenStack, or GCP. The standard migration
+workflow uses a quiesced snapshot, a full clone, and an OVF/OVA export. Each
+target imports the resulting disk artifacts using its native image workflow.
 OpenStack and Azure also support a [datastore-direct workflow](doc/datastore-direct.md)
 that streams snapshot disks without a clone or OVF/OVA export. Neither workflow
 powers off the source VM, though the datastore-direct curl backend cannot read
@@ -324,7 +324,8 @@ section explains the knobs; the examples file is the cheat sheet.
 
 The following networking and user-data options apply only to
 `playbooks/launch-openstack-instance.yml`,
-`bin/launch-openstack-instance.sh`, and the interactive `bin/launch-openstack-dialog.sh`. AWS and GCP launches do not use
+`bin/launch-openstack-instance.sh`, and the interactive
+`bin/launch-openstack-dialog.sh`. AWS, Azure, and GCP launches do not use
 `openstack_auto_ip`, `openstack_dhcp_user_data`, or the OpenStack user-data
 files described below.
 
@@ -511,11 +512,12 @@ Note that `gcloud compute ssh` and the Cloud Console ephemeral-key flow rely on
 `google-guest-agent`, which the Migrate to Virtual Machines OS adaptation does
 not install. On migrated instances, use ordinary `ssh` with an inherited key.
 
-AWS, OpenStack, and GCP migrations use persistent run directories under
+AWS, Azure, OpenStack, and GCP migrations use persistent run directories under
 `/var/tmp/migrate-v2v/` (the `artifact_root` default, and the wrappers'
 `ARTIFACT_ROOT` default), each in a target/VM/run-ID subtree. After an
-OpenStack or GCP run fails, the OVF package, manifest, and referenced VMDKs are
-retained for resume. AWS retains its OVA in S3 according to its existing flow.
+Azure, OpenStack, or GCP OVF run fails, the package, manifest, and referenced
+VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
+its OVA in S3 according to its existing flow.
 
 For large OpenStack migrations, the persistent run directory must have enough
 space for the exported OVF disk set plus two temporary QCOW2 files: the disk
@@ -611,8 +613,8 @@ Useful migration options include `validate_certs`, `quiesce_snapshot`, and
 `govc_bin`; AWS polling uses `import_poll_retries`/`import_poll_delay`. For an
 AWS source with known firmware, set `aws_import_boot_mode` to `uefi` or
 `legacy-bios`; when omitted, AWS receives no explicit mode and can infer it.
-OpenStack and GCP use their target-specific polling variables. OpenStack also
-supports `openstack_boot_mode` (use `bios` for BIOS guests),
+Azure, OpenStack, and GCP use their target-specific polling variables.
+OpenStack also supports `openstack_boot_mode` (use `bios` for BIOS guests),
 `openstack_nics`, `openstack_preserve_mac`, `openstack_mac_addresses`,
 `openstack_fixed_ips`, and `openstack_auto_ip`, plus the playbook-only
 `openstack_volume_type` and `openstack_availability_zone` (no wrapper
@@ -721,7 +723,7 @@ an interactive prompt:
   -e vm_name=my-vm -e datacenter=Datacenter
 ```
 
-The seven `bin/` platform wrappers combine their environment-variable settings with
+The `bin/` platform wrappers combine their environment-variable settings with
 any Ansible arguments supplied on the command line; for example,
 `./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project`.
 Migration wrappers default their artifact root to `/var/tmp/migrate-v2v`,
@@ -1155,8 +1157,9 @@ numbered `0..n-1` in boot order with only disk 0 a boot candidate, and a
 stages run unchanged on either. The `artifact_type` and the per-disk fields
 differ by method:
 
-- **OVF export** (`bin/inspect-ova.py`, used by AWS, GCP, and the OVF OpenStack
-  method): `artifact_type` `ovf` or `ova`, and per disk the source VMDK `path`,
+- **OVF export** (`bin/inspect-ova.py`, used by AWS, Azure, GCP, and the OVF
+  OpenStack method): `artifact_type` `ovf` or `ova`, and per disk the source
+  VMDK `path`,
   `capacity_bytes`, `populated_size_bytes` when provided, `format`,
   `ovf_position` (where the descriptor lists the disk), and the OVF attachment
   metadata (`disk_id`, `instance_id`, `address_on_parent`, `parent`).
@@ -1470,12 +1473,15 @@ the prior server and its ports were removed; ports already attached to a
 server cannot be reused, and their MACs remain reserved until the ports are
 deleted.
 
-Every successful AWS, OpenStack, or GCP launch appends one record to
+Every successful AWS, Azure, OpenStack, or GCP launch appends one record to
 `catalogs/deployment-catalog.json` via `bin/append-deployment-catalog.py`.
 AWS records contain `vm_name`, `target_platform`, `ami_id`, the
 `import_task_id` it came from, `instance_id`, `instance_type`, `aws_region`,
-`vpc_subnet_id`, `status`, and `launched_at`. OpenStack records contain
-`vm_name`, `target_platform`, `openstack_server_id`, the ordered image IDs,
+`vpc_subnet_id`, `status`, and `launched_at`. Azure records contain the VM name,
+subscription, resource group, location, size, boot image ID, attached data-disk
+names, private and public IPs, source migration ID, `status`, and `launched_at`.
+OpenStack records contain `vm_name`, `target_platform`,
+`openstack_server_id`, the ordered image IDs,
 project (key), optional project ID and region, flavor, network and
 per-NIC `openstack_network_ids`, the port-backed `openstack_nics` entries,
 explicit `openstack_port_ids` when ports were pre-created, attached
@@ -1486,9 +1492,9 @@ explicitly when their MACs or fixed IPs must be reused.
 when it removes a deployment whose server is already gone. GCP records contain the instance name, project, zone, machine
 type, boot image, attached data-disk names, status, and `launched_at`.
 Deployment `status` is recorded as each cloud reports it, so its casing is
-per platform: OpenStack `ACTIVE`, AWS `running`, GCP `RUNNING`. Only the
-lowercase `retired` left by older reconciliation runs is shared. Compare `status` case-insensitively
-when filtering across platforms.
+per platform: OpenStack `ACTIVE`, AWS `running`, Azure and GCP `RUNNING`.
+Only the lowercase `retired` left by older reconciliation runs is shared.
+Compare `status` case-insensitively when filtering across platforms.
 Same accumulate-not-supersede reasoning as the migration catalog - the same
 AMI or image can legitimately be launched more than once, so history is kept
 rather than overwritten; only an exact rerun against the same target resource
