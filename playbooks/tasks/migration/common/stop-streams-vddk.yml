@@ -1,11 +1,11 @@
 ---
-# playbooks/tasks/migration/openstack/stop-streams-vddk.yml
+# playbooks/tasks/migration/common/stop-streams-vddk.yml
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
-# Stop every nbdkit that convert-disk-vddk.yml started for this run. Its
-# qemu-img then fails and its background job ends without renaming a partial
-# QCOW2 into place, so nothing keeps reading the source or writing the staging
-# directory while cleanup runs or a resume starts.
+# Stop every nbdkit that a target's convert-disk-vddk.yml started for this
+# run. Its qemu-img then fails and its background job ends without renaming a
+# partial QCOW2 or VHD into place, so nothing keeps reading the source or
+# writing the staging directory while cleanup runs or a resume starts.
 #
 # Runs after a failure, and also at the start of a resume or discard: a run
 # whose ansible-playbook was killed outright never reached its own cleanup,
@@ -20,11 +20,11 @@
 
 - name: Find the running disk streams
   ansible.builtin.find:
-    paths: "{{ openstack_vddk_socket_dir }}"
+    paths: "{{ vddk_socket_dir }}"
     patterns: "disk-*.pid"
-  register: openstack_vddk_stream_pids
+  register: vddk_stream_pids
   when:
-    - openstack_vddk_socket_dir is defined
+    - vddk_socket_dir is defined
     - not (migration_succeeded | default(false) | bool)
 
 - name: Stop the running disk streams
@@ -49,34 +49,34 @@
       waited=$((waited + 1))
     done
     echo "stopped $pid"
-  register: openstack_vddk_stream_stop
-  loop: "{{ openstack_vddk_stream_pids.files | default([]) }}"
+  register: vddk_stream_stop
+  loop: "{{ vddk_stream_pids.files | default([]) }}"
   loop_control:
     label: "{{ item.path | basename }}"
-  changed_when: "'stopped' in openstack_vddk_stream_stop.stdout"
+  changed_when: "'stopped' in vddk_stream_stop.stdout"
   when:
-    - openstack_vddk_socket_dir is defined
+    - vddk_socket_dir is defined
     - not (migration_succeeded | default(false) | bool)
 
 - name: Find vCenter password files left in the socket directory
   ansible.builtin.find:
-    paths: "{{ openstack_vddk_socket_dir }}"
+    paths: "{{ vddk_socket_dir }}"
     patterns: "password-*"
-  register: openstack_vddk_password_files
+  register: vddk_password_files
   when:
-    - openstack_vddk_socket_dir is defined
+    - vddk_socket_dir is defined
     - not (migration_succeeded | default(false) | bool)
 
 - name: Remove vCenter password files a killed conversion left behind
   ansible.builtin.file:
     path: "{{ item }}"
     state: absent
-  loop: "{{ openstack_vddk_password_files.files | default([]) | map(attribute='path') }}"
+  loop: "{{ vddk_password_files.files | default([]) | map(attribute='path') }}"
   loop_control:
     label: "{{ item | basename }}"
   when:
-    - openstack_vddk_socket_dir is defined
+    - vddk_socket_dir is defined
     - not (migration_succeeded | default(false) | bool)
-  register: openstack_vddk_password_removed
+  register: vddk_password_removed
   failed_when: false
 

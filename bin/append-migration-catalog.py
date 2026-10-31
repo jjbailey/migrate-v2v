@@ -7,6 +7,7 @@
 import argparse
 import json
 import pathlib
+import re
 import sys
 from urllib.parse import urlparse
 
@@ -41,6 +42,26 @@ GCP_REQUIRED = {
     "gcp_boot_image_name", "gcp_boot_image_selflink",
 }
 
+AZURE_REQUIRED = {
+    "azure_subscription_id", "azure_resource_group", "azure_location",
+    "azure_storage_account", "azure_storage_container", "azure_blob_prefix",
+    "azure_boot_image_name", "azure_boot_image_id",
+}
+
+# A managed image resource ID, as azure_rm_image_info reports it.
+AZURE_IMAGE_ID = re.compile(
+    r"^/subscriptions/[^/]+/resourceGroups/[^/]+"
+    r"/providers/Microsoft[.]Compute/images/[^/]+$",
+    re.IGNORECASE,
+)
+
+# A managed snapshot resource ID, as azure_rm_snapshot_info reports it.
+AZURE_SNAPSHOT_ID = re.compile(
+    r"^/subscriptions/[^/]+/resourceGroups/[^/]+"
+    r"/providers/Microsoft[.]Compute/snapshots/[^/]+$",
+    re.IGNORECASE,
+)
+
 def migration_identity(entry):
     """Identity for an idempotent retry, including target project scope."""
     target = entry.get("target_platform")
@@ -50,6 +71,8 @@ def migration_identity(entry):
         scope = entry.get("openstack_project_id", entry.get("openstack_project", ""))
     elif target == "gcp":
         scope = entry.get("gcp_project", "")
+    elif target == "azure":
+        scope = entry.get("azure_subscription_id", "")
     else:
         scope = ""
     resource = entry.get("import_task_id", entry.get("clone_name"))
@@ -82,6 +105,8 @@ def validate(entry):
         target_required = OS_REQUIRED
     elif target == "gcp":
         target_required = GCP_REQUIRED
+    elif target == "azure":
+        target_required = AZURE_REQUIRED
     else:
         raise ValueError("unsupported target_platform: " + str(target))
     require_missing_fields(entry, target_required, target)
@@ -159,6 +184,51 @@ def validate(entry):
         ):
             raise ValueError(
                 "GCP image selflinks must be absolute HTTP(S) URLs")
+
+    if target == "azure":
+        for name in AZURE_REQUIRED:
+            require_nonempty_string(entry, name)
+        # Data disks are managed snapshots, which a launch can turn into
+        # disks. Rows written before that recorded them as managed images
+        # (azure_data_image_*); they still validate, but cannot be launched
+        # with data disks.
+        if "azure_data_snapshot_names" in entry or "azure_data_image_names" not in entry:
+            kind, data_pattern, resource = "snapshot", AZURE_SNAPSHOT_ID, "snapshots"
+        else:
+            kind, data_pattern, resource = "image", AZURE_IMAGE_ID, "images"
+        data_names = validate_string_list(
+            entry, f"azure_data_{kind}_names", allow_empty=True
+        )
+        data_ids = validate_string_list(
+            entry, f"azure_data_{kind}_ids", allow_empty=True
+        )
+        if len(data_ids) != len(data_names):
+            raise ValueError(
+                f"azure_data_{kind}_ids must match azure_data_{kind}_names"
+            )
+        if len(data_names) != len(disks) - 1:
+            raise ValueError(
+                f"Azure data {kind} count must equal artifact disk count minus one"
+            )
+        names = [entry["azure_boot_image_name"], *data_names]
+        validate_image_order(names, disks, "Azure resource name")
+        checks = [(entry["azure_boot_image_id"], entry["azure_boot_image_name"],
+                   AZURE_IMAGE_ID, "images")]
+        checks += [(value, name, data_pattern, resource)
+                   for value, name in zip(data_ids, data_names)]
+        for resource_id, name, pattern, collection in checks:
+            if not pattern.match(resource_id):
+                raise ValueError(
+                    f"Azure ID {resource_id} must be a managed {collection[:-1]} "
+                    "resource ID (/subscriptions/<id>/resourceGroups/<rg>/"
+                    f"providers/Microsoft.Compute/{collection}/<name>)")
+            if resource_id.rsplit("/", 1)[-1] != name:
+                raise ValueError(
+                    f"Azure ID {resource_id} does not name {name!r}")
+        generation = entry.get("azure_hyper_v_generation")
+        if generation is not None and str(generation) not in ("V1", "V2"):
+            raise ValueError(
+                "azure_hyper_v_generation must be V1 or V2 when present")
 
 def main():
     parser = argparse.ArgumentParser()

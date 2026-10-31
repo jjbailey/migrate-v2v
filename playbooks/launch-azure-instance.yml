@@ -1,0 +1,284 @@
+---
+# playbooks/launch-azure-instance.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Launch an Azure VM from the latest completed Azure migration. The boot image
+# becomes the VM's OS disk; each migrated data snapshot is copied into a new
+# managed disk and attached at LUN 0, 1, ... in manifest order.
+#
+# The images are generalized, so Azure provisions the VM: cloud-init (Azure
+# datasource) in the guest creates azure_admin_username with the given SSH key
+# and reports ready. A guest without it fails with OSProvisioningTimedOut.
+#
+# Azure has no default network, so the play uses a named VNet, subnet, and
+# network security group in the project's resource group, creating each only
+# when it is missing; an existing one is used as it is. Every VM gets its own
+# NIC and, unless azure_no_public_ip, a static Standard public IP.
+
+- name: Launch an Azure VM from a migrated VM
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    vm_name: "my-vm"
+    instance_name: ""
+    azure_vm_size: "Standard_B2s_v2"
+    azure_os_disk_type: "StandardSSD_LRS"
+    azure_data_disk_type: "StandardSSD_LRS"
+    azure_vnet_name: "migrate-v2v-vnet"
+    azure_vnet_cidr: "10.80.0.0/16"
+    azure_subnet_name: "migrate-v2v-subnet"
+    azure_subnet_cidr: "10.80.0.0/24"
+    azure_nsg_name: "migrate-v2v-nsg"
+    # Source the NSG's SSH rule admits when the play creates the NSG. An
+    # existing NSG keeps its own rules.
+    azure_ssh_source_prefix: "*"
+    azure_no_public_ip: false
+    # cloud-init creates this user with the key below; Azure rejects names
+    # such as root and admin.
+    azure_admin_username: "azureuser"
+    azure_ssh_public_key_file: ""
+    azure_boot_image_id: ""
+    azure_data_snapshot_ids: []
+    azure_migration_id: ""
+    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
+    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+
+  tasks:
+    # Bare -e key=[...] arrives as a string, and Ansible extra-vars cannot be
+    # overridden by set_fact. Decode list-shaped inputs into the `azure` mapping
+    # (not an extra-var) and use azure.* for the rest of this play. Same idiom
+    # as the GCP launch play.
+    - name: Normalize Azure list-shaped extra-vars
+      ansible.builtin.set_fact:
+        azure:
+          data_snapshot_ids: >-
+            {{ azure_data_snapshot_ids | from_yaml if (azure_data_snapshot_ids is string)
+               else azure_data_snapshot_ids }}
+
+    - name: Require normalized Azure list inputs
+      ansible.builtin.assert:
+        that:
+          - azure.data_snapshot_ids is sequence
+          - azure.data_snapshot_ids is not string
+        fail_msg: >-
+          azure_data_snapshot_ids must be a list. Pass it as JSON, for example
+          -e '{"azure_data_snapshot_ids": ["/subscriptions/.../snapshots/x"]}'.
+
+    - name: Require an SSH public key for the admin user
+      ansible.builtin.assert:
+        that: azure_ssh_public_key_file | length > 0
+        fail_msg: >-
+          Pass -e azure_ssh_public_key_file=<path to a .pub file> (wrapper:
+          AZURE_SSH_KEY_FILE); Azure provisions the admin user with that key.
+
+    - name: Read the SSH public key for the admin user
+      ansible.builtin.slurp:
+        src: "{{ azure_ssh_public_key_file }}"
+      register: azure_ssh_public_key_raw
+
+    - block:
+        - name: Select the Azure project for this run
+          ansible.builtin.include_tasks: tasks/migration/azure/select-project.yml
+
+        # Azure VM names allow letters, digits, hyphens, and underscores, but
+        # the Linux host name derived from the name allows only the first
+        # three, so this keeps to those, at most 64 characters.
+        - name: Derive a valid Azure VM name
+          ansible.builtin.set_fact:
+            azure_vm_name: >-
+              {{ (instance_name if (instance_name | length > 0) else vm_name)
+                 | lower | regex_replace('[^a-z0-9-]', '-')
+                 | regex_replace('^-+|-+$', '') }}
+            azure_data_disk_names: []
+            azure_data_disk_ids: []
+
+        - name: Give an all-symbolic VM name a valid Azure prefix
+          ansible.builtin.set_fact:
+            azure_vm_name: "{{ 'vm-' ~ azure_vm_name if (azure_vm_name | length == 0 or azure_vm_name is match('^[0-9]')) else azure_vm_name }}"
+
+        # Leaves room for the "-data-NN" disk suffix within the 80-character
+        # managed disk name limit as well.
+        - name: Trim the Azure VM name to its limit
+          ansible.builtin.set_fact:
+            azure_vm_name: "{{ azure_vm_name[:64] | regex_replace('-+$', '') }}"
+
+        - name: Look up the latest completed Azure migration
+          when: azure_boot_image_id | length == 0
+          block:
+            - name: Query the Azure migration catalog
+              ansible.builtin.command:
+                argv:
+                  - python3
+                  - "{{ playbook_dir }}/../bin/lookup-migration-azure.py"
+                  - --catalog
+                  - "{{ migration_catalog_path }}"
+                  - --vm-name
+                  - "{{ vm_name }}"
+                  - --project
+                  - "{{ azure_subscription_id }}"
+              register: azure_migration_lookup
+              changed_when: false
+
+            - name: Resolve the boot image and data snapshots from the catalog
+              ansible.builtin.set_fact:
+                azure_lookup: "{{ azure_migration_lookup.stdout | from_json }}"
+
+            - name: Require the migration to be in this project's region
+              # A managed image and a snapshot can only be used in their own
+              # region.
+              ansible.builtin.assert:
+                that: >-
+                  (azure_lookup.azure_location | lower | replace(' ', ''))
+                  == (azure_location | lower | replace(' ', ''))
+                fail_msg: >-
+                  Migration {{ azure_lookup.migration_id }} is in
+                  {{ azure_lookup.azure_location }}, but Azure project
+                  {{ azure_target_project_name }} launches in {{ azure_location }}.
+
+            - name: Record the catalog's boot image and data snapshots
+              ansible.builtin.set_fact:
+                azure_boot_image_id_effective: "{{ azure_lookup.azure_boot_image_id }}"
+                azure_data_snapshot_ids_effective: "{{ azure_lookup.azure_data_snapshot_ids }}"
+                azure_migration_id_effective: "{{ azure_lookup.migration_id }}"
+
+        - name: Use the boot image and data snapshots given on the command line
+          ansible.builtin.set_fact:
+            azure_boot_image_id_effective: "{{ azure_boot_image_id }}"
+            azure_data_snapshot_ids_effective: "{{ azure.data_snapshot_ids }}"
+            azure_migration_id_effective: "{{ azure_migration_id }}"
+          when: azure_boot_image_id | length > 0
+
+        - name: Require a boot image
+          ansible.builtin.assert:
+            that: azure_boot_image_id_effective | length > 0
+            fail_msg: "Provide azure_boot_image_id or run migrate-azure-vm*.yml first."
+
+        - name: Launch the VM
+          module_defaults:
+            group/azure.azcollection.all: "{{ azure_module_defaults }}"
+          block:
+            # azure_rm_virtualmachine_info fails outright when a named VM
+            # does not exist, so the resource group is listed and filtered.
+            - name: List the VMs in the resource group
+              azure.azcollection.azure_rm_virtualmachine_info:
+                resource_group: "{{ azure_resource_group }}"
+              register: azure_rg_vms
+
+            - name: Check whether the Azure VM already exists
+              ansible.builtin.set_fact:
+                azure_vm_check:
+                  vms: "{{ azure_rg_vms.vms | default([]) | selectattr('name', 'equalto', azure_vm_name) | list }}"
+
+            - name: Refuse to reuse a VM from another migration
+              vars:
+                azure_vm_tags: "{{ (azure_vm_check.vms | first).tags | default({}, true) }}"
+              ansible.builtin.assert:
+                that:
+                  - azure_migration_id_effective | length > 0
+                  - azure_vm_tags.MigratedFrom | default('') == vm_name
+                  - azure_vm_tags.SourceMigrationId | default('') == azure_migration_id_effective
+                fail_msg: >-
+                  Existing VM {{ azure_vm_name }} is not tagged as a launch of
+                  migration {{ azure_migration_id_effective | default('manual', true) }}.
+                  Inspect it before retrying; choose another instance name or
+                  remove the stale VM.
+              when: azure_vm_check.vms | default([]) | length > 0
+
+            - name: Report reuse of an existing Azure VM
+              ansible.builtin.debug:
+                msg: "Reusing existing Azure VM {{ azure_vm_name }}."
+              when: azure_vm_check.vms | default([]) | length > 0
+
+            - name: Create the VM and its network and disks
+              when: azure_vm_check.vms | default([]) | length == 0
+              ansible.builtin.include_tasks: tasks/launch-azure-vm.yml
+
+            - name: Read the VM's network interface
+              azure.azcollection.azure_rm_networkinterface_info:
+                resource_group: "{{ azure_resource_group }}"
+                name: "{{ azure_vm_name }}-nic"
+              register: azure_nic_info
+
+            - name: Read the VM's public IP address
+              azure.azcollection.azure_rm_publicipaddress_info:
+                resource_group: "{{ azure_resource_group }}"
+                name: "{{ azure_vm_name }}-pip"
+              register: azure_pip_info
+              when: not (azure_no_public_ip | bool)
+
+            - name: Record the VM's addresses
+              ansible.builtin.set_fact:
+                azure_private_ip: >-
+                  {{ ((azure_nic_info.networkinterfaces | default([]) | first | default({})).ip_configurations
+                      | default([]) | first | default({})).private_ip_address | default('') }}
+                azure_public_ip: >-
+                  {{ ((azure_pip_info.publicipaddresses | default([]) | first | default({})).ip_address
+                      | default('')) if not (azure_no_public_ip | bool) else '' }}
+
+            - name: Read the attached data disks
+              # Also settles the list for a reused VM, which this run did not
+              # create the disks of.
+              azure.azcollection.azure_rm_virtualmachine_info:
+                resource_group: "{{ azure_resource_group }}"
+                name: "{{ azure_vm_name }}"
+              register: azure_vm_final
+
+            - name: Record the attached data disks in LUN order
+              ansible.builtin.set_fact:
+                azure_data_disk_names: >-
+                  {{ (azure_vm_final.vms | first).data_disks | default([])
+                     | sort(attribute='lun') | map(attribute='name') | list }}
+
+        - name: Display the Azure VM
+          ansible.builtin.debug:
+            msg: >-
+              Azure VM {{ azure_vm_name }} ({{ azure_vm_size }}) in
+              {{ azure_resource_group }}: private IP {{ azure_private_ip or 'unknown' }},
+              public IP {{ azure_public_ip or 'none' }}, data disks
+              {{ azure_data_disk_names | join(', ') or 'none' }}. Log in as
+              {{ azure_admin_username }}{{ ('@' ~ azure_public_ip) if azure_public_ip else '' }}.
+
+        - name: Build the Azure deployment catalog entry
+          ansible.builtin.set_fact:
+            azure_deployment_entry:
+              vm_name: "{{ vm_name }}"
+              target_platform: azure
+              azure_vm_name: "{{ azure_vm_name }}"
+              azure_subscription_id: "{{ azure_subscription_id }}"
+              azure_resource_group: "{{ azure_resource_group }}"
+              azure_location: "{{ azure_location }}"
+              azure_vm_size: "{{ azure_vm_size }}"
+              azure_boot_image_id: "{{ azure_boot_image_id_effective }}"
+              azure_data_disk_names: "{{ azure_data_disk_names }}"
+              azure_private_ip: "{{ azure_private_ip }}"
+              azure_public_ip: "{{ azure_public_ip }}"
+              source_migration_id: "{{ azure_migration_id_effective | default('', true) }}"
+              status: "RUNNING"
+              launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+
+        - name: Prepare the Azure deployment catalog entry
+          ansible.builtin.copy:
+            content: "{{ azure_deployment_entry | to_json }}"
+            dest: "/tmp/.{{ azure_vm_name }}.azure-deployment-entry.json"
+            mode: "0600"
+
+        - name: Record the Azure deployment
+          ansible.builtin.command:
+            argv:
+              - python3
+              - "{{ playbook_dir }}/../bin/append-deployment-catalog.py"
+              - --catalog
+              - "{{ deployment_catalog_path }}"
+              - --entry
+              - "/tmp/.{{ azure_vm_name }}.azure-deployment-entry.json"
+          changed_when: true
+
+      always:
+        - name: Remove the temporary Azure deployment entry
+          ansible.builtin.file:
+            path: "/tmp/.{{ azure_vm_name | default('azure-vm') }}.azure-deployment-entry.json"
+            state: absent
+          failed_when: false
+

@@ -123,7 +123,7 @@ vault_pass="${VAULT_PASSWORD_FILE:-$HOME/.ssh/dib-vault-pass}"
 if [ -n "$vault_files" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
     echo "== vault schema =="
     if python3 tests/check_vault_schema.py "$vault_pass" ; then
-        echo "  ok   vault schemas (vsphere/openstack/aws/gcp)"
+        echo "  ok   vault schemas (vsphere/openstack/aws/gcp/azure)"
     else
         fail "vault schema check failed"
     fi

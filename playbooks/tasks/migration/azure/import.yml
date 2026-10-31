@@ -1,0 +1,262 @@
+---
+# playbooks/tasks/migration/azure/import.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Prepare the staging storage account, settle which disks a resume can reuse,
+# then convert, stage, and register every remaining disk. Conversions run one
+# disk ahead of its upload (see openstack/import.yml for the rationale);
+# registering the staged blob is a server-side operation and runs per disk.
+#
+# The boot disk becomes a managed image, which is what a VM is created from.
+# Every data disk becomes a managed snapshot instead: Azure cannot create a
+# managed disk from a managed image, but it can from a snapshot, which is how
+# launch-azure-instance.yml attaches them. Both are billed by used size.
+#
+# Everything that talks to Azure runs inside one block so that only these
+# tasks carry the service principal. See select-project.yml for why this is
+# module_defaults rather than environment.
+
+- name: Plan the staging blob and Azure resource name for every disk
+  # Deriving both names once removes the need for each phase to recompute them
+  # from a loop position, so no phase depends on another phase's order. The
+  # resource is the boot image for disk 0 and a data snapshot for the rest.
+  ansible.builtin.set_fact:
+    azure_disk_plan: >-
+      {{ azure_disk_plan | default([]) + [{
+        'index': item.index,
+        'path': item.path,
+        'file_size_bytes': item.file_size_bytes,
+        'vhd': 'disk-' ~ item.index ~ '.vhd',
+        'blob': azure_blob_prefix ~ '/disk-' ~ item.index ~ '.vhd',
+        'resource': azure_image_prefix ~ '-disk-' ~ item.index,
+        'is_boot': azure_plan_position == 0,
+      }] }}
+  loop: "{{ artifact_manifest.disks }}"
+  loop_control:
+    index_var: azure_plan_position
+    label: "disk {{ item.index }} ({{ 'boot' if azure_plan_position == 0 else 'data' }})"
+
+- name: Choose how each disk is converted
+  ansible.builtin.set_fact:
+    azure_convert_tasks: >-
+      {{ 'convert-disk-vddk.yml' if export_format == 'datastore' else 'convert-disk.yml' }}
+
+- name: Import every planned disk into Azure
+  module_defaults:
+    group/azure.azcollection.all: "{{ azure_module_defaults }}"
+  block:
+    # The staging storage account is created only when it is missing. An
+    # existing account is used as-is; this pipeline never changes the
+    # settings of an account somebody else configured.
+    - name: Check for the staging storage account
+      azure.azcollection.azure_rm_storageaccount_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_storage_account }}"
+      register: azure_storage_account_info
+
+    - name: Create the staging storage account
+      azure.azcollection.azure_rm_storageaccount:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_storage_account }}"
+        location: "{{ azure_location }}"
+        account_type: Standard_LRS
+        kind: StorageV2
+        https_only: true
+        minimum_tls_version: TLS1_2
+        allow_blob_public_access: false
+        tags:
+          managed_by: migrate-v2v
+      when: azure_storage_account_info.storageaccounts | default([]) | length == 0
+
+    - name: Read the staging storage account endpoints
+      azure.azcollection.azure_rm_storageaccount_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_storage_account }}"
+      register: azure_storage_account_ready
+      failed_when: azure_storage_account_ready.storageaccounts | default([]) | length == 0
+
+    # An existing account is used as it is, so check its region before any
+    # upload: Azure only rejects a VHD from another region when the image is
+    # created, after the whole disk has been sent.
+    - name: Fail when the staging storage account is in another region
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((azure_storage_account_ready.storageaccounts | first).location | lower | replace(' ', ''))
+            == (azure_location | lower | replace(' ', ''))
+        fail_msg: >-
+          Storage account {{ azure_storage_account }} is in
+          {{ (azure_storage_account_ready.storageaccounts | first).location }},
+          but images are created in {{ azure_location }}. Use a storage
+          account in the same region as the image.
+        quiet: true
+
+    # The blob endpoint comes from Azure rather than being assembled here, so
+    # a sovereign cloud's endpoint suffix is still right.
+    - name: Record the blob endpoint for staged VHDs
+      ansible.builtin.set_fact:
+        azure_blob_endpoint: >-
+          {{ (azure_storage_account_ready.storageaccounts | first).primary_endpoints.blob.endpoint
+             | regex_replace('/+$', '') }}
+
+    # azure_rm_image_info fails outright when given name plus resource_group
+    # and the image does not exist, so every lookup here lists the resource
+    # group and filters by name instead; snapshots are listed the same way.
+    - name: List managed images in the resource group
+      azure.azcollection.azure_rm_image_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_rg_images
+
+    - name: List snapshots in the resource group
+      azure.azcollection.azure_rm_snapshot_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_rg_snapshots
+
+    - name: Record resources that already carry this run's names
+      vars:
+        azure_boot_names: "{{ azure_disk_plan | selectattr('is_boot') | map(attribute='resource') | list }}"
+        azure_data_names: "{{ azure_disk_plan | rejectattr('is_boot') | map(attribute='resource') | list }}"
+      ansible.builtin.set_fact:
+        azure_existing_image_names: >-
+          {{ azure_rg_images.images | default([]) | selectattr('name', 'defined')
+             | map(attribute='name') | intersect(azure_boot_names) }}
+        azure_existing_snapshot_names: >-
+          {{ azure_rg_snapshots.state | default([]) | selectattr('name', 'defined')
+             | map(attribute='name') | intersect(azure_data_names) }}
+        # Only a snapshot whose import finished can stand in for the disk; a
+        # failed or interrupted one is replaced.
+        azure_completed_snapshot_names: >-
+          {{ azure_rg_snapshots.state | default([]) | selectattr('name', 'defined')
+             | selectattr('properties.provisioningState', 'defined')
+             | selectattr('properties.provisioningState', 'equalto', 'Succeeded')
+             | map(attribute='name') | intersect(azure_data_names) }}
+
+    - name: Record an existing completed image or snapshot as reusable during resume
+      ansible.builtin.set_fact:
+        azure_reused_image_names: >-
+          {{ azure_reused_image_names
+             + ([azure_disk.resource] if (azure_disk.is_boot and azure_disk.resource in azure_existing_image_names) else []) }}
+        azure_reused_snapshot_names: >-
+          {{ azure_reused_snapshot_names
+             + ([azure_disk.resource] if (not azure_disk.is_boot and azure_disk.resource in azure_completed_snapshot_names) else []) }}
+      loop: "{{ azure_disk_plan }}"
+      loop_control:
+        loop_var: azure_disk
+        label: "disk {{ azure_disk.index }} ({{ azure_disk.resource }})"
+      when: migration_resume_mode | bool
+
+    - name: Report reuse of existing completed images and snapshots
+      ansible.builtin.debug:
+        msg: >-
+          Reusing existing Azure resource(s)
+          {{ (azure_reused_image_names + azure_reused_snapshot_names) | join(', ') }}
+          during resume; skipping deletion and re-import.
+      when: (azure_reused_image_names + azure_reused_snapshot_names) | length > 0
+
+    - name: Refuse to overwrite existing images or snapshots when replacement is disabled
+      vars:
+        azure_conflicting_names: >-
+          {{ (azure_existing_image_names | difference(azure_reused_image_names))
+             + (azure_existing_snapshot_names | difference(azure_reused_snapshot_names)) }}
+      ansible.builtin.fail:
+        msg: >-
+          Azure resource(s) {{ azure_conflicting_names | join(', ') }} already
+          exist in resource group {{ azure_resource_group }}. Set
+          azure_replace_existing_image=true to replace them.
+      when:
+        - azure_conflicting_names | length > 0
+        - not (azure_replace_existing_image | bool)
+
+    - name: Collect the disks that still need conversion and upload
+      ansible.builtin.set_fact:
+        azure_pending_disks: >-
+          {{ azure_disk_plan
+             | rejectattr('resource', 'in', azure_reused_image_names + azure_reused_snapshot_names) | list }}
+
+    - name: Report the disks that still need conversion
+      ansible.builtin.debug:
+        msg: >-
+          {{ azure_pending_disks | length }} of {{ azure_disk_plan | length }}
+          disk(s) need conversion and upload;
+          {{ (azure_reused_image_names + azure_reused_snapshot_names) | length }}
+          already have their image or snapshot.
+
+    - name: Convert, stage, and register each remaining disk
+      ansible.builtin.include_tasks: import-disk.yml
+      loop: "{{ azure_pending_disks }}"
+      loop_control:
+        loop_var: azure_disk
+        index_var: azure_pending_position
+        label: "disk {{ azure_disk.index }} ({{ 'boot' if azure_disk.is_boot else 'data' }})"
+
+    # One listing at the end settles both what this run created and what a
+    # resume reused, and re-verifies every planned resource exists.
+    - name: List the resource group's images for the final check
+      azure.azcollection.azure_rm_image_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_final_images
+
+    - name: List the resource group's snapshots for the final check
+      azure.azcollection.azure_rm_snapshot_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_final_snapshots
+
+    - name: Verify the boot image exists and succeeded
+      vars:
+        azure_image_entry: >-
+          {{ azure_final_images.images | default([])
+             | selectattr('name', 'equalto', azure_disk.resource) | list }}
+      ansible.builtin.assert:
+        that:
+          - azure_image_entry | length == 1
+          - (azure_image_entry | first).provisioning_state | default('') == 'Succeeded'
+        fail_msg: >-
+          Azure image {{ azure_disk.resource }} for disk {{ azure_disk.index }} is
+          missing or not in the Succeeded state; not recording a catalog entry.
+      loop: "{{ azure_disk_plan | selectattr('is_boot') | list }}"
+      loop_control:
+        loop_var: azure_disk
+        label: "disk {{ azure_disk.index }} ({{ azure_disk.resource }})"
+
+    - name: Verify every data snapshot exists and succeeded
+      vars:
+        azure_snapshot_entry: >-
+          {{ azure_final_snapshots.state | default([])
+             | selectattr('name', 'equalto', azure_disk.resource) | list }}
+      ansible.builtin.assert:
+        that:
+          - azure_snapshot_entry | length == 1
+          - (azure_snapshot_entry | first).properties.provisioningState | default('') == 'Succeeded'
+        fail_msg: >-
+          Azure snapshot {{ azure_disk.resource }} for disk {{ azure_disk.index }}
+          is missing or not in the Succeeded state; not recording a catalog
+          entry.
+      loop: "{{ azure_disk_plan | rejectattr('is_boot') | list }}"
+      loop_control:
+        loop_var: azure_disk
+        label: "disk {{ azure_disk.index }} ({{ azure_disk.resource }})"
+
+    - name: Record the boot image and the data snapshots in manifest order
+      # The catalog's boot image is disk 0 and its data snapshots are the
+      # rest, in order; a launch attaches them in that order.
+      ansible.builtin.set_fact:
+        azure_image_names: "{{ [azure_boot_disk.resource] }}"
+        azure_image_ids: >-
+          {{ [(azure_final_images.images | default([])
+               | selectattr('name', 'equalto', azure_boot_disk.resource) | first).id] }}
+        azure_snapshot_names: "{{ azure_data_disks | map(attribute='resource') | list }}"
+        azure_snapshot_ids: >-
+          {{ azure_data_disks | map(attribute='resource')
+             | map('extract', azure_final_snapshots.state | default([]) | items2dict(key_name='name', value_name='id'))
+             | list }}
+      vars:
+        azure_boot_disk: "{{ azure_disk_plan | selectattr('is_boot') | first }}"
+        azure_data_disks: "{{ azure_disk_plan | rejectattr('is_boot') | list }}"
+
+    - name: Display the imported images and snapshots
+      ansible.builtin.debug:
+        msg: >-
+          Imported {{ azure_disk_plan | length }} disk(s) into
+          {{ azure_resource_group }}: boot image {{ azure_image_names | first }}{{
+          (', data snapshot(s) ' ~ (azure_snapshot_names | join(', '))) if (azure_snapshot_names | length > 0) else '' }}.
+

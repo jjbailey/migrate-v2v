@@ -43,28 +43,29 @@
     openstack_convert_async_timeout: 86400
     openstack_convert_poll_retries: 2880
     openstack_convert_poll_delay: 30
-    # Datastore-direct settings.
-    openstack_vddk_nbdkit_bin: nbdkit
+    # Datastore-direct settings, shared with migrate-azure-vm-vddk.yml. The
+    # older openstack_vddk_<name> spelling of each is still accepted.
+    vddk_nbdkit_bin: "{{ openstack_vddk_nbdkit_bin | default('nbdkit') }}"
     # How disks are read: vddk (VixDiskLib through nbdkit's vddk plugin), curl
     # (flat files from vCenter's /folder endpoint), or auto (vddk when the
     # plugin and library load, else curl).
-    openstack_vddk_backend: auto
+    vddk_backend: "{{ openstack_vddk_backend | default('auto') }}"
     # VixDiskLib directory holding lib64/libvixDiskLib.so.8; empty uses the
     # vddk plugin's built-in default.
-    openstack_vddk_libdir: ""
+    vddk_libdir: "{{ openstack_vddk_libdir | default('') }}"
     # VixDiskLib transports to try, colon-separated.
-    openstack_vddk_transports: nbdssl
+    vddk_transports: "{{ openstack_vddk_transports | default('nbdssl') }}"
     # vCenter certificate SHA-1 thumbprint; empty reads it in preflight.
-    openstack_vddk_thumbprint: ""
+    vddk_thumbprint: "{{ openstack_vddk_thumbprint | default('') }}"
     # PEM file of the CA that issued the vCenter certificate, for a vCenter this
     # host does not already trust: curl gets it as cainfo=, and the thumbprint
     # check verifies against it. Empty uses the host's trust store.
-    openstack_vddk_ca_bundle: ""
+    vddk_ca_bundle: "{{ openstack_vddk_ca_bundle | default('') }}"
     # A full copy of a snapshot does not need Changed Block Tracking. Set true
     # to insist on it (a baseline for future incremental runs).
-    openstack_vddk_require_cbt: false
+    vddk_require_cbt: "{{ openstack_vddk_require_cbt | default(false) }}"
     # Read a local file instead of connecting to vCenter. Test use only.
-    openstack_vddk_local: false
+    vddk_local: "{{ openstack_vddk_local | default(false) }}"
 
   tasks:
     - name: Refuse a discard combined with a resume
@@ -94,7 +95,7 @@
       ansible.builtin.import_tasks: tasks/migration/openstack/initialize-vddk.yml
 
     - name: Stop disk streams a killed earlier attempt of this run left running
-      ansible.builtin.import_tasks: tasks/migration/openstack/stop-streams-vddk.yml
+      ansible.builtin.import_tasks: tasks/migration/common/stop-streams-vddk.yml
       when: migration_resume_mode | bool
 
     - name: Execute the OpenStack migration
@@ -124,7 +125,7 @@
 
       always:
         - name: Stop disk streams still running after a failure
-          ansible.builtin.import_tasks: tasks/migration/openstack/stop-streams-vddk.yml
+          ansible.builtin.import_tasks: tasks/migration/common/stop-streams-vddk.yml
 
         - name: Clean up OpenStack resources
           ansible.builtin.import_tasks: tasks/migration/openstack/cleanup.yml

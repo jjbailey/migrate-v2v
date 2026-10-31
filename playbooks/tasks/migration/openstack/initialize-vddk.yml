@@ -39,7 +39,7 @@
     openstack_image_prefix: "{{ vm_name }}-migration-{{ migration_run_id }}"
     # Unix socket paths are limited to 107 bytes, which a long VM name in the
     # run directory could exceed, so the sockets get a short directory of their own.
-    openstack_vddk_socket_dir: "/tmp/.vddk-{{ migration_run_id }}"
+    vddk_socket_dir: "/tmp/.vddk-{{ migration_run_id }}"
     catalog_entry_path: >-
       /tmp/.{{ vm_name }}-openstack-vddk-{{ migration_run_id }}.catalog-entry.json
 
@@ -51,7 +51,7 @@
 
 - name: Create the private NBD socket directory
   ansible.builtin.file:
-    path: "{{ openstack_vddk_socket_dir }}"
+    path: "{{ vddk_socket_dir }}"
     state: directory
     mode: "0700"
 

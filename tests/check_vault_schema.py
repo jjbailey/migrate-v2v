@@ -5,6 +5,7 @@
 """Validate the required credential shapes in the encrypted vault files."""
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -96,6 +97,19 @@ def validate_vaults(passfile, repo_dir):
             raise ValueError(
                 f"vaults/gcp.yml: gcp_projects[{name!r}] "
                 "service_account_key.client_email missing or empty")
+
+    azure = load("azure")
+    projects = azure.get("azure_projects") or {}
+    if not projects:
+        raise ValueError("vaults/azure.yml: no azure_projects entries found")
+    require_entry(projects.items(), "vaults/azure.yml: azure_projects",
+                  ("tenant_id", "subscription_id", "client_id", "client_secret",
+                   "resource_group", "location", "storage_account"))
+    for name, entry in projects.items():
+        if not re.fullmatch(r"[a-z0-9]{3,24}", str(entry.get("storage_account") or "")):
+            raise ValueError(
+                f"vaults/azure.yml: azure_projects[{name!r}] storage_account "
+                "must be 3-24 lowercase letters and digits")
 
 def main():
     if len(sys.argv) != 2:

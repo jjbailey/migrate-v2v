@@ -78,6 +78,8 @@ class WrapperTestCase(unittest.TestCase):
 class MigrateWrapperTests(WrapperTestCase):
     SCRIPTS = {
         "migrate-aws-vm.sh": "playbooks/migrate-aws-vm.yml",
+        "migrate-azure-vm.sh": "playbooks/migrate-azure-vm.yml",
+        "migrate-azure-vm-vddk.sh": "playbooks/migrate-azure-vm-vddk.yml",
         "migrate-gcp-vm.sh": "playbooks/migrate-gcp-vm.yml",
         "migrate-openstack-vm.sh": "playbooks/migrate-openstack-vm.yml",
         "migrate-openstack-vm-vddk.sh": "playbooks/migrate-openstack-vm-vddk.yml",
@@ -92,6 +94,7 @@ class MigrateWrapperTests(WrapperTestCase):
                     "OS_PROJECT_NAME": "project a",
                     "GCP_TARGET_PROJECT": "project a",
                     "AWS_TARGET_PROJECT": "account a",
+                    "AZURE_TARGET_PROJECT": "project a",
                 })
                 argv = self.recorded_argv()
                 self.assertEqual(argv[0], playbook)
@@ -126,11 +129,22 @@ class MigrateWrapperTests(WrapperTestCase):
             "VM_NAME": "vm", "BACKEND": "curl", "COMPRESS": "true",
             "VCENTER_CA_BUNDLE": "/etc/ssl/my ca.pem"})
         extra = self.extra_vars()
-        self.assertEqual(extra["openstack_vddk_backend"], "curl")
+        self.assertEqual(extra["vddk_backend"], "curl")
         self.assertEqual(extra["openstack_convert_compress"], "true")
-        self.assertEqual(extra["openstack_vddk_ca_bundle"], "/etc/ssl/my ca.pem")
-        self.assertNotIn("openstack_vddk_require_cbt", extra)
+        self.assertEqual(extra["vddk_ca_bundle"], "/etc/ssl/my ca.pem")
+        self.assertNotIn("vddk_require_cbt", extra)
         self.assertNotIn("discard_run_id", extra)
+
+    def test_azure_vddk_options(self):
+        self.run_wrapper("migrate-azure-vm-vddk.sh", {
+            "VM_NAME": "vm", "AZURE_TARGET_PROJECT": "sub a", "BACKEND": "vddk",
+            "REQUIRE_CBT": "true", "DISCARD_RUN_ID": "123"})
+        extra = self.extra_vars()
+        self.assertEqual(extra["azure_target_project"], "sub a")
+        self.assertEqual(extra["vddk_backend"], "vddk")
+        self.assertEqual(extra["vddk_require_cbt"], "true")
+        self.assertEqual(extra["discard_run_id"], "123")
+        self.assertNotIn("vddk_ca_bundle", extra)
 
     def test_extra_args_follow_the_wrapper_vars(self):
         self.run_wrapper(
@@ -225,6 +239,30 @@ class LaunchWrapperTests(WrapperTestCase):
         self.assertEqual(extra["gcp_network"], "default")
         self.assertEqual(extra["gcp_ssh_public_key_file"], str(key))
         self.assertEqual(extra["gcp_ssh_user"], "cloudinit")
+
+    def test_azure(self):
+        key = self.tmp / "my key.pub"
+        key.write_text("ssh-ed25519 AAAA test\n")
+        self.run_wrapper("launch-azure-instance.sh", {
+            "VM_NAME": "Web Server 01",
+            "AZURE_TARGET_PROJECT": "sub a",
+            "AZURE_VM_SIZE": "Standard_B2s_v2",
+            "AZURE_NO_PUBLIC_IP": "true",
+            "AZURE_SSH_KEY_FILE": str(key)})
+        argv = self.recorded_argv()
+        self.assertEqual(argv[0], "playbooks/launch-azure-instance.yml")
+        extra = self.extra_vars()
+        self.assertEqual(extra["vm_name"], "Web Server 01")
+        self.assertEqual(extra["azure_target_project"], "sub a")
+        self.assertEqual(extra["azure_vm_size"], "Standard_B2s_v2")
+        self.assertEqual(extra["azure_no_public_ip"], "true")
+        self.assertEqual(extra["azure_ssh_public_key_file"], str(key))
+        self.assertNotIn("azure_admin_username", extra)
+
+    def test_azure_rejects_an_unreadable_key(self):
+        self.run_wrapper("launch-azure-instance.sh", {
+            "VM_NAME": "vm", "AZURE_SSH_KEY_FILE": str(self.tmp / "missing.pub")},
+            expect_success=False)
 
     def test_gcp_defaults_leave_tags_out(self):
         self.run_wrapper("launch-gcp-instance.sh", {"VM_NAME": "vm"})

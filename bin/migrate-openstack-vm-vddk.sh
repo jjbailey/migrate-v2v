@@ -55,10 +55,10 @@ fi
 args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
 [ -n "$OS_PROJECT_NAME" ] && args+=(-e "$(wrapper_var openstack_target_project "$OS_PROJECT_NAME")")
 [ -n "$ARTIFACT_ROOT" ] && args+=(-e "$(wrapper_var artifact_root "$ARTIFACT_ROOT")")
-[ -n "$REQUIRE_CBT" ] && args+=(-e "$(wrapper_var openstack_vddk_require_cbt "$REQUIRE_CBT")")
-[ -n "$BACKEND" ] && args+=(-e "$(wrapper_var openstack_vddk_backend "$BACKEND")")
+[ -n "$REQUIRE_CBT" ] && args+=(-e "$(wrapper_var vddk_require_cbt "$REQUIRE_CBT")")
+[ -n "$BACKEND" ] && args+=(-e "$(wrapper_var vddk_backend "$BACKEND")")
 [ -n "$COMPRESS" ] && args+=(-e "$(wrapper_var openstack_convert_compress "$COMPRESS")")
 [ -n "$DISCARD_RUN_ID" ] && args+=(-e "$(wrapper_var discard_run_id "$DISCARD_RUN_ID")")
-[ -n "$VCENTER_CA_BUNDLE" ] && args+=(-e "$(wrapper_var openstack_vddk_ca_bundle "$VCENTER_CA_BUNDLE")")
+[ -n "$VCENTER_CA_BUNDLE" ] && args+=(-e "$(wrapper_var vddk_ca_bundle "$VCENTER_CA_BUNDLE")")
 
 wrapper_run_playbook playbooks/migrate-openstack-vm-vddk.yml "${args[@]}" "${wrapper_extra_args[@]}" -v

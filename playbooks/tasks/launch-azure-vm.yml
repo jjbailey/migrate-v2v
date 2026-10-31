@@ -1,0 +1,149 @@
+---
+# playbooks/tasks/launch-azure-vm.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Create one Azure VM for launch-azure-instance.yml: the shared network when
+# it is missing, then this VM's public IP, NIC, data disks, and the VM itself.
+# Runs inside that play's module_defaults block, so every azure.azcollection
+# task carries the service principal.
+#
+# Expects: azure_vm_name, azure_boot_image_id_effective,
+# azure_data_snapshot_ids_effective, azure_migration_id_effective, and
+# azure_ssh_public_key_raw.
+
+# The VNet listing returns its subnets as well; the subnet info module fails
+# outright on a subnet that does not exist.
+- name: Look up the launch virtual network
+  azure.azcollection.azure_rm_virtualnetwork_info:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vnet_name }}"
+  register: azure_vnet_info
+
+- name: Create the launch virtual network when it is missing
+  azure.azcollection.azure_rm_virtualnetwork:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vnet_name }}"
+    location: "{{ azure_location }}"
+    address_prefixes_cidr:
+      - "{{ azure_vnet_cidr }}"
+    tags:
+      managed_by: migrate-v2v
+  when: azure_vnet_info.virtualnetworks | default([]) | length == 0
+
+- name: Create the launch subnet when it is missing
+  azure.azcollection.azure_rm_subnet:
+    resource_group: "{{ azure_resource_group }}"
+    virtual_network_name: "{{ azure_vnet_name }}"
+    name: "{{ azure_subnet_name }}"
+    address_prefix_cidr: "{{ azure_subnet_cidr }}"
+  when: >-
+    azure_vnet_info.virtualnetworks | default([]) | map(attribute='subnets') | flatten
+    | selectattr('name', 'equalto', azure_subnet_name) | list | length == 0
+
+- name: Look up the launch network security group
+  azure.azcollection.azure_rm_securitygroup_info:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_nsg_name }}"
+  register: azure_nsg_info
+
+- name: Create the launch network security group when it is missing
+  azure.azcollection.azure_rm_securitygroup:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_nsg_name }}"
+    location: "{{ azure_location }}"
+    rules:
+      - name: allow-ssh
+        protocol: Tcp
+        destination_port_range: 22
+        source_address_prefix: "{{ azure_ssh_source_prefix }}"
+        access: Allow
+        priority: 1000
+        direction: Inbound
+    tags:
+      managed_by: migrate-v2v
+  when: azure_nsg_info.securitygroups | default([]) | length == 0
+
+- name: Create the VM's public IP address
+  azure.azcollection.azure_rm_publicipaddress:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vm_name }}-pip"
+    location: "{{ azure_location }}"
+    sku: Standard
+    allocation_method: Static
+    tags:
+      MigratedFrom: "{{ vm_name }}"
+  when: not (azure_no_public_ip | bool)
+
+- name: Create the VM's network interface
+  azure.azcollection.azure_rm_networkinterface:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vm_name }}-nic"
+    location: "{{ azure_location }}"
+    virtual_network: "{{ azure_vnet_name }}"
+    subnet_name: "{{ azure_subnet_name }}"
+    security_group: "{{ azure_nsg_name }}"
+    ip_configurations:
+      - name: ipconfig1
+        primary: true
+        public_ip_address_name: "{{ (azure_vm_name ~ '-pip') if not (azure_no_public_ip | bool) else omit }}"
+    tags:
+      MigratedFrom: "{{ vm_name }}"
+
+# Each data disk is a fresh copy of its migrated snapshot, so several launches
+# of one migration never share a disk.
+- name: Create the VM's data disks from the migrated snapshots
+  azure.azcollection.azure_rm_manageddisk:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vm_name }}-data-{{ azure_lun + 1 }}"
+    location: "{{ azure_location }}"
+    create_option: copy
+    # Not source_uri: azcollection 4.x requires the snapshot's ARM ID here,
+    # whatever the module's create_option text still says.
+    source_resource_id: "{{ azure_snapshot_id }}"
+    storage_account_type: "{{ azure_data_disk_type }}"
+    tags:
+      MigratedFrom: "{{ vm_name }}"
+      SourceSnapshot: "{{ azure_snapshot_id | regex_replace('^.*/', '') }}"
+  loop: "{{ azure_data_snapshot_ids_effective }}"
+  loop_control:
+    loop_var: azure_snapshot_id
+    index_var: azure_lun
+    label: "LUN {{ azure_lun }} from {{ azure_snapshot_id | regex_replace('^.*/', '') }}"
+  register: azure_data_disks_created
+
+- name: Attach the data disks at LUN 0, 1, ... in manifest order
+  ansible.builtin.set_fact:
+    azure_data_disk_attachments: >-
+      {{ azure_data_disk_attachments | default([])
+         + [{'lun': azure_lun, 'managed_disk_id': azure_data_disk.state.id}] }}
+  loop: "{{ azure_data_disks_created.results | default([]) }}"
+  loop_control:
+    loop_var: azure_data_disk
+    index_var: azure_lun
+    label: "LUN {{ azure_lun }}"
+
+- name: Create the Azure VM from the migrated boot image
+  azure.azcollection.azure_rm_virtualmachine:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ azure_vm_name }}"
+    location: "{{ azure_location }}"
+    vm_size: "{{ azure_vm_size }}"
+    image:
+      id: "{{ azure_boot_image_id_effective }}"
+    os_type: Linux
+    os_disk_name: "{{ azure_vm_name }}-osdisk"
+    managed_disk_type: "{{ azure_os_disk_type }}"
+    admin_username: "{{ azure_admin_username }}"
+    ssh_password_enabled: false
+    ssh_public_keys:
+      - path: "/home/{{ azure_admin_username }}/.ssh/authorized_keys"
+        key_data: "{{ (azure_ssh_public_key_raw.content | b64decode).strip() }}"
+    network_interface_names:
+      - "{{ azure_vm_name }}-nic"
+    data_disks: "{{ azure_data_disk_attachments | default([]) }}"
+    boot_diagnostics:
+      enabled: true
+    tags:
+      MigratedFrom: "{{ vm_name }}"
+      SourceMigrationId: "{{ azure_migration_id_effective | default('manual', true) }}"
+

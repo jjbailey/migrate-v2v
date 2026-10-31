@@ -65,6 +65,16 @@ def gcp_deployment(vm, instance, zone="us-central1-a", **extra):
         "gcp_boot_image_name": f"{vm}-disk-0", "gcp_data_disk_names": [], **extra,
     }
 
+def azure_deployment(vm, name, resource_group="rg-a", **extra):
+    return {
+        "vm_name": vm, "target_platform": "azure", "status": "RUNNING",
+        "launched_at": "2026-09-14T12:00:00Z", "azure_vm_name": name,
+        "azure_subscription_id": "sub-a", "azure_resource_group": resource_group,
+        "azure_location": "westus2", "azure_vm_size": "Standard_B2s_v2",
+        "azure_boot_image_id": f"/subscriptions/sub-a/resourceGroups/rg-a/providers/Microsoft.Compute/images/{vm}-disk-0",
+        "azure_data_disk_names": [], **extra,
+    }
+
 class AppendMainTestCase(unittest.TestCase):
     module = None
     list_key = None
@@ -191,6 +201,26 @@ class AppendDeploymentMainTests(AppendMainTestCase):
         self.assertEqual(
             {(row["gcp_zone"], row["status"]) for row in rows},
             {("us-central1-a", "TERMINATED"), ("us-east1-b", "RUNNING")})
+
+    def test_azure_identity_is_vm_subscription_and_resource_group(self):
+        self.append(azure_deployment("vm-a", "vm-a"))
+        self.append(azure_deployment("vm-a", "vm-a", resource_group="rg-b"))
+        self.append(azure_deployment("vm-a", "vm-a", resource_group="RG-A", status="STOPPED",
+                                     azure_data_disk_names=["vm-a-data-1"]))
+        rows = self.rows()
+        self.assertEqual(len(rows), 2)
+        self.assertEqual(
+            {(row["azure_resource_group"], row["status"]) for row in rows},
+            {("RG-A", "STOPPED"), ("rg-b", "RUNNING")})
+
+    def test_azure_deployment_requires_its_fields(self):
+        entry = azure_deployment("vm-a", "vm-a")
+        del entry["azure_vm_size"]
+        with self.assertRaisesRegex(ValueError, "azure_vm_size"):
+            deployment.validate(entry)
+        entry = azure_deployment("vm-a", "vm-a", azure_data_disk_names="vm-a-data-1")
+        with self.assertRaisesRegex(ValueError, "azure_data_disk_names"):
+            deployment.validate(entry)
 
     def test_rows_are_sorted_by_vm_then_launch_time(self):
         self.append(openstack_deployment("vm-b", "server-1"))

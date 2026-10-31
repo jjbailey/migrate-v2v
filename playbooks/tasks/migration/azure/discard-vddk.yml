@@ -1,0 +1,58 @@
+---
+# playbooks/tasks/migration/azure/discard-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Collect what a retained datastore-direct run left in Azure, so cleanup.yml
+# removes it on a discard (-e discard_run_id=<id>). A failed run never reached
+# the catalog, so its image, snapshots, and staged blobs are only known by the
+# names initialize.yml derives from the run ID: <image prefix>-disk-<N> and
+# <blob prefix>/disk-<N>.vhd. Listing by prefix also finds an upload, image,
+# or snapshot that failed part way.
+
+- name: Find the retained run's images, snapshots, and staged blobs
+  module_defaults:
+    group/azure.azcollection.all: "{{ azure_module_defaults }}"
+  block:
+    - name: List managed images in the resource group
+      azure.azcollection.azure_rm_image_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_discard_images
+
+    - name: List snapshots in the resource group
+      azure.azcollection.azure_rm_snapshot_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_discard_snapshots
+
+    - name: Check for the staging storage account
+      azure.azcollection.azure_rm_storageaccount_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_storage_account }}"
+      register: azure_discard_storage_account
+
+    # Listing by prefix never fails on an absent blob, but it does on an
+    # absent account or container, which a run that failed early never made.
+    - name: List the run's staged blobs
+      azure.azcollection.azure_rm_storageblob_info:
+        resource_group: "{{ azure_resource_group }}"
+        storage_account_name: "{{ azure_storage_account }}"
+        container_name: "{{ azure_storage_container }}"
+        name_starts_with: "{{ azure_blob_prefix }}/"
+      register: azure_discard_blobs
+      failed_when: false
+      when: azure_discard_storage_account.storageaccounts | default([]) | length > 0
+
+    - name: Queue the retained run's images, snapshots, and blobs for removal
+      ansible.builtin.set_fact:
+        azure_created_image_names: >-
+          {{ azure_discard_images.images | default([]) | selectattr('name', 'defined')
+             | map(attribute='name')
+             | select('match', (azure_image_prefix ~ '-disk-') | regex_escape)
+             | list | unique }}
+        azure_created_snapshot_names: >-
+          {{ azure_discard_snapshots.state | default([]) | selectattr('name', 'defined')
+             | map(attribute='name')
+             | select('match', (azure_image_prefix ~ '-disk-') | regex_escape)
+             | list | unique }}
+        azure_blob_names: >-
+          {{ azure_discard_blobs.blobs | default([]) | map(attribute='name') | list | unique }}
+

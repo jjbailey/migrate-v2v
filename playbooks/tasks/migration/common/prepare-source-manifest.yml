@@ -9,10 +9,10 @@
 #
 # Required inputs:
 #   datacenter, vm_name, validate_certs, quiesce_snapshot, snapshot_name,
-#   migration_target, openstack_vddk_require_cbt, openstack_vddk_backend_effective
+#   migration_target, vddk_require_cbt, vddk_backend_effective
 # Outputs:
 #   source_vm_path, source_vm_folder, source_vm_moref, source_snapshot_moref
-#   (vddk backend), artifact_manifest
+#   (vddk backend), source_firmware, artifact_manifest
 
 - name: Resolve the source VM inventory path
   environment:
@@ -57,8 +57,8 @@
     fail_msg: >-
       CBT is not enabled on '{{ vm_name }}'. Enable it first with
       bin/enable-cbt.py (no power cycle), or leave
-      -e openstack_vddk_require_cbt=false (the default).
-  when: openstack_vddk_require_cbt | bool
+      -e vddk_require_cbt=false (the default).
+  when: vddk_require_cbt | bool
 
 # Before the snapshot, so a VM with an unsupported disk (independent, shared,
 # raw device mapping, encrypted) is refused without creating anything. The
@@ -79,7 +79,7 @@
   ansible.builtin.include_tasks: check-curl-disks-vddk.yml
   vars:
     curl_check_disks: "{{ (vm_manifest_result.stdout | from_json).disks }}"
-  when: openstack_vddk_backend_effective == 'curl'
+  when: vddk_backend_effective == 'curl'
 
 - name: Record source virtual NIC MAC addresses in device order
   ansible.builtin.set_fact:
@@ -89,6 +89,14 @@
          | sort(attribute='key')
          | map(attribute='macAddress')
          | list }}
+  no_log: true
+
+- name: Record the source VM firmware
+  # 'efi' or 'bios', as in export-ova.yml: Azure's Hyper-V generation follows
+  # it, and the manifest keeps it so a resume never asks the source again.
+  ansible.builtin.set_fact:
+    source_firmware: >-
+      {{ (source_vm_info.stdout | from_json).virtualMachines[0].config.firmware | default('bios') }}
   no_log: true
 
 - name: Mark the snapshot for best-effort cleanup
@@ -112,12 +120,13 @@
 
 - name: Resolve the migration snapshot reference for VixDiskLib
   ansible.builtin.import_tasks: snapshot-ref-vddk.yml
-  when: openstack_vddk_backend_effective == 'vddk'
+  when: vddk_backend_effective == 'vddk'
 
 - name: Record the target-neutral artifact manifest
   ansible.builtin.set_fact:
     artifact_manifest: >-
       {{ (vm_manifest_result.stdout | from_json)
          | combine({'source_mac_addresses': source_mac_addresses | default([]),
-                    'transfer_backend': openstack_vddk_backend_effective}) }}
+                    'source_firmware': source_firmware | default('bios'),
+                    'transfer_backend': vddk_backend_effective}) }}
 

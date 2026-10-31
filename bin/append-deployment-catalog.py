@@ -40,6 +40,12 @@ GCP_REQUIRED = {
     "gcp_boot_image_name", "gcp_data_disk_names",
 }
 
+AZURE_REQUIRED = {
+    "azure_vm_name", "azure_subscription_id", "azure_resource_group",
+    "azure_location", "azure_vm_size", "azure_boot_image_id",
+    "azure_data_disk_names",
+}
+
 def validate(entry):
     require_missing_fields(entry, COMMON_REQUIRED)
     if entry["target_platform"] == "aws":
@@ -48,6 +54,8 @@ def validate(entry):
         target_required = OS_REQUIRED
     elif entry["target_platform"] == "gcp":
         target_required = GCP_REQUIRED
+    elif entry["target_platform"] == "azure":
+        target_required = AZURE_REQUIRED
     else:
         raise ValueError(
             "unsupported target_platform: " + str(entry["target_platform"])
@@ -128,6 +136,11 @@ def validate(entry):
             require_nonempty_string(entry, name)
         validate_string_list(entry, "gcp_data_disk_names", allow_empty=True)
 
+    elif target == "azure":
+        for name in AZURE_REQUIRED - {"azure_data_disk_names"}:
+            require_nonempty_string(entry, name)
+        validate_string_list(entry, "azure_data_disk_names", allow_empty=True)
+
     else:
         for name in AWS_REQUIRED:
             require_nonempty_string(entry, name)
@@ -150,6 +163,10 @@ def main():
             if target == "gcp":
                 resource = item.get("gcp_instance_name")
                 scope = (item.get("gcp_project", ""), item.get("gcp_zone", ""))
+            elif target == "azure":
+                resource = item.get("azure_vm_name")
+                scope = (item.get("azure_subscription_id", ""),
+                         str(item.get("azure_resource_group", "")).lower())
             elif target == "aws":
                 resource = item.get("instance_id")
                 scope = (item.get("aws_account_id", ""), item.get("aws_region", ""))

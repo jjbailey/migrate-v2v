@@ -14,15 +14,20 @@
 collections:
   - name: amazon.aws
     version: "11.4.0"
+  - name: azure.azcollection
+    version: "4.1.0"
   - name: community.vmware
     version: "5.10.0"
   - name: openstack.cloud
     version: "2.6.0"
 
-# azure.azcollection 4.1.0 is deliberately not required yet. vaults/azure.yml
-# and bin/azure-vault.sh are reserved for the in-progress Azure work, which has
-# no playbook or wrapper, so nothing here may depend on the collection. Install
-# it separately (and restore this pin and the README prerequisites) when the
-# Azure workflow lands.
-#  - name: azure.azcollection
-#    version: "4.1.0"
+# azure.azcollection carries its own Python SDK requirements (azure-identity,
+# azure-mgmt-compute, azure-storage-blob, and friends) in the collection's
+# requirements.txt. Install them into the same Python environment that runs
+# Ansible, next to this file:
+#
+#   python3 -m pip install -r \
+#     ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt
+#
+# The Azure CLI is not used by any playbook; install it only if you want to
+# inspect what the pipeline created by hand.

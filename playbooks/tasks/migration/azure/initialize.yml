@@ -1,0 +1,91 @@
+---
+# playbooks/tasks/migration/azure/initialize.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Stable Azure names, persistent paths, and lifecycle state.
+
+- name: Generate or reuse the Azure migration run ID
+  ansible.builtin.set_fact:
+    migration_run_id: >-
+      {{ resume_run_id if (resume_run_id | length > 0) else lookup('pipe', 'python3 -c "import time; print(time.time_ns())"') }}
+    migration_resume_mode: "{{ resume_run_id | length > 0 }}"
+    migration_succeeded: false
+    snapshot_cleanup_required: false
+    clone_cleanup_required: false
+    azure_created_image_names: []
+    azure_reused_image_names: []
+    azure_created_snapshot_names: []
+    azure_reused_snapshot_names: []
+    azure_blob_names: []
+    # Keyed by manifest disk index: the conversion job a resume may pick up.
+    azure_convert_jobs: {}
+    azure_pending_disks: []
+
+- name: Sanitize the VM name for Azure resource naming
+  ansible.builtin.set_fact:
+    # Managed image names may not contain upper case, so lowercase letters,
+    # digits, and hyphens it is.
+    azure_vm_slug: "{{ vm_name | lower | regex_replace('[^a-z0-9]+', '-') | regex_replace('^-+|-+$', '') }}"
+
+- name: Give the slug a letter prefix when Azure would reject it
+  ansible.builtin.set_fact:
+    # Image names must start with a letter or digit, so a leading digit (or an
+    # empty slug from an all-symbolic VM name) gets a fixed valid prefix.
+    azure_vm_slug: "{{ 'vm-' ~ azure_vm_slug if (azure_vm_slug | length == 0 or azure_vm_slug is match('^[0-9]')) else azure_vm_slug }}"
+
+- name: Compute the VM-slug budget for Azure image names
+  ansible.builtin.set_fact:
+    # Managed image names are at most 80 characters. Every image name is
+    # "<prefix>-disk-<index>", so reserve room for the "-migration-<run id>"
+    # infix and a three-digit "-disk-NNN" suffix.
+    azure_vm_slug_budget: "{{ 80 - ('-migration-' ~ migration_run_id ~ '-disk-000') | length }}"
+
+- name: Trim the VM slug to fit the Azure image-name budget
+  ansible.builtin.set_fact:
+    azure_vm_slug_trimmed: "{{ azure_vm_slug[:azure_vm_slug_budget | int] | regex_replace('-+$', '') }}"
+
+- name: Derive the persistent Azure run directory
+  ansible.builtin.set_fact:
+    migration_run_dir: >-
+      {{ artifact_root }}/azure/{{ vm_name | regex_replace('[^A-Za-z0-9_.-]', '_') }}/{{ migration_run_id }}
+
+- name: Derive Azure migration names and paths
+  vars:
+    # The datastore-direct method (export_format datastore) makes no clone.
+    # The catalog and its readers still key every migration on clone_name, so
+    # it stays the migration's unique identifier; common/cleanup-vddk.yml
+    # never deletes it.
+    azure_snapshot_infix: "{{ 'vddk' if export_format == 'datastore' else 'export' }}"
+    azure_clone_infix: "{{ 'vddk' if export_format == 'datastore' else 'export-clone' }}"
+  ansible.builtin.set_fact:
+    snapshot_name: "ansible-azure-{{ azure_snapshot_infix }}-snap-{{ migration_run_id }}"
+    clone_name: "{{ vm_name }}-azure-{{ azure_clone_infix }}-{{ migration_run_id }}"
+    ovf_local_path: "{{ migration_run_dir }}/export.ovf"
+    artifact_manifest_path: "{{ migration_run_dir }}/artifact-manifest.json"
+    azure_staging_dir: "{{ migration_run_dir }}/disks"
+    azure_blob_prefix: "migrate-v2v/{{ migration_run_id }}"
+    azure_image_prefix: "{{ azure_vm_slug_trimmed ~ '-migration-' ~ migration_run_id }}"
+    catalog_entry_path: >-
+      /tmp/.{{ vm_name }}-azure-{{ azure_clone_infix }}-{{ migration_run_id }}.catalog-entry.json
+
+- name: Derive the private NBD socket directory for datastore-direct runs
+  ansible.builtin.set_fact:
+    # Unix socket paths are limited to 107 bytes, which a long VM name in the
+    # run directory could exceed, so the sockets get a short directory of
+    # their own.
+    vddk_socket_dir: "/tmp/.vddk-{{ migration_run_id }}"
+  when: export_format == 'datastore'
+
+- name: Create the persistent Azure run directory
+  ansible.builtin.file:
+    path: "{{ migration_run_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Create the private NBD socket directory
+  ansible.builtin.file:
+    path: "{{ vddk_socket_dir }}"
+    state: directory
+    mode: "0700"
+  when: export_format == 'datastore'
+

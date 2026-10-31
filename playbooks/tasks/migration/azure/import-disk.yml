@@ -1,0 +1,198 @@
+---
+# playbooks/tasks/migration/azure/import-disk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Collect one disk's conversion, start the next disk's conversion, then stage
+# this disk's VHD as a page blob and register it: a managed image for the boot
+# disk, a managed snapshot for a data disk (see import.yml). Conversions read
+# the exported VMDK (convert-disk.yml) or, for the datastore-direct method,
+# stream the disk from the source VM (convert-disk-vddk.yml). Starting the
+# next conversion before this upload is what overlaps the two; see import.yml
+# for why the lookahead is one disk deep.
+#
+# Expects: azure_disk (a planned disk entry) and azure_pending_position, and
+# runs inside import.yml's module_defaults block, so every azure.azcollection
+# task below carries the service principal.
+
+- name: Start this disk's conversion if nothing has started it yet
+  # Only the first pending disk lands here: every later disk was started by
+  # the lookahead in the previous iteration.
+  ansible.builtin.include_tasks: "{{ azure_convert_tasks }}"
+  vars:
+    azure_convert_disk: "{{ azure_disk }}"
+  when: (azure_disk.index | string) not in azure_convert_jobs
+
+- name: Wait for this disk's conversion to finish
+  ansible.builtin.async_status:
+    jid: "{{ azure_convert_jobs[azure_disk.index | string] }}"
+  register: azure_convert_result
+  until: azure_convert_result.finished | bool
+  retries: "{{ azure_convert_poll_retries | int }}"
+  delay: "{{ azure_convert_poll_delay | int }}"
+
+- name: Fail if this disk's conversion failed
+  ansible.builtin.fail:
+    msg: >-
+      conversion failed for disk {{ azure_disk.index }}:
+      {{ azure_convert_result.stderr | default('no stderr captured') }}
+  when: azure_convert_result.rc | default(1) != 0
+
+- name: Start the next disk's conversion while this one uploads
+  ansible.builtin.include_tasks: "{{ azure_convert_tasks }}"
+  vars:
+    azure_convert_disk: "{{ azure_pending_disks[azure_pending_position + 1] }}"
+  when: azure_pending_position + 1 < (azure_pending_disks | length)
+
+- name: Stage and register this disk
+  block:
+    - name: Check whether this disk's VHD is already staged
+      # Listing by prefix never fails on an absent blob, where a direct blob
+      # lookup can; the exact name is matched out of the result below.
+      azure.azcollection.azure_rm_storageblob_info:
+        resource_group: "{{ azure_resource_group }}"
+        storage_account_name: "{{ azure_storage_account }}"
+        container_name: "{{ azure_storage_container }}"
+        name_starts_with: "{{ azure_disk.blob }}"
+      register: azure_staged_blob_info
+
+    - name: Report reuse of an existing staged VHD
+      ansible.builtin.debug:
+        msg: >-
+          Reusing staged blob {{ azure_disk.blob }} for resumable disk
+          {{ azure_disk.index }}.
+      when:
+        - migration_resume_mode | bool
+        - azure_staged_blob_info.blobs | default([]) | selectattr('name', 'equalto', azure_disk.blob) | list | length > 0
+
+    - name: Upload this disk's VHD to Azure Blob Storage
+      # Page-blob upload skips all-zero pages, so only the used blocks travel,
+      # and force replaces any partial blob an earlier attempt of this run
+      # left behind. The container is created when missing.
+      azure.azcollection.azure_rm_storageblob:
+        resource_group: "{{ azure_resource_group }}"
+        storage_account_name: "{{ azure_storage_account }}"
+        container: "{{ azure_storage_container }}"
+        blob: "{{ azure_disk.blob }}"
+        blob_type: page
+        src: "{{ azure_staging_dir }}/{{ azure_disk.vhd }}"
+        force: true
+      register: azure_vhd_upload
+      when: >-
+        not (migration_resume_mode | bool) or
+        (azure_staged_blob_info.blobs | default([])
+         | selectattr('name', 'equalto', azure_disk.blob) | list | length == 0)
+
+    - name: Track the staged VHD blob for cleanup
+      ansible.builtin.set_fact:
+        azure_blob_names: "{{ azure_blob_names + [azure_disk.blob] }}"
+
+    - name: Delete an existing image of this name when replacement is enabled
+      # Reruns publish the current artifact: the resource ID is derived from
+      # the name, so it stays the same while its content changes - like GCP.
+      azure.azcollection.azure_rm_image:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_disk.resource }}"
+        state: absent
+      when:
+        - azure_disk.is_boot
+        - azure_disk.resource in azure_existing_image_names
+        - azure_disk.resource not in azure_reused_image_names
+        - azure_replace_existing_image | bool
+
+    - name: Delete an existing snapshot of this name when replacement is enabled
+      azure.azcollection.azure_rm_snapshot:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_disk.resource }}"
+        state: absent
+      when:
+        - not azure_disk.is_boot
+        - azure_disk.resource in azure_existing_snapshot_names
+        - azure_disk.resource not in azure_reused_snapshot_names
+        - azure_replace_existing_image | bool
+
+    # Recorded before the resource is created, not after: a failed or
+    # interrupted import can still leave one behind, and cleanup can only
+    # remove what it knows the name of.
+    - name: Track the image or snapshot this import will create
+      ansible.builtin.set_fact:
+        azure_created_image_names: >-
+          {{ azure_created_image_names + ([azure_disk.resource] if azure_disk.is_boot else []) }}
+        azure_created_snapshot_names: >-
+          {{ azure_created_snapshot_names + ([] if azure_disk.is_boot else [azure_disk.resource]) }}
+
+    - name: Create the boot disk's managed image from the staged VHD
+      azure.azcollection.azure_rm_image:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_disk.resource }}"
+        location: "{{ azure_location }}"
+        source: "{{ azure_blob_endpoint }}/{{ azure_storage_container }}/{{ azure_disk.blob }}"
+        os_type: Linux
+        hyper_v_generation: "{{ azure_hyper_v_generation_effective }}"
+        tags:
+          name: "{{ azure_disk.resource }}"
+          migration-run: "{{ migration_run_id }}"
+        state: present
+      when: azure_disk.is_boot
+
+    - name: Wait for the managed image to finish provisioning
+      azure.azcollection.azure_rm_image_info:
+        resource_group: "{{ azure_resource_group }}"
+      register: azure_created_image_info
+      vars:
+        azure_created_entry: >-
+          {{ azure_created_image_info.images | default([])
+             | selectattr('name', 'equalto', azure_disk.resource) | list }}
+      retries: "{{ azure_image_lookup_retries | int }}"
+      delay: "{{ azure_image_lookup_delay | int }}"
+      until: >-
+        azure_created_entry | length > 0 and
+        (azure_created_entry | first).provisioning_state == 'Succeeded'
+      changed_when: false
+      when: azure_disk.is_boot
+
+    # The snapshot holds its own copy of the data once its import succeeds,
+    # so the staged blob can go like the boot disk's.
+    - name: Import a data disk's staged VHD as a managed snapshot
+      azure.azcollection.azure_rm_snapshot:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_disk.resource }}"
+        location: "{{ azure_location }}"
+        sku:
+          name: Standard_LRS
+        creation_data:
+          create_option: Import
+          source_uri: "{{ azure_blob_endpoint }}/{{ azure_storage_container }}/{{ azure_disk.blob }}"
+        tags:
+          name: "{{ azure_disk.resource }}"
+          migration-run: "{{ migration_run_id }}"
+        state: present
+      when: not azure_disk.is_boot
+
+    - name: Wait for the data snapshot to finish provisioning
+      azure.azcollection.azure_rm_snapshot_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_disk.resource }}"
+      register: azure_created_snapshot_info
+      retries: "{{ azure_image_lookup_retries | int }}"
+      delay: "{{ azure_image_lookup_delay | int }}"
+      until: >-
+        azure_created_snapshot_info.state | default([]) | length > 0 and
+        (azure_created_snapshot_info.state | first).properties.provisioningState | default('') == 'Succeeded'
+      changed_when: false
+      when: not azure_disk.is_boot
+
+  always:
+    # Only this disk's files: the disk converted by the lookahead above is
+    # still needed by the next iteration. A resume re-converts any disk whose
+    # VHD was removed here, so nothing durable is lost.
+    - name: Remove this disk's temporary conversion files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ [azure_staging_dir ~ '/' ~ azure_disk.vhd,
+            azure_staging_dir ~ '/' ~ azure_disk.vhd ~ '.tmp']
+           + ([vddk_socket_dir ~ '/disk-' ~ azure_disk.index ~ '.sock']
+              if (vddk_socket_dir is defined) else []) }}
+      failed_when: false
+

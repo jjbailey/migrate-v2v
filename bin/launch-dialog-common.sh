@@ -2,7 +2,7 @@
 # bin/launch-dialog-common.sh
 # vim: set tabstop=4 shiftwidth=4 expandtab:
 
-# Shared UI for the AWS, GCP, and OpenStack launch and migrate dialogs. A
+# Shared UI for the AWS, Azure, GCP, and OpenStack launch and migrate dialogs. A
 # caller sets DIALOG_NAME, then sources this file. Every widget aborts the
 # dialog on cancel or Esc, and nothing runs until finish() confirms it.
 

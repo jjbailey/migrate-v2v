@@ -19,7 +19,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-TASKS = ROOT / "playbooks" / "tasks" / "migration" / "openstack"
+MIGRATION = ROOT / "playbooks" / "tasks" / "migration"
+TASKS = MIGRATION / "openstack"
 TOOLS = ("ansible-playbook", "nbdkit", "qemu-img")
 
 CONVERT_PLAY = """
@@ -28,11 +29,11 @@ CONVERT_PLAY = """
   gather_facts: false
   vars:
     # set_fact cannot override an extra var, so the job map starts here.
-    openstack_convert_jobs: {{}}
+    {target}_convert_jobs: {{}}
   tasks:
     - ansible.builtin.include_tasks: {tasks}/convert-disk-vddk.yml
     - ansible.builtin.async_status:
-        jid: "{{{{ openstack_convert_jobs['0'] }}}}"
+        jid: "{{{{ {target}_convert_jobs['0'] }}}}"
       register: result
       until: result.finished | bool
       retries: 60
@@ -79,7 +80,7 @@ class StreamTests(unittest.TestCase):
     def playbook(self, text, **extra_vars):
         play = self.tmp / "play.yml"
         play.write_text(text)
-        variables = {"openstack_vddk_socket_dir": str(self.sockets), **extra_vars}
+        variables = {"vddk_socket_dir": str(self.sockets), **extra_vars}
         return subprocess.run(["ansible-playbook", str(play), "-e", json.dumps(variables)],
                               capture_output=True, text=True, check=False)
 
@@ -92,13 +93,13 @@ class StreamTests(unittest.TestCase):
             "openstack_convert_args": [],
             "openstack_convert_compress": False,
             "openstack_convert_async_timeout": 120,
-            "openstack_vddk_local": True,
-            "openstack_vddk_backend_effective": "curl",
-            "openstack_vddk_nbdkit_bin": "nbdkit",
-            "openstack_vddk_libdir": "",
-            "openstack_vddk_thumbprint": "",
-            "openstack_vddk_transports": "nbdssl",
-            "openstack_vddk_ca_bundle": "",
+            "vddk_local": True,
+            "vddk_backend_effective": "curl",
+            "vddk_nbdkit_bin": "nbdkit",
+            "vddk_libdir": "",
+            "vddk_thumbprint": "",
+            "vddk_transports": "nbdssl",
+            "vddk_ca_bundle": "",
             "qemu_img_bin": "qemu-img",
             "vcenter_hostname": "127.0.0.1:1",
             "vcenter_username": "test",
@@ -107,7 +108,7 @@ class StreamTests(unittest.TestCase):
             "validate_certs": False,
             **overrides,
         }
-        played = self.playbook(CONVERT_PLAY.format(tasks=TASKS, out=out), **variables)
+        played = self.playbook(CONVERT_PLAY.format(tasks=TASKS, target="openstack", out=out), **variables)
         self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
         return json.loads(out.read_text())
 
@@ -142,9 +143,9 @@ class StreamTests(unittest.TestCase):
         )
         wrapper.chmod(0o700)
 
-        result = self.convert(openstack_vddk_local=False,
-                              openstack_vddk_backend_effective="vddk",
-                              openstack_vddk_nbdkit_bin=str(wrapper))
+        result = self.convert(vddk_local=False,
+                              vddk_backend_effective="vddk",
+                              vddk_nbdkit_bin=str(wrapper))
         self.assertEqual(result["rc"], 0, result["stderr"])
         invocation = json.loads(captured.read_text())
         self.assertIn(f"config={self.sockets}/config-0", invocation["args"])
@@ -176,7 +177,7 @@ class StreamTests(unittest.TestCase):
     def test_read_failure_quotes_nbdkit(self):
         # The curl plugin starts, then fails when qemu-img connects: the reason
         # is only in nbdkit's own log, which the failure must carry.
-        result = self.convert(openstack_vddk_local=False)
+        result = self.convert(vddk_local=False)
         self.assertNotEqual(result["rc"], 0)
         # Check that nbdkit's own log is quoted, not libcurl's wording, which
         # changes between versions: the curl plugin names itself and the
@@ -187,6 +188,44 @@ class StreamTests(unittest.TestCase):
         self.assertIn("127.0.0.1", quoted)
         self.assertFalse((self.run_dir / "disks" / "disk-0.qcow2").exists())
         self.assertFalse((self.sockets / "config-0").exists())
+
+    def test_azure_converts_a_disk_to_a_fixed_vhd(self):
+        raw = self.tmp / "disk.raw"
+        raw.write_bytes(b"\xab" * 1024 * 1024 + bytes(1024 * 1024))
+        out = self.tmp / "result.json"
+        variables = {
+            "migration_run_dir": str(self.run_dir),
+            "azure_staging_dir": str(self.run_dir / "disks"),
+            "azure_convert_disk": {"index": 0, "path": str(raw)},
+            "azure_convert_args": [],
+            "azure_convert_async_timeout": 120,
+            "vddk_local": True,
+            "vddk_backend_effective": "curl",
+            "vddk_nbdkit_bin": "nbdkit",
+            "vddk_libdir": "",
+            "vddk_thumbprint": "",
+            "vddk_transports": "nbdssl",
+            "vddk_ca_bundle": "",
+            "qemu_img_bin": "qemu-img",
+            "validate_certs": False,
+        }
+        played = self.playbook(
+            CONVERT_PLAY.format(tasks=MIGRATION / "azure", target="azure", out=out), **variables)
+        self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
+        result = json.loads(out.read_text())
+        self.assertEqual(result["rc"], 0, result["stderr"])
+        vhd = self.run_dir / "disks" / "disk-0.vhd"
+        compared = subprocess.run(["qemu-img", "compare", "-f", "raw", "-F", "vpc",
+                                   str(raw), str(vhd)],
+                                  capture_output=True, text=True, check=False)
+        self.assertEqual(compared.returncode, 0, compared.stdout + compared.stderr)
+        info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", "-f", "vpc", str(vhd)],
+                                         capture_output=True, text=True, check=True).stdout)
+        # Azure images only a whole number of MiB: force_size keeps it exact.
+        self.assertEqual(info["virtual-size"], 2 * 1024 * 1024)
+        # A fixed VHD is the raw data plus a 512-byte footer.
+        self.assertEqual(vhd.stat().st_size, 2 * 1024 * 1024 + 512)
+        self.assertFalse((self.run_dir / "disks" / "disk-0.vhd.tmp").exists())
 
     def start_nbdkit(self, socket, pidfile):
         process = subprocess.Popen(["nbdkit", "-f", "-r", "-U", str(socket), "--pidfile", str(pidfile),
@@ -208,7 +247,7 @@ class StreamTests(unittest.TestCase):
         (self.sockets / "disk-2.pid").write_text(f"{unrelated.pid}\n")
         (self.sockets / "disk-3.pid").write_text("garbage\n")
 
-        played = self.playbook(STOP_PLAY.format(tasks=TASKS))
+        played = self.playbook(STOP_PLAY.format(tasks=MIGRATION / "common"))
         self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
         ours.wait(timeout=5)
         self.assertFalse(alive(ours.pid))

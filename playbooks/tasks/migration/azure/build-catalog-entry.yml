@@ -1,0 +1,48 @@
+---
+# playbooks/tasks/migration/azure/build-catalog-entry.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Build the target-specific portion of the shared migration catalog record.
+# The source provenance and migrated_at are added by
+# common/build-migration-entry.yml; only the Azure fields are listed here.
+
+- name: Verify the boot image and data snapshots are in manifest disk order
+  # The catalog's boot image is disk 0 and its data snapshots are the rest, in
+  # order, and a launch attaches them in that order. Refuse to record a row
+  # whose resources do not line up one-to-one with the manifest's disks.
+  ansible.builtin.assert:
+    that:
+      - (azure_image_names + azure_snapshot_names) == azure_expected_names
+      - >-
+        (azure_image_ids + azure_snapshot_ids) | map('regex_replace', '^.*/', '') | list
+        == azure_expected_names
+    fail_msg: >-
+      Imported Azure resources {{ azure_image_names + azure_snapshot_names }}
+      (IDs {{ azure_image_ids + azure_snapshot_ids }}) do not match the
+      manifest disk order {{ azure_expected_names }}; not recording a catalog
+      entry.
+  vars:
+    azure_expected_names: >-
+      {{ artifact_manifest.disks | map(attribute='index') | map('string')
+         | map('regex_replace', '^', azure_image_prefix ~ '-disk-') | list }}
+
+- name: Build the Azure migration catalog entry
+  ansible.builtin.import_tasks: ../common/build-migration-entry.yml
+  vars:
+    migration_entry_fields:
+      target_platform: azure
+      artifact_type: vhd-disk-set
+      artifact_manifest: "{{ artifact_manifest }}"
+      azure_subscription_id: "{{ azure_subscription_id }}"
+      azure_resource_group: "{{ azure_resource_group }}"
+      azure_location: "{{ azure_location }}"
+      azure_storage_account: "{{ azure_storage_account }}"
+      azure_storage_container: "{{ azure_storage_container }}"
+      azure_blob_prefix: "{{ azure_blob_prefix }}"
+      azure_hyper_v_generation: "{{ azure_hyper_v_generation_effective }}"
+      azure_boot_image_name: "{{ azure_image_names[0] }}"
+      azure_boot_image_id: "{{ azure_image_ids[0] }}"
+      azure_data_snapshot_names: "{{ azure_snapshot_names }}"
+      azure_data_snapshot_ids: "{{ azure_snapshot_ids }}"
+      status: completed
+

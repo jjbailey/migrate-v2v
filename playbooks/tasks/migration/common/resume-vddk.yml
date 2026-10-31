@@ -4,8 +4,9 @@
 
 # Validate what a datastore-direct resume needs. There is no local VMDK set;
 # the migration snapshot on the source VM is the checkpoint, so a resume needs
-# the saved manifest and that snapshot still present. Disks already in Glance
-# are skipped by openstack/check-image.yml as usual.
+# the saved manifest and that snapshot still present. Disks the target already
+# holds (a Glance image, an Azure managed image) are skipped by its import as
+# usual.
 #
 # A discard (migration_discard_only, from -e discard_run_id=<id>) runs the same
 # lookups but tolerates a missing manifest or snapshot: it only collects what
@@ -98,7 +99,7 @@
   when:
     - migration_resume_mode | bool
     - not (migration_discard_only | bool)
-    - openstack_vddk_backend_effective == 'curl'
+    - vddk_backend_effective == 'curl'
 
 - name: Find the images the retained run uploaded
   # Every image of a run is named <prefix>-disk-<N>; a failed run never
@@ -109,7 +110,9 @@
     region_name: "{{ openstack_region_name }}"
   register: discard_image_info
   no_log: true
-  when: migration_discard_only | bool
+  when:
+    - migration_discard_only | bool
+    - migration_target == 'openstack'
 
 - name: Queue the retained run's images for removal
   ansible.builtin.set_fact:
@@ -117,7 +120,9 @@
       {{ discard_image_info.images | map(attribute='name')
          | select('match', (openstack_image_prefix ~ '-disk-') | regex_escape)
          | list | unique }}
-  when: migration_discard_only | bool
+  when:
+    - migration_discard_only | bool
+    - migration_target == 'openstack'
 
 - name: Read the source VM reference for the resume
   environment:
@@ -133,7 +138,7 @@
   when:
     - migration_resume_mode | bool
     - not (migration_discard_only | bool)
-    - openstack_vddk_backend_effective == 'vddk'
+    - vddk_backend_effective == 'vddk'
 
 - name: Record the source VM reference for the resume
   ansible.builtin.set_fact:
@@ -142,12 +147,12 @@
   when:
     - migration_resume_mode | bool
     - not (migration_discard_only | bool)
-    - openstack_vddk_backend_effective == 'vddk'
+    - vddk_backend_effective == 'vddk'
 
 - name: Resolve the migration snapshot reference for the resume
   ansible.builtin.include_tasks: snapshot-ref-vddk.yml
   when:
     - migration_resume_mode | bool
     - not (migration_discard_only | bool)
-    - openstack_vddk_backend_effective == 'vddk'
+    - vddk_backend_effective == 'vddk'
 

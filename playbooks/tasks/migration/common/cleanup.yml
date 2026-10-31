@@ -4,7 +4,7 @@
 
 # Best-effort cleanup shared by every target.
 
-# The resumable run directory. GCP and OpenStack always derive
+# The resumable run directory. Azure, GCP, and OpenStack always derive
 # migration_run_dir and can resume from it, so it is removed on success or
 # explicit discard, and otherwise kept with a resume hint. AWS does not resume:
 # it defines migration_run_dir only when an operator supplies one, which is
@@ -16,7 +16,7 @@
     path: "{{ migration_run_dir }}"
     state: absent
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
   failed_when: false
 
@@ -27,7 +27,7 @@
       {{ migration_run_dir }}. Resume with
       -e resume_run_id={{ migration_run_id }} after correcting the failure.
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
 

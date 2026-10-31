@@ -9,7 +9,7 @@
 # collect the job, which is what lets a conversion overlap the previous disk's
 # upload.
 #
-# Backends (openstack_vddk_backend_effective, chosen in preflight):
+# Backends (vddk_backend_effective, chosen in preflight):
 #   vddk  nbdkit's vddk plugin and VixDiskLib open the disk as the migration
 #         snapshot froze it (vCenter login, ticket, NFC to the ESXi host).
 #   curl  nbdkit's curl plugin reads the -flat.vmdk from vCenter's /folder
@@ -18,7 +18,7 @@
 #
 # Expects: openstack_convert_disk (a manifest disk entry), the vCenter facts and
 # datacenter (plus source_vm_moref and source_snapshot_moref for vddk), or
-# openstack_vddk_local=true (a local file, for tests).
+# vddk_local=true (a local file, for tests).
 
 - name: Write the vCenter password where nbdkit can read it without argv
   # Per disk, and removed by that disk's own conversion shell when it ends: a
@@ -27,9 +27,9 @@
   # conversion in the run.
   ansible.builtin.copy:
     content: "{{ vcenter_password }}"
-    dest: "{{ openstack_vddk_socket_dir }}/password-{{ openstack_convert_disk.index }}"
+    dest: "{{ vddk_socket_dir }}/password-{{ openstack_convert_disk.index }}"
     mode: "0600"
-  when: not (openstack_vddk_local | bool)
+  when: not (vddk_local | bool)
   no_log: true
 
 - name: Configure two NFC sessions per disk for OpenVDDK
@@ -39,43 +39,43 @@
   ansible.builtin.copy:
     content: |
       OpenVDDK.nbd.sessions = "2"
-    dest: "{{ openstack_vddk_socket_dir }}/config-{{ openstack_convert_disk.index }}"
+    dest: "{{ vddk_socket_dir }}/config-{{ openstack_convert_disk.index }}"
     mode: "0600"
   when:
-    - not (openstack_vddk_local | bool)
-    - openstack_vddk_backend_effective == 'vddk'
+    - not (vddk_local | bool)
+    - vddk_backend_effective == 'vddk'
 
 - name: Assemble the nbdkit plugin and arguments for this disk
   vars:
     # "[datastore] dir/disk.vmdk" is served as dir/disk-flat.vmdk.
-    openstack_vddk_datastore: "{{ openstack_convert_disk.path | regex_replace('^\\[([^\\]]+)\\].*$', '\\1') }}"
-    openstack_vddk_relative: "{{ openstack_convert_disk.path | regex_replace('^\\[[^\\]]+\\]\\s*(.*)\\.vmdk$', '\\1') }}-flat.vmdk"
-    openstack_vddk_password_arg: "password=+{{ openstack_vddk_socket_dir }}/password-{{ openstack_convert_disk.index }}"
-    openstack_vddk_args_vddk: >-
-      {{ (['libdir=' ~ openstack_vddk_libdir] if (openstack_vddk_libdir | length > 0) else [])
-         + ['config=' ~ openstack_vddk_socket_dir ~ '/config-' ~ openstack_convert_disk.index,
+    vddk_datastore: "{{ openstack_convert_disk.path | regex_replace('^\\[([^\\]]+)\\].*$', '\\1') }}"
+    vddk_relative: "{{ openstack_convert_disk.path | regex_replace('^\\[[^\\]]+\\]\\s*(.*)\\.vmdk$', '\\1') }}-flat.vmdk"
+    vddk_password_arg: "password=+{{ vddk_socket_dir }}/password-{{ openstack_convert_disk.index }}"
+    vddk_args_vddk: >-
+      {{ (['libdir=' ~ vddk_libdir] if (vddk_libdir | length > 0) else [])
+         + ['config=' ~ vddk_socket_dir ~ '/config-' ~ openstack_convert_disk.index,
             'server=' ~ vcenter_hostname,
             'user=' ~ vcenter_username,
-            openstack_vddk_password_arg,
-            'thumbprint=' ~ openstack_vddk_thumbprint,
+            vddk_password_arg,
+            'thumbprint=' ~ vddk_thumbprint,
             'vm=moref=' ~ (source_vm_moref | default('')),
             'snapshot=' ~ (source_snapshot_moref | default('')),
-            'transports=' ~ openstack_vddk_transports,
+            'transports=' ~ vddk_transports,
             'file=' ~ openstack_convert_disk.path] }}
-    openstack_vddk_args_curl: >-
-      {{ ['url=https://' ~ vcenter_hostname ~ '/folder/' ~ (openstack_vddk_relative | urlencode)
-            ~ '?dcPath=' ~ (datacenter | urlencode) ~ '&dsName=' ~ (openstack_vddk_datastore | urlencode),
+    vddk_args_curl: >-
+      {{ ['url=https://' ~ vcenter_hostname ~ '/folder/' ~ (vddk_relative | urlencode)
+            ~ '?dcPath=' ~ (datacenter | urlencode) ~ '&dsName=' ~ (vddk_datastore | urlencode),
           'user=' ~ vcenter_username,
-          openstack_vddk_password_arg,
+          vddk_password_arg,
           'sslverify=' ~ ('true' if (validate_certs | bool) else 'false')]
-         + (['cainfo=' ~ openstack_vddk_ca_bundle] if (openstack_vddk_ca_bundle | length > 0) else []) }}
+         + (['cainfo=' ~ vddk_ca_bundle] if (vddk_ca_bundle | length > 0) else []) }}
   ansible.builtin.set_fact:
-    openstack_vddk_plugin: >-
-      {{ 'file' if (openstack_vddk_local | bool) else openstack_vddk_backend_effective }}
-    openstack_vddk_plugin_args: >-
-      {{ ['file=' ~ openstack_convert_disk.path] if (openstack_vddk_local | bool)
-         else (openstack_vddk_args_vddk if openstack_vddk_backend_effective == 'vddk'
-               else openstack_vddk_args_curl) }}
+    vddk_plugin: >-
+      {{ 'file' if (vddk_local | bool) else vddk_backend_effective }}
+    vddk_plugin_args: >-
+      {{ ['file=' ~ openstack_convert_disk.path] if (vddk_local | bool)
+         else (vddk_args_vddk if vddk_backend_effective == 'vddk'
+               else vddk_args_curl) }}
   no_log: true
 
 - name: Start this disk's stream and QCOW2 conversion atomically
@@ -103,14 +103,14 @@
   # operator settings and can hold spaces.
   ansible.builtin.shell: |
     set -eu
-    socket={{ (openstack_vddk_socket_dir ~ '/disk-' ~ openstack_convert_disk.index ~ '.sock') | quote }}
-    pidfile={{ (openstack_vddk_socket_dir ~ '/disk-' ~ openstack_convert_disk.index ~ '.pid') | quote }}
-    password={{ (openstack_vddk_socket_dir ~ '/password-' ~ openstack_convert_disk.index) | quote }}
+    socket={{ (vddk_socket_dir ~ '/disk-' ~ openstack_convert_disk.index ~ '.sock') | quote }}
+    pidfile={{ (vddk_socket_dir ~ '/disk-' ~ openstack_convert_disk.index ~ '.pid') | quote }}
+    password={{ (vddk_socket_dir ~ '/password-' ~ openstack_convert_disk.index) | quote }}
     log={{ (migration_run_dir ~ '/nbdkit-disk-' ~ openstack_convert_disk.index ~ '.log') | quote }}
     temporary={{ (openstack_staging_dir ~ '/disk-' ~ openstack_convert_disk.index ~ '.qcow2.tmp') | quote }}
     rm -f "$socket" "$pidfile" "$temporary"
-    {{ openstack_vddk_nbdkit_bin | quote }} -f -r -U "$socket" --pidfile "$pidfile" \
-      {{ openstack_vddk_plugin | quote }} {{ openstack_vddk_plugin_args | map('quote') | join(' ') }} \
+    {{ vddk_nbdkit_bin | quote }} -f -r -U "$socket" --pidfile "$pidfile" \
+      {{ vddk_plugin | quote }} {{ vddk_plugin_args | map('quote') | join(' ') }} \
       2> "$log" &
     nbdkit_pid=$!
     trap 'kill "$nbdkit_pid" 2> /dev/null || true; rm -f "$password" || true' EXIT
