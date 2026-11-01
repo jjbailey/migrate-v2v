@@ -19,7 +19,7 @@ AZURE_VNET_NAME=${AZURE_VNET_NAME:-}
 AZURE_SUBNET_NAME=${AZURE_SUBNET_NAME:-}
 AZURE_NSG_NAME=${AZURE_NSG_NAME:-}
 AZURE_NO_PUBLIC_IP=${AZURE_NO_PUBLIC_IP:-false}
-# Azure provisions the admin user from this key through cloud-init; there is
+# Azure provisions the admin user from this key through cloud-init ; there is
 # no project-wide key as on GCP, so every launch needs one.
 AZURE_ADMIN_USERNAME=${AZURE_ADMIN_USERNAME:-}
 AZURE_SSH_KEY_FILE=${AZURE_SSH_KEY_FILE:-}

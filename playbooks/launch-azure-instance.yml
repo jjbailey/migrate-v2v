@@ -42,6 +42,9 @@
     azure_boot_image_id: ""
     azure_data_snapshot_ids: []
     azure_migration_id: ""
+    # select-project.yml falls back to this when the vault entry has no
+    # storage_container. A launch never stages blobs, so empty is fine.
+    azure_storage_container: ""
     migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
     deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
 
@@ -92,7 +95,6 @@
                  | lower | regex_replace('[^a-z0-9-]', '-')
                  | regex_replace('^-+|-+$', '') }}
             azure_data_disk_names: []
-            azure_data_disk_ids: []
 
         - name: Give an all-symbolic VM name a valid Azure prefix
           ansible.builtin.set_fact:
@@ -201,12 +203,18 @@
                 name: "{{ azure_vm_name }}-nic"
               register: azure_nic_info
 
+            # Follows the NIC rather than azure_no_public_ip: a reused VM keeps
+            # whatever public IP it was created with, or none.
             - name: Read the VM's public IP address
               azure.azcollection.azure_rm_publicipaddress_info:
-                resource_group: "{{ azure_resource_group }}"
-                name: "{{ azure_vm_name }}-pip"
+                resource_group: "{{ azure_nic_pip_id.split('/')[4] }}"
+                name: "{{ azure_nic_pip_id.split('/') | last }}"
               register: azure_pip_info
-              when: not (azure_no_public_ip | bool)
+              vars:
+                azure_nic_pip_id: >-
+                  {{ ((azure_nic_info.networkinterfaces | default([]) | first | default({})).ip_configurations
+                      | default([]) | first | default({})).public_ip_address | default('', true) }}
+              when: azure_nic_pip_id | length > 0
 
             - name: Record the VM's addresses
               ansible.builtin.set_fact:
@@ -214,8 +222,8 @@
                   {{ ((azure_nic_info.networkinterfaces | default([]) | first | default({})).ip_configurations
                       | default([]) | first | default({})).private_ip_address | default('') }}
                 azure_public_ip: >-
-                  {{ ((azure_pip_info.publicipaddresses | default([]) | first | default({})).ip_address
-                      | default('')) if not (azure_no_public_ip | bool) else '' }}
+                  {{ (azure_pip_info.publicipaddresses | default([]) | first | default({})).ip_address
+                     | default('') }}
 
             - name: Read the attached data disks
               # Also settles the list for a reused VM, which this run did not

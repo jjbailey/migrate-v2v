@@ -164,7 +164,7 @@ print("\n".join(out))' "$facts" "$current" 2> /dev/null
 
 # Curated EC2 instance types: the full list is hundreds long, so offer the
 # common families and leave a manual row. CURRENT pre-selects the value.
-# Always succeeds; the caller treats empty output as "no choices".
+# Always succeeds ; the caller treats empty output as "no choices".
 load_aws_instance_type_choices()
 {
     local current=${1:-t3.medium} found=0 cand
@@ -187,8 +187,7 @@ load_aws_instance_type_choices()
 }
 
 AWS_TARGET_PROJECT=$(choose_target "Which AWS account should this VM launch into?" vaults/aws.yml aws_projects "${AWS_TARGET_PROJECT:-}") || abort
-VM_NAME=$(choose_vm aws AWS) || abort
-require_nonempty "$VM_NAME" "The VM name cannot be empty."
+VM_NAME=$(choose_vm_required aws AWS) || abort
 
 while : ; do
     subnet_choices=$(load_aws_subnet_choices "$AWS_TARGET_PROJECT" "${AWS_SUBNET_ID:-}") || subnet_choices=""
@@ -316,7 +315,7 @@ say "Launch summary for $VM_NAME
   Security groups: ${sg_mode}${AWS_SECURITY_GROUPS_JSON:+ ($AWS_SECURITY_GROUPS_JSON)}
   SSH key pair...: ${AWS_KEY_NAME:-none}" 14
 
-file=$(mktemp /tmp/launch-aws.XXXXXX)
+file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
 {
     printf '#!/bin/bash\n'
     printf 'export AWS_TARGET_PROJECT=%s\n' "$(quote "$AWS_TARGET_PROJECT")"

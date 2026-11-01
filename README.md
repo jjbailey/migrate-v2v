@@ -786,7 +786,9 @@ What each kind asks:
   current value pre-selected. Long single-select lists lead with a
   `Type manually (skip the list)` row so a known value can be typed without
   scrolling, and a failed lookup falls back to manual entry instead of
-  aborting.
+  aborting. The generated command records blank optional choices explicitly,
+  so values left in the environment cannot override them when it is run later.
+  Choosing **None** for OpenStack security groups passes an empty list.
 
 Target choices are read from the vault with `ansible-vault view`, using
 `VAULT_PASSWORD_FILE` or `~/.ssh/dib-vault-pass`. If the password file or
@@ -797,14 +799,16 @@ At the end the dialog offers three steps: review the generated command, save it
 (default `./migrate-<vm>.sh` or `./launch-<vm>.sh`), and run it now. The
 generated script is a short shell file of `export` lines followed by the
 wrapper's absolute path, so a saved copy can be run from any directory. An
-unsaved command is left in `/tmp`. Cancelling at any prompt, or pressing Esc,
-exits with "Nothing was run."
+unsaved command is left in `${TMPDIR:-/tmp}`. Saving asks for another path if
+the file already exists. Cancelling at any prompt, or pressing Esc, exits with
+"Nothing was run."
 
 The migrate dialogs write `ARTIFACT_ROOT` into the script, defaulting to
 `/var/tmp/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
 artifacts belong on another filesystem. The shared widgets and the
-terminal handling live in `bin/launch-dialog-common.sh`, which every dialog
-sources. Ready-to-run examples are collected in
+terminal handling live in `bin/launch-dialog-common.sh`; the migration prompts
+and command generation live in `bin/migrate-dialog-common.sh`. Ready-to-run
+examples are collected in
 [examples/README.md](examples/README.md).
 
 ## Datastore-Direct Migration to OpenStack

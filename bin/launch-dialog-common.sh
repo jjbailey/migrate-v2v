@@ -52,7 +52,7 @@ cols=$(tput cols 2> /dev/null || echo 80)
 case "$rows" in '' | *[!0-9]*) rows=24 ;; esac
 case "$cols" in '' | *[!0-9]*) cols=80 ;; esac
 if [ "$cols" -lt 20 ] || [ "$rows" -lt 10 ] ; then
-    echo "${DIALOG_NAME}: terminal is too small (${cols}x${rows}); minimum is 20x10." >&2
+    echo "${DIALOG_NAME}: terminal is too small (${cols}x${rows}) ; minimum is 20x10." >&2
     exit 1
 fi
 COLS=$((cols - 4))
@@ -83,11 +83,28 @@ input()
     printf %s "$value"
 }
 
+input_required()
+{
+    local prompt=$1 default=$2 message=$3 value
+    while : ; do
+        value=$(input "$prompt" "$default") || return 1
+        if [ -n "$value" ] ; then
+            printf %s "$value"
+            return 0
+        fi
+        bad "$message" || true
+    done
+}
+
 yesno()
 {
     local a=()
+    local status
     [ "$2" != no ] || a+=(--defaultno)
-    dlg "${a[@]}" --yesno "$1" "$(height 10)" "$COLS"
+    dlg "${a[@]}" --yesno "$1" "$(height 10)" "$COLS" && return 0
+    status=$?
+    [ "$status" -eq 1 ] && return 1
+    abort
 }
 
 radio()
@@ -133,11 +150,17 @@ require_nonempty()
 
 tristate()
 {
-    local title=$1 picked
+    local title=$1 current=${2:-} picked
+    local auto=OFF force_true=OFF force_false=OFF
+    case "$current" in
+        true) force_true=ON ;;
+        false) force_false=ON ;;
+        *) auto=ON ;;
+    esac
     picked=$(radio "$title" \
-        auto "Use the vault's default policy" ON \
-        true "Force true" OFF \
-        false "Force false" OFF) || return 1
+        auto "Use the vault's default policy" "$auto" \
+        true "Force true" "$force_true" \
+        false "Force false" "$force_false") || return 1
     [ "$picked" != auto ] && printf %s "$picked" || printf %s ""
 }
 
@@ -178,6 +201,19 @@ for name,stamp in sorted(best.items(), key=lambda item: when(item[1]), reverse=T
     [ "$picked" != _other ] && printf %s "$picked" || input "VM name:" ""
 }
 
+choose_vm_required()
+{
+    local platform=$1 label=$2 vm
+    while : ; do
+        vm=$(choose_vm "$platform" "$label") || return 1
+        if [ -n "$vm" ] ; then
+            printf %s "$vm"
+            return 0
+        fi
+        bad "The VM name cannot be empty." || true
+    done
+}
+
 vault_keys()
 {
     local vault=$1 map_name=$2
@@ -205,16 +241,28 @@ choose_target()
 {
     local title=$1 vault=$2 map_name=$3 current=$4 picked
     local choices=()
+    local matched=false
     while IFS= read -r name ; do
-        [ -n "$name" ] && choices+=("$name" "in ${vault}" OFF)
+        if [ -n "$name" ] ; then
+            if [ "$name" = "$current" ] ; then
+                choices+=("$name" "in ${vault}" ON)
+                matched=true
+            else
+                choices+=("$name" "in ${vault}" OFF)
+            fi
+        fi
     done < <(vault_keys "$vault" "$map_name" || true)
     if [ ${#choices[@]} -eq 0 ] ; then
         input "$title (blank lets the playbook auto-select):" "$current"
         return
     fi
-    choices[2]=ON
+    [ "$matched" = true ] || [ -n "$current" ] || choices[2]=ON
     choices+=("_auto" "Let the playbook pick a single-entry vault" OFF)
-    choices+=("_other" "Type a different name" OFF)
+    if [ -n "$current" ] && [ "$matched" = false ] ; then
+        choices+=("_other" "Type a different name" ON)
+    else
+        choices+=("_other" "Type a different name" OFF)
+    fi
     picked=$(dlg --radiolist "$title" "$(height 16)" "$COLS" 8 "${choices[@]}") || return 1
     case "$picked" in
         _auto) printf %s "" ;;
@@ -230,17 +278,26 @@ finish()
         dlg --textbox "$file" "$(height 22)" "$COLS" || true
     fi
     if yesno "Save the command to a file?" no ; then
-        saved=$(input "Save where:" "./${verb}-${vm}.sh") || abort
-        if cp -- "$file" "$saved" ; then
-            saved=$(realpath -- "$saved")
-            chmod +x "$saved"
-            rm -f -- "$file"
-            file=$saved
-            say "Saved to $saved." 8
-        else
-            say "Could not write $saved.\n\nNothing was run. The command is still at $file." 10
-            return 0
-        fi
+        while : ; do
+            saved=$(input "Save where:" "./${verb}-${vm}.sh") || abort
+            if [ -z "$saved" ] ; then
+                bad "Choose a file path." || true
+                continue
+            fi
+            if [ -e "$saved" ] || [ -L "$saved" ] ; then
+                bad "The file already exists: $saved" || true
+                continue
+            fi
+            if (set -C; cat -- "$file" > "$saved") ; then
+                saved=$(realpath -- "$saved")
+                chmod +x "$saved"
+                rm -f -- "$file"
+                file=$saved
+                say "Saved to $saved." 8
+                break
+            fi
+            bad "Could not write $saved." || true
+        done
     fi
     if yesno "Run the ${verb} now?" no ; then
         bash "$file"

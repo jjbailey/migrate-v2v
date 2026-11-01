@@ -5,8 +5,8 @@
 # Datastore-direct migration to OpenStack: snapshots the running VM and streams
 # its disks straight from the datastore, with no clone and no OVF export.
 # See doc/datastore-direct.md. Takes the same environment variables as
-# migrate-openstack-vm.sh, plus BACKEND (auto, vddk, or curl; default auto),
-# COMPRESS (compress the QCOW2 for a slow upload link; default false),
+# migrate-openstack-vm.sh, plus BACKEND (auto, vddk, or curl ; default auto),
+# COMPRESS (compress the QCOW2 for a slow upload link ; default false),
 # REQUIRE_CBT (default false), DISCARD_RUN_ID (remove a failed run's
 # snapshot, run directory, and uploaded images instead of migrating), and
 # VCENTER_CA_BUNDLE (PEM file of the CA that issued the vCenter certificate).
