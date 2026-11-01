@@ -45,29 +45,12 @@
 
 - name: Stage and register this disk
   block:
-    - name: Check whether this disk's VHD is already staged
-      # Listing by prefix never fails on an absent blob, where a direct blob
-      # lookup can; the exact name is matched out of the result below.
-      azure.azcollection.azure_rm_storageblob_info:
-        resource_group: "{{ azure_resource_group }}"
-        storage_account_name: "{{ azure_storage_account }}"
-        container_name: "{{ azure_storage_container }}"
-        name_starts_with: "{{ azure_disk.blob }}"
-      register: azure_staged_blob_info
-
-    - name: Report reuse of an existing staged VHD
-      ansible.builtin.debug:
-        msg: >-
-          Reusing staged blob {{ azure_disk.blob }} for resumable disk
-          {{ azure_disk.index }}.
-      when:
-        - migration_resume_mode | bool
-        - azure_staged_blob_info.blobs | default([]) | selectattr('name', 'equalto', azure_disk.blob) | list | length > 0
-
     - name: Upload this disk's VHD to Azure Blob Storage
       # Page-blob upload skips all-zero pages, so only the used blocks travel,
-      # and force replaces any partial blob an earlier attempt of this run
-      # left behind. The container is created when missing.
+      # and force replaces any partial blob an earlier attempt left behind.
+      # A named page blob can contain incomplete data after an interrupted
+      # upload, so every disk still needing import is uploaded again. The
+      # module creates the container when missing.
       azure.azcollection.azure_rm_storageblob:
         resource_group: "{{ azure_resource_group }}"
         storage_account_name: "{{ azure_storage_account }}"
@@ -77,14 +60,6 @@
         src: "{{ azure_staging_dir }}/{{ azure_disk.vhd }}"
         force: true
       register: azure_vhd_upload
-      when: >-
-        not (migration_resume_mode | bool) or
-        (azure_staged_blob_info.blobs | default([])
-         | selectattr('name', 'equalto', azure_disk.blob) | list | length == 0)
-
-    - name: Track the staged VHD blob for cleanup
-      ansible.builtin.set_fact:
-        azure_blob_names: "{{ azure_blob_names + [azure_disk.blob] }}"
 
     - name: Delete an existing image of this name when replacement is enabled
       # Reruns publish the current artifact: the resource ID is derived from

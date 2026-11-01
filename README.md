@@ -248,7 +248,7 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     safety guard.
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
-    entries whose managed images are gone. It supports `--dry-run`,
+    entries whose managed images or snapshots are gone. It supports `--dry-run`,
     `--subscription`, and the same `--force` safety guard.
 
 The migration playbooks are thin target entry points. Shared vSphere
@@ -1211,7 +1211,8 @@ contain the subscription ID, resource group, location, storage account,
 container and blob prefix, the Hyper-V generation, and the boot and ordered
 data-disk snapshot names and resource IDs (older rows recorded data disks as
 managed images; they validate, but only their boot disk can be launched). GCP
-and Azure launch workflows create instances from those images. Unlike a catalog that
+launches from its images; Azure launches from the boot image and data snapshots.
+Unlike a catalog that
 tracks only current state, this one accumulates - AWS never
 retires an AMI behind your back the way, say, an in-place vSphere template
 gets overwritten, so an older record for the same `vm_name` is still a valid,
@@ -1273,7 +1274,7 @@ validated; the readers still tolerate rows written before the current schema.
 
 `playbooks/migrate-azure-vm.yml` (through `bin/migrate-azure-vm.sh` or
 `bin/migrate-azure-dialog.sh`) migrates one vSphere VM into Azure managed
-images:
+images and snapshots:
 
 1. The shared VMware pipeline snapshots the source VM, clones it, and exports
    a validated OVF package; the source VM's firmware (`efi` or `bios`) is
@@ -1306,8 +1307,9 @@ images:
    while its content changes, exactly as GCP does.
 5. Once the run succeeds, the staged VHD blobs are deleted - a managed image
    or snapshot holds its own copy of the disk. A failed run keeps them (and
-   the run directory) so `-e resume_run_id=<id>` can reuse the finished blobs,
-   images, and snapshots and redo only what is left;
+   the run directory) so `-e resume_run_id=<id>` can reuse completed images
+   and snapshots and redo only what is left. Pending disks are uploaded again
+   because an interrupted upload can leave an incomplete page blob;
    `discard_failed_artifacts=true` removes them and this run's images and
    snapshots instead.
 

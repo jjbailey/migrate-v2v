@@ -36,6 +36,12 @@
     index_var: azure_plan_position
     label: "disk {{ item.index }} ({{ 'boot' if azure_plan_position == 0 else 'data' }})"
 
+- name: Track every planned staging blob for cleanup
+  # A resume may skip a completed image or snapshot, but its blob can still
+  # be present from the earlier attempt. Also covers interrupted uploads.
+  ansible.builtin.set_fact:
+    azure_blob_names: "{{ azure_disk_plan | map(attribute='blob') | list }}"
+
 - name: Choose how each disk is converted
   ansible.builtin.set_fact:
     azure_convert_tasks: >-
@@ -120,6 +126,11 @@
         azure_existing_image_names: >-
           {{ azure_rg_images.images | default([]) | selectattr('name', 'defined')
              | map(attribute='name') | intersect(azure_boot_names) }}
+        azure_completed_image_names: >-
+          {{ azure_rg_images.images | default([]) | selectattr('name', 'defined')
+             | selectattr('provisioning_state', 'defined')
+             | selectattr('provisioning_state', 'equalto', 'Succeeded')
+             | map(attribute='name') | intersect(azure_boot_names) }}
         azure_existing_snapshot_names: >-
           {{ azure_rg_snapshots.state | default([]) | selectattr('name', 'defined')
              | map(attribute='name') | intersect(azure_data_names) }}
@@ -135,7 +146,7 @@
       ansible.builtin.set_fact:
         azure_reused_image_names: >-
           {{ azure_reused_image_names
-             + ([azure_disk.resource] if (azure_disk.is_boot and azure_disk.resource in azure_existing_image_names) else []) }}
+             + ([azure_disk.resource] if (azure_disk.is_boot and azure_disk.resource in azure_completed_image_names) else []) }}
         azure_reused_snapshot_names: >-
           {{ azure_reused_snapshot_names
              + ([azure_disk.resource] if (not azure_disk.is_boot and azure_disk.resource in azure_completed_snapshot_names) else []) }}

@@ -137,13 +137,13 @@ uses the same snapshot, manifest, backends, resume, and discard as the
 OpenStack playbook. Only the per-disk output differs: `qemu-img` writes each
 stream as the fixed-format VHD Azure requires
 (`-O vpc -o subformat=fixed,force_size=on`, so the virtual size stays exact),
-which is uploaded as a page blob and registered as a managed image, exactly as
-in `migrate-azure-vm.yml`.
+which is uploaded as a page blob. The boot disk becomes a managed image and
+data disks become managed snapshots, as in `migrate-azure-vm.yml`.
 
 ```text
 nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
   → qemu-img convert -f raw -O vpc (fixed)  disks/disk-N.vhd
-  → page blob in the staging container → managed image
+  → page blob in the staging container → boot image or data snapshot
 ```
 
 ```bash
@@ -158,7 +158,7 @@ plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`; there
 is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest records
 the source firmware, so the image's Hyper-V generation (V1 for BIOS, V2 for
 UEFI) follows the VM as with the OVF method. A discard removes the run's
-snapshot, run directory, staged blobs, and managed images, found by the
+snapshot, run directory, staged blobs, managed image, and data snapshots, found by the
 run-ID-derived names. A fixed VHD is staged at the disk's full virtual size,
 written sparse, so it costs only the used blocks on the controller.
 
