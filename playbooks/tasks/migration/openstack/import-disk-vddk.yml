@@ -78,6 +78,6 @@
       loop:
         - "{{ openstack_staging_dir }}/disk-{{ openstack_disk.index }}.qcow2"
         - "{{ openstack_staging_dir }}/disk-{{ openstack_disk.index }}.qcow2.tmp"
-        - "{{ openstack_vddk_socket_dir }}/disk-{{ openstack_disk.index }}.sock"
+        - "{{ vddk_socket_dir }}/disk-{{ openstack_disk.index }}.sock"
       failed_when: false
 

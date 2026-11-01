@@ -4,6 +4,16 @@
 
 # Stable OpenStack names, persistent paths, and lifecycle state.
 
+# Generated run IDs are nanosecond timestamps. Anything else cannot name an
+# earlier run, and it ends up in the run directory path and resource names.
+- name: Refuse a resume or discard run ID that is not a generated one
+  ansible.builtin.assert:
+    that: (resume_run_id | string) is match('^[0-9]{1,20}$')
+    fail_msg: >-
+      Run ID '{{ resume_run_id }}' is not a generated run ID (digits only).
+      Pass the run ID printed by the earlier run.
+  when: resume_run_id | length > 0
+
 - name: Generate or reuse the OpenStack migration run ID
   ansible.builtin.set_fact:
     migration_run_id: >-

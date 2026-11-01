@@ -1,0 +1,121 @@
+---
+# playbooks/tasks/migration/azure/select-project.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Select one Azure subscription/project from vaults/azure.yml.
+# Supports azure_projects only: Azure never had a flat single-target vault, so
+# there is no legacy mapping to keep accepting.
+#
+# Each azure_projects entry holds a service principal (tenant_id, client_id,
+# client_secret), the subscription_id it works in, and where the migration
+# lands: resource_group, location, storage_account and, optionally,
+# storage_container. Select one with -e azure_target_project=<key-or-sub-id>;
+# a single-entry map is auto-selected.
+#
+# Sets azure_* facts plus azure_module_defaults, the credentials the Azure
+# tasks hand to every azure.azcollection module through module_defaults.
+# Unlike aws_task_env, credentials deliberately do not go through environment:
+# Ansible runs each module under `sh -c 'VAR=... python ...'`, which leaves
+# AZURE_SECRET readable in `ps` for as long as a multi-GB upload takes. As a
+# module parameter the secret travels inside the module payload, and the
+# collection marks it no_log.
+
+- name: Include the Azure vault variables
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/../vaults/azure.yml"
+  no_log: true
+
+- name: Determine whether an Azure target project was explicitly requested
+  ansible.builtin.set_fact:
+    azure_target_project_explicit: "{{ azure_target_project is defined and (azure_target_project | string | trim | length > 0) }}"
+    azure_target_project_requested: "{{ (azure_target_project | string | trim) if azure_target_project is defined else '' }}"
+
+- name: Index Azure projects by stringified key
+  ansible.builtin.set_fact:
+    azure_projects_by_key: "{{ azure_projects_by_key | default({}) | combine({(item.key | string): item.value}) }}"
+  loop: "{{ azure_projects | default({}) | dict2items }}"
+  when: azure_projects is defined
+  no_log: true
+
+- name: Select the requested Azure project
+  ansible.builtin.set_fact:
+    azure_project_config: "{{ item.value }}"
+    azure_target_project_name: "{{ item.key }}"
+  loop: "{{ azure_projects_by_key | default({}) | dict2items }}"
+  when:
+    - azure_target_project_explicit | bool
+    - azure_target_project_name is not defined
+    - azure_target_project_requested in [item.key, (item.value.subscription_id | default('') | string)]
+  no_log: true
+
+- name: Fail when the requested Azure project matches nothing in the Vault
+  ansible.builtin.fail:
+    msg: >-
+      Azure project '{{ azure_target_project_requested }}' matches no vault key
+      or subscription ID in vaults/azure.yml under azure_projects.
+      Available: {{ azure_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
+  when:
+    - azure_target_project_explicit | bool
+    - azure_target_project_name is not defined
+
+- name: Auto-select the only Azure project when no target was requested
+  ansible.builtin.set_fact:
+    azure_project_config: "{{ (azure_projects_by_key | dict2items | first).value }}"
+    azure_target_project_name: "{{ (azure_projects_by_key | dict2items | first).key }}"
+  when:
+    - not (azure_target_project_explicit | bool)
+    - azure_target_project_name is not defined
+    - azure_projects_by_key is defined
+    - azure_projects_by_key | length == 1
+  no_log: true
+
+- name: Fail when no Azure project is selected
+  ansible.builtin.fail:
+    msg: >-
+      No Azure project selected. Pass -e azure_target_project=<name-or-subscription-id>
+      matching a key or subscription ID in azure_projects.
+  when: azure_target_project_name is not defined or (azure_target_project_name | string | length) == 0
+
+- name: Validate the selected Azure project configuration
+  ansible.builtin.assert:
+    that:
+      - azure_project_config is defined
+      - azure_project_config.tenant_id is defined and (azure_project_config.tenant_id | string | trim | length) > 0
+      - azure_project_config.subscription_id is defined and (azure_project_config.subscription_id | string | trim | length) > 0
+      - azure_project_config.client_id is defined and (azure_project_config.client_id | string | trim | length) > 0
+      - azure_project_config.client_secret is defined and (azure_project_config.client_secret | string | trim | length) > 0
+      - azure_project_config.resource_group is defined and (azure_project_config.resource_group | string | trim | length) > 0
+      - azure_project_config.location is defined and (azure_project_config.location | string | trim | length) > 0
+      - azure_project_config.storage_account is defined and (azure_project_config.storage_account | string) is match('^[a-z0-9]{3,24}$')
+    fail_msg: >-
+      The selected Azure project must define tenant_id, subscription_id,
+      client_id, client_secret, resource_group, location, and storage_account
+      (3-24 lowercase letters and digits).
+  no_log: true
+
+- name: Normalize the selected Azure project values
+  ansible.builtin.set_fact:
+    azure_tenant_id: "{{ azure_project_config.tenant_id | string }}"
+    azure_subscription_id: "{{ azure_project_config.subscription_id | string }}"
+    azure_client_id: "{{ azure_project_config.client_id | string }}"
+    azure_client_secret: "{{ azure_project_config.client_secret | string }}"
+    azure_resource_group: "{{ azure_project_config.resource_group | string }}"
+    azure_location: "{{ azure_project_config.location | string }}"
+    azure_storage_account: "{{ azure_project_config.storage_account | string }}"
+    azure_storage_container: "{{ azure_project_config.storage_container | default(azure_storage_container, true) | string }}"
+    azure_target_project_name: "{{ azure_target_project_name | string }}"
+  no_log: true
+
+# With client_id given as a parameter, auth_source 'auto' uses these values
+# and never falls back to ~/.azure/credentials or a logged-in az CLI session,
+# which would silently run the migration as whoever last ran `az login`.
+- name: Build the Azure module credentials for the selected project
+  ansible.builtin.set_fact:
+    azure_module_defaults:
+      auth_source: auto
+      tenant: "{{ azure_tenant_id }}"
+      subscription_id: "{{ azure_subscription_id }}"
+      client_id: "{{ azure_client_id }}"
+      secret: "{{ azure_client_secret }}"
+  no_log: true
+

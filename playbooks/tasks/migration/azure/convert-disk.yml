@@ -1,0 +1,60 @@
+---
+# playbooks/tasks/migration/azure/convert-disk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Start one disk's VMDK-to-VHD conversion in the background and remember its
+# job ID. The caller decides when to collect it, which is what lets a
+# conversion overlap the previous disk's upload.
+#
+# Azure only accepts a fixed-format VHD uploaded as a page blob, whose virtual
+# size is a whole number of MiB. The fixed VHD is written sparse, so it costs
+# only the used blocks on disk, and force_size keeps the exact virtual size
+# instead of qemu-img's CHS rounding. The temporary name plus the final mv
+# means an interrupted run never leaves a short VHD that looks complete.
+#
+# Expects: azure_convert_disk (a planned disk entry from import.yml)
+
+- name: Verify the exported OVF VMDK
+  ansible.builtin.stat:
+    path: "{{ migration_run_dir }}/{{ azure_convert_disk.path }}"
+  register: azure_source_disk_stat
+
+- name: Reject a missing or incomplete OVF VMDK
+  ansible.builtin.assert:
+    that:
+      - azure_source_disk_stat.stat.exists
+      - azure_convert_disk.file_size_bytes is none or
+        azure_source_disk_stat.stat.size == (azure_convert_disk.file_size_bytes | int)
+    fail_msg: >-
+      OVF disk {{ azure_convert_disk.index }} is missing or incomplete; the
+      OVF package or its manifest may be damaged.
+
+- name: Start this VMDK's conversion to a fixed VHD atomically
+  vars:
+    # A list; a string from a bare -e key=value is read as a YAML list when it
+    # looks like one, else split on whitespace.
+    azure_convert_argv: >-
+      {{ azure_convert_args if (azure_convert_args is not string)
+         else ((azure_convert_args | from_yaml) if (azure_convert_args | trim).startswith('[')
+               else azure_convert_args.split()) }}
+  # Every value is shell-quoted: run directories and disk paths come from
+  # operator settings and can hold spaces.
+  ansible.builtin.shell: |
+    set -eu
+    temporary={{ (azure_staging_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.vhd.tmp') | quote }}
+    rm -f "$temporary"
+    {{ qemu_img_bin | quote }} convert {{ azure_convert_argv | map('string') | map('quote') | join(' ') }} \
+      -f vmdk -O vpc -o subformat=fixed,force_size=on \
+      {{ (migration_run_dir ~ '/' ~ azure_convert_disk.path) | quote }} "$temporary"
+    mv -f "$temporary" {{ (azure_staging_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.vhd') | quote }}
+  async: "{{ azure_convert_async_timeout | int }}"
+  poll: 0
+  register: azure_convert_started
+  changed_when: true
+
+- name: Remember this disk's conversion job
+  ansible.builtin.set_fact:
+    azure_convert_jobs: >-
+      {{ azure_convert_jobs
+         | combine({azure_convert_disk.index | string: azure_convert_started.ansible_job_id}) }}
+

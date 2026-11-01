@@ -1,0 +1,19 @@
+---
+# playbooks/tasks/migration/azure/preflight.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Azure credentials and prerequisites.
+
+- name: Select the Azure project for this run
+  ansible.builtin.import_tasks: select-project.yml
+
+- name: Check qemu-img
+  # The only host tool the conversion to Azure's fixed-VHD format needs.
+  ansible.builtin.command:
+    argv:
+      - "{{ qemu_img_bin }}"
+      - --version
+  register: azure_qemu_img_check
+  failed_when: azure_qemu_img_check.rc != 0
+  changed_when: false
+

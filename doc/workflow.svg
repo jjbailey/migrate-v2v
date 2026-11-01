@@ -18,15 +18,15 @@
   </defs>
 
   <text x="90" y="75" class="title">VMware Migration Workflow</text>
-  <text x="90" y="115" class="subtitle">Each target run exports from vSphere, reusing the same task pipeline.</text>
+  <text x="90" y="115" class="subtitle">Each target run snapshots the source and produces native cloud artifacts.</text>
 
   <rect x="90" y="190" width="430" height="470" class="box" fill="#e8f2fa"/>
   <rect x="90" y="190" width="430" height="70" rx="18" fill="#1769aa"/>
   <text x="125" y="235" class="head">VSPHERE SOURCE</text>
   <text x="125" y="325" class="label">Running VM</text>
-  <text x="125" y="372" class="body">Snapshot and clone</text>
+  <text x="125" y="372" class="body">Quiesced snapshot</text>
   <text x="125" y="430" class="label">Source stays online</text>
-  <text x="125" y="477" class="body">Non-disruptive handoff</text>
+  <text x="125" y="477" class="body">Clone only on OVF route</text>
   <text x="125" y="558" class="small">vSphere metadata inputs</text>
   <text x="125" y="598" class="small">Disks and source MACs</text>
 
@@ -36,11 +36,11 @@
   <rect x="665" y="190" width="490" height="70" rx="18" fill="#1769aa"/>
   <text x="700" y="235" class="head">SHARED TASK PIPELINE</text>
   <text x="700" y="325" class="label">Per-target run</text>
-  <text x="700" y="370" class="body">Snapshot, clone, export OVA</text>
+  <text x="700" y="370" class="body">OVF export or direct stream</text>
   <text x="700" y="435" class="label">Inspect</text>
-  <text x="700" y="480" class="body">Manifest + target preparation</text>
+  <text x="700" y="480" class="body">Disk manifest + target prep</text>
   <text x="700" y="545" class="label">Trace</text>
-  <text x="700" y="590" class="body">Run ID + disk manifest</text>
+  <text x="700" y="590" class="body">Run ID + catalog record</text>
 
   <path d="M1155 425 H1310" class="arrow"/>
 
@@ -49,24 +49,31 @@
   <text x="1345" y="170" class="head">SELECTED NATIVE CLOUD LANDING</text>
   <text x="1345" y="245" class="subtitle">Destination logic stays at the boundary.</text>
 
-  <rect x="1360" y="305" width="270" height="285" class="target" fill="#ffffff"/>
-  <text x="1400" y="370" class="label">AWS</text>
-  <text x="1400" y="430" class="body">S3 → AMI</text>
-  <text x="1400" y="480" class="small">Import Image</text>
-  <text x="1400" y="520" class="small">Launch Instance</text>
+  <rect x="1340" y="305" width="210" height="285" class="target" fill="#ffffff"/>
+  <text x="1360" y="370" class="label">AWS</text>
+  <text x="1360" y="425" class="body">S3 → AMI</text>
+  <text x="1360" y="475" class="small">Import image</text>
+  <text x="1360" y="515" class="small">Launch EC2</text>
 
-  <rect x="1660" y="305" width="270" height="285" class="target" fill="#ffffff"/>
-  <text x="1700" y="370" class="label">OpenStack</text>
-  <text x="1700" y="430" class="body">QCOW2 → Glance</text>
-  <text x="1700" y="480" class="small">Boot image + volumes</text>
-  <text x="1700" y="520" class="small">Launch server</text>
+  <rect x="1567" y="305" width="210" height="285" class="target" fill="#ffffff"/>
+  <text x="1587" y="370" class="label">Azure</text>
+  <text x="1587" y="425" class="body">Fixed VHD</text>
+  <text x="1587" y="465" class="small">Page blob</text>
+  <text x="1587" y="505" class="small">Image + snapshots</text>
+  <text x="1587" y="545" class="small">Launch VM</text>
 
-  <rect x="1960" y="305" width="270" height="285" class="target" fill="#ffffff"/>
-  <text x="2000" y="370" class="label">Google Cloud</text>
-  <text x="2000" y="430" class="body">GCS → M2VM</text>
-  <text x="2000" y="480" class="small">Compute Images</text>
-  <text x="2000" y="520" class="small">Launch VM</text>
+  <rect x="1794" y="305" width="210" height="285" class="target" fill="#ffffff"/>
+  <text x="1814" y="370" class="label">OpenStack</text>
+  <text x="1814" y="425" class="body">QCOW2</text>
+  <text x="1814" y="475" class="small">Glance + Cinder</text>
+  <text x="1814" y="515" class="small">Launch server</text>
+
+  <rect x="2021" y="305" width="210" height="285" class="target" fill="#ffffff"/>
+  <text x="2041" y="370" class="label">Google Cloud</text>
+  <text x="2041" y="425" class="body">GCS → M2VM</text>
+  <text x="2041" y="475" class="small">Compute images</text>
+  <text x="2041" y="515" class="small">Launch VM</text>
 
   <path d="M1795 245 V290" class="arrow"/>
-  <text x="90" y="815" class="subtitle">Each migration selects one target; all targets reuse the same vSphere task implementation.</text>
+  <text x="90" y="815" class="subtitle">Four targets share source checks; Azure and OpenStack also support datastore-direct streaming.</text>
 </svg>

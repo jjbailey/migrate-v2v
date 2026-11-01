@@ -10,7 +10,7 @@
 # the VM keeps accruing writes in the snapshot delta, which is why the
 # retained-run message names the snapshot.
 
-# The resumable run directory. GCP and OpenStack always derive
+# The resumable run directory. Azure, GCP and OpenStack always derive
 # migration_run_dir and can resume from it, so it is removed on success or
 # explicit discard, and otherwise kept with a resume hint. AWS does not resume:
 # it defines migration_run_dir only when an operator supplies one, which is
@@ -22,7 +22,7 @@
     path: "{{ migration_run_dir }}"
     state: absent
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
   failed_when: false
 
@@ -36,7 +36,7 @@
     path: "{{ artifact_manifest_path }}"
   register: cleanup_manifest_stat
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
 
@@ -83,7 +83,7 @@
       -e discard_run_id={{ migration_run_id }}. Do not leave a retained snapshot
       in place: its delta keeps growing.
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
     - not (migration_nothing_to_resume | default(false) | bool)
@@ -99,7 +99,7 @@
       and {{ migration_run_dir }}, then start a new run. Do not leave the
       snapshot in place: its delta keeps growing until it is removed.
   when:
-    - migration_target in ['gcp', 'openstack']
+    - migration_target in ['azure', 'gcp', 'openstack']
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
     - not (migration_nothing_to_resume | default(false) | bool)
@@ -114,9 +114,9 @@
 
 - name: Remove the NBD socket directory
   ansible.builtin.file:
-    path: "{{ openstack_vddk_socket_dir }}"
+    path: "{{ vddk_socket_dir }}"
     state: absent
-  when: openstack_vddk_socket_dir is defined
+  when: vddk_socket_dir is defined
   register: cleanup_sockets
   failed_when: false
 
@@ -156,7 +156,9 @@
     discard_snapshot_text: >-
       {{ ("snapshot '" ~ snapshot_name ~ "'") if (snapshot_cleanup_required | default(false) | bool)
          else 'no snapshot (none was left)' }}
-    discard_image_names: "{{ openstack_uploaded_image_names | default([]) }}"
+    discard_image_names: >-
+      {{ (openstack_uploaded_image_names | default([]))
+         + (azure_created_image_names | default([])) }}
   ansible.builtin.debug:
     msg: >-
       Discarded run {{ migration_run_id }}: removed {{ migration_run_dir }},

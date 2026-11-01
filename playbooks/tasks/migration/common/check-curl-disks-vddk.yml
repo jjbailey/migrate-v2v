@@ -23,7 +23,7 @@
       {% if migration_resume_mode | default(false) | bool %}
       Run {{ migration_run_id }} recorded '{{ vm_name }}' with snapshots, so its
       disks are not single flat files and the curl backend would read only the
-      stale base files. Resume with -e openstack_vddk_backend=vddk, or discard
+      stale base files. Resume with -e vddk_backend=vddk, or discard
       the run with -e discard_run_id={{ migration_run_id }}.
       {% else %}
       '{{ vm_name }}' already has snapshots, so its disks are not single flat
@@ -50,7 +50,7 @@
     url_password: "{{ vcenter_password }}"
     force_basic_auth: true
     validate_certs: "{{ validate_certs | bool }}"
-    ca_path: "{{ openstack_vddk_ca_bundle if (openstack_vddk_ca_bundle | default('') | length > 0) else omit }}"
+    ca_path: "{{ vddk_ca_bundle if (vddk_ca_bundle | default('') | length > 0) else omit }}"
     status_code: [200]
   register: curl_flat_check
   failed_when: false

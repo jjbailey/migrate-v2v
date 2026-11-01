@@ -64,6 +64,15 @@
          | list }}
   no_log: true
 
+- name: Record the source VM firmware
+  # 'efi' or 'bios'. Azure's Hyper-V generation follows it (Gen2 boots UEFI,
+  # Gen1 boots BIOS), and reading it here - before the snapshot - also records
+  # it in the artifact manifest, so a resume never has to ask the source again.
+  ansible.builtin.set_fact:
+    source_firmware: >-
+      {{ (source_vm_info.stdout | from_json).virtualMachines[0].config.firmware | default('bios') }}
+  no_log: true
+
 - name: Mark the snapshot for best-effort cleanup
   ansible.builtin.set_fact:
     snapshot_cleanup_required: true
@@ -154,5 +163,6 @@
   ansible.builtin.set_fact:
     artifact_manifest: >-
       {{ (ova_manifest_result.stdout | from_json)
-         | combine({'source_mac_addresses': source_mac_addresses | default([])}) }}
+         | combine({'source_mac_addresses': source_mac_addresses | default([]),
+                    'source_firmware': source_firmware | default('bios')}) }}
 

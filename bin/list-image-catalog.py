@@ -20,12 +20,14 @@ def project_values(entry):
         "aws": ("aws_project", "aws_account_id"),
         "openstack": ("openstack_project", "openstack_project_id"),
         "gcp": ("gcp_project",),
+        "azure": ("azure_subscription_id",),
     }.get(platform, ())
     return [str(entry[field]) for field in fields if entry.get(field)]
 
 def region_value(entry):
     field = {"aws": "aws_region", "openstack": "openstack_region",
-             "gcp": "gcp_import_location"}.get(entry.get("target_platform"))
+             "gcp": "gcp_import_location", "azure": "azure_location"}.get(
+                 entry.get("target_platform"))
     return entry.get(field, "") if field else ""
 
 def matches(entry, args):
@@ -64,13 +66,22 @@ def print_images(entry, width):
         for index in range(max(len(names), len(links))):
             print_field(f"Disk {index + 1} name", names[index] if index < len(names) else None, width)
             print_field(f"Disk {index + 1} URL", links[index] if index < len(links) else None, width)
+    elif platform == "azure":
+        print_field("Boot image", entry.get("azure_boot_image_name"), width)
+        print_field("Boot image ID", entry.get("azure_boot_image_id"), width)
+        # Data disks are snapshots; older rows recorded them as images.
+        names = entry.get("azure_data_snapshot_names", entry.get("azure_data_image_names")) or []
+        ids = entry.get("azure_data_snapshot_ids", entry.get("azure_data_image_ids")) or []
+        for index in range(max(len(names), len(ids))):
+            print_field(f"Disk {index + 1} name", names[index] if index < len(names) else None, width)
+            print_field(f"Disk {index + 1} ID", ids[index] if index < len(ids) else None, width)
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG,
                         help="catalog JSON file (default: repository's catalogs/migration-catalog.json)")
     parser.add_argument("--provider", "--platform", dest="provider",
-                        choices=("aws", "gcp", "openstack"), help="filter by target platform")
+                        choices=("aws", "gcp", "openstack", "azure"), help="filter by target platform")
     parser.add_argument("--vm-name", help="filter by exact source VM name")
     parser.add_argument("--project", help="filter by project name/key/ID or AWS account ID")
     parser.add_argument("--region", help="filter by exact region (GCP: import location); excludes unrecorded regions")
@@ -85,7 +96,9 @@ def main(argv=None):
             raise ValueError("every catalog migration must be an object")
         for entry in entries:
             for field in ("openstack_image_ids", "openstack_image_names", "gcp_data_image_names",
-                          "gcp_data_image_selflinks"):
+                          "gcp_data_image_selflinks", "azure_data_image_names",
+                          "azure_data_image_ids", "azure_data_snapshot_names",
+                          "azure_data_snapshot_ids"):
                 value = entry.get(field)
                 if value is not None and (not isinstance(value, list)
                                           or any(not isinstance(item, str) for item in value)):

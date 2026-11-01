@@ -1,0 +1,14 @@
+---
+# playbooks/tasks/migration/azure/preflight-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Azure credentials and prerequisites for the datastore-direct path: the
+# checks in preflight.yml plus the shared nbdkit and disk-backend checks in
+# common/select-backend-vddk.yml.
+
+- name: Run the Azure preflight checks
+  ansible.builtin.import_tasks: preflight.yml
+
+- name: Check nbdkit and choose the disk backend
+  ansible.builtin.import_tasks: ../common/select-backend-vddk.yml
+

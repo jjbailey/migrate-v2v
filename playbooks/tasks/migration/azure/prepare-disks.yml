@@ -1,0 +1,69 @@
+---
+# playbooks/tasks/migration/azure/prepare-disks.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Settle the shared manifest, verify the OVF disk files, and check the
+# constraints Azure puts on a VHD before anything is converted or uploaded.
+# Each disk's VMDK is verified again by convert-disk.yml immediately before
+# its conversion. The datastore-direct method (export_format datastore) has
+# no local VMDKs; it streams each disk from the source VM instead.
+
+- name: Settle the artifact manifest
+  ansible.builtin.import_tasks: ../common/load-manifest.yml
+
+- name: Create the Azure conversion staging directory
+  ansible.builtin.file:
+    path: "{{ azure_staging_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Verify exported OVF VMDK sizes
+  ansible.builtin.stat:
+    path: "{{ migration_run_dir }}/{{ item.path }}"
+  register: azure_source_disk_stats
+  loop: "{{ artifact_manifest.disks }}"
+  loop_control:
+    label: "disk {{ item.index }}"
+  when: export_format != 'datastore'
+
+- name: Reject missing or incomplete OVF VMDKs
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - artifact_manifest.disks[loop_index].file_size_bytes is none or
+        item.stat.size == (artifact_manifest.disks[loop_index].file_size_bytes | int)
+    fail_msg: >-
+      OVF disk {{ artifact_manifest.disks[loop_index].index }} is missing or
+      incomplete; delete the stale artifact and resume again.
+  loop: "{{ azure_source_disk_stats.results }}"
+  loop_control:
+    index_var: loop_index
+    label: "disk {{ artifact_manifest.disks[loop_index].index }}"
+  when: export_format != 'datastore'
+
+- name: Reject a virtual size Azure cannot image
+  # Azure rejects a VHD whose virtual size is not a whole number of MiB, and
+  # only at image-creation time, after the whole disk has been uploaded. The
+  # manifest's capacity is the size qemu-img preserves (force_size), so this
+  # catches a source disk Azure can never accept before anything is sent.
+  ansible.builtin.assert:
+    that: (item.capacity_bytes | int) % 1048576 == 0
+    fail_msg: >-
+      Disk {{ item.index }} has a virtual size of {{ item.capacity_bytes }}
+      bytes, which is not a multiple of 1 MiB. Azure cannot create an image
+      from it; resize the source disk to a whole number of MiB first.
+  loop: "{{ artifact_manifest.disks }}"
+  loop_control:
+    label: "disk {{ item.index }}"
+
+- name: Resolve the image's Hyper-V generation
+  # Gen2 VMs boot UEFI and Gen1 VMs boot BIOS, so the generation follows the
+  # source VM's firmware rather than the provider. An explicit
+  # azure_hyper_v_generation always wins; otherwise the firmware recorded in
+  # the artifact manifest decides, which also covers a resume, where the
+  # source VM is not consulted again.
+  ansible.builtin.set_fact:
+    azure_hyper_v_generation_effective: >-
+      {{ azure_hyper_v_generation if (azure_hyper_v_generation | length > 0)
+         else ('V2' if (artifact_manifest.source_firmware | default('bios')) == 'efi' else 'V1') }}
+

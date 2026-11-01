@@ -152,8 +152,7 @@ print("\n".join(out))' "$facts" 2> /dev/null
 
 # Project first: it decides where the instance and its volumes land.
 PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" vaults/openstack.yml openstack_projects "${OS_PROJECT_NAME:-}") || abort
-VM_NAME=$(choose_vm openstack OpenStack) || abort
-require_nonempty "$VM_NAME" "The VM name cannot be empty."
+VM_NAME=$(choose_vm_required openstack OpenStack) || abort
 
 FIXED_IPS_JSON=""
 addr_mode=$(radio "How should the new instance get its IP addresses?" \
@@ -254,6 +253,7 @@ case "$sg_mode" in
                     break
                 }
                 if yesno 'No security groups selected.\n\nProceed with none (cloud default policy applies)?' no ; then
+                    SGS_JSON='[]'
                     break
                 fi
             done
@@ -262,8 +262,8 @@ case "$sg_mode" in
     names)
         while : ; do
             sgs=$(input "Security group names, comma-separated:" "default") || abort
-            [ -n "$sgs" ] && {
                 SGS_JSON=$(json_list "$sgs")
+                [ "$SGS_JSON" != '[]' ] && {
                 break
             }
             bad "Enter at least one security group name." || true
@@ -272,12 +272,15 @@ case "$sg_mode" in
     ids)
         while : ; do
             sgids=$(input "Security group UUIDs, comma-separated:" "") || abort
-            [ -n "$sgids" ] && {
-                SG_IDS_JSON=$(json_list "$sgids")
+            SG_IDS_JSON=$(json_list "$sgids")
+            [ "$SG_IDS_JSON" != '[]' ] && {
                 break
             }
             bad "Enter at least one security group UUID." || true
         done
+        ;;
+    none)
+        SGS_JSON='[]'
         ;;
 esac
 
@@ -329,24 +332,18 @@ say "Launch summary for ${VM_NAME}
   SSH key....: ${KEY_NAME}
   Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 18
 
-file=$(mktemp /tmp/launch-openstack.XXXXXX)
+file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 {
     printf '#!/bin/bash\n'
-    printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
-    printf 'export OS_FLAVOR=%s\n' "$(quote "$FLAVOR")"
-    printf 'export OS_KEY_NAME=%s\n' "$(quote "$KEY_NAME")"
-    printf 'export OS_NETWORK=%s\n' "$(quote "$NETWORK")"
-    [ -n "$SGS_JSON" ] && printf 'export OS_SECURITY_GROUPS_JSON=%s\n' "$(quote "$SGS_JSON")"
-    [ -n "$SG_IDS_JSON" ] && printf 'export OS_SECURITY_GROUP_IDS_JSON=%s\n' "$(quote "$SG_IDS_JSON")"
-    [ -n "$NETWORK_ID" ] && printf 'export OS_NETWORK_ID=%s\n' "$(quote "$NETWORK_ID")"
-    printf 'export OS_PRESERVE_MAC=%s\n' "$(quote "$PRESERVE_MAC")"
-    [ -n "$MAC_JSON" ] && printf 'export OS_MAC_ADDRESSES_JSON=%s\n' "$(quote "$MAC_JSON")"
-    [ -n "$FIXED_IPS_JSON" ] && printf 'export OS_FIXED_IPS_JSON=%s\n' "$(quote "$FIXED_IPS_JSON")"
-    printf 'export OS_AUTO_IP=%s\n' "$(quote "$AUTO_IP")"
-    printf 'export OS_CONFIG_DRIVE=%s\n' "$(quote "$CONFIG_DRIVE")"
-    printf 'export OS_DHCP_USER_DATA=%s\n' "$(quote "$DHCP_USER_DATA")"
-    [ -n "$USER_DATA_FILE" ] && printf 'export OS_USER_DATA_FILE=%s\n' "$(quote "$USER_DATA_FILE")"
-    [ -n "$PROJECT" ] && printf 'export OS_PROJECT_NAME=%s\n' "$(quote "$PROJECT")"
+    for pair in "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
+        "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=" \
+        "OS_SECURITY_GROUPS_JSON=$SGS_JSON" "OS_SECURITY_GROUP_IDS_JSON=$SG_IDS_JSON" \
+        "OS_PRESERVE_MAC=$PRESERVE_MAC" "OS_MAC_ADDRESSES_JSON=$MAC_JSON" \
+        "OS_FIXED_IPS_JSON=$FIXED_IPS_JSON" "OS_AUTO_IP=$AUTO_IP" \
+        "OS_CONFIG_DRIVE=$CONFIG_DRIVE" "OS_DHCP_USER_DATA=$DHCP_USER_DATA" \
+        "OS_USER_DATA=" "OS_USER_DATA_FILE=$USER_DATA_FILE" "OS_PROJECT_NAME=$PROJECT" ; do
+        printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
+    done
     printf '%s\n' "$(quote "$script_dir/launch-openstack-instance.sh")"
 } > "$file"
 chmod +x "$file"

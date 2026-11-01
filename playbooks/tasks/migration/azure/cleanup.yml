@@ -1,0 +1,81 @@
+---
+# playbooks/tasks/migration/azure/cleanup.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Best-effort cleanup for Azure-owned artifacts. A managed image or snapshot
+# holds its own copy of the disk, so the staged VHD blobs are removed once the
+# run succeeded (or was explicitly discarded); a failed run keeps them so a
+# resume can reuse them, like the GCS staging objects. Images and snapshots
+# are only removed on an explicit discard of a failed run.
+
+- name: Clean up Azure resources
+  module_defaults:
+    group/azure.azcollection.all: "{{ azure_module_defaults | default({}) }}"
+  block:
+    - name: Remove staged VHD blobs from Azure Blob Storage
+      azure.azcollection.azure_rm_storageblob:
+        resource_group: "{{ azure_resource_group | default('') }}"
+        storage_account_name: "{{ azure_storage_account | default('') }}"
+        container: "{{ azure_storage_container | default('') }}"
+        blob: "{{ item }}"
+        state: absent
+      loop: "{{ azure_blob_names | default([]) }}"
+      loop_control:
+        label: "{{ item }}"
+      when: (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
+      register: azure_blob_remove
+      failed_when: false
+
+    - name: Report staged VHD blobs that could not be removed
+      ansible.builtin.debug:
+        msg: >-
+          Removing blob {{ item.item }} did not succeed; check container
+          {{ azure_storage_container }} and remove it manually. Detail:
+          {{ item.msg | default('(none reported)') }}
+      loop: "{{ azure_blob_remove.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
+        - item.failed | default(false) | bool or (item.msg | default('') | length > 0)
+
+    - name: Report retained VHD blobs for a failed run
+      ansible.builtin.debug:
+        msg: >-
+          Migration did not complete. Staged blobs were retained in container
+          {{ azure_storage_container }} under {{ azure_blob_prefix | default('') }}
+          for debugging; a resume re-uploads or reuses them.
+      when:
+        - azure_blob_names | default([]) | length > 0
+        - not (migration_succeeded | default(false) | bool)
+        - not (discard_failed_artifacts | bool)
+
+    # A resumed run reuses images and snapshots an earlier attempt created
+    # (azure_reused_*_names); a discard removes those along with this
+    # attempt's.
+    - name: Remove managed images created by this failed run
+      azure.azcollection.azure_rm_image:
+        resource_group: "{{ azure_resource_group | default('') }}"
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ (azure_created_image_names | default([])) | union(azure_reused_image_names | default([])) }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - not (migration_succeeded | default(false) | bool)
+        - discard_failed_artifacts | bool
+      failed_when: false
+
+    - name: Remove data snapshots created by this failed run
+      azure.azcollection.azure_rm_snapshot:
+        resource_group: "{{ azure_resource_group | default('') }}"
+        name: "{{ item }}"
+        state: absent
+      loop: "{{ (azure_created_snapshot_names | default([])) | union(azure_reused_snapshot_names | default([])) }}"
+      loop_control:
+        label: "{{ item }}"
+      when:
+        - not (migration_succeeded | default(false) | bool)
+        - discard_failed_artifacts | bool
+      failed_when: false
+

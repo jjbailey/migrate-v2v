@@ -23,7 +23,7 @@ GCP_NO_ADDRESS=${GCP_NO_ADDRESS:-false}
 # OpenStack keypair is a 'cloudinit:' entry in the project's ssh-keys metadata,
 # which every instance inherits, so no per-launch key argument is needed.
 # GCP_SSH_KEY_FILE injects an additional key as instance metadata for one
-# launch; it adds to the project keys rather than replacing them.
+# launch ; it adds to the project keys rather than replacing them.
 GCP_SSH_USER=${GCP_SSH_USER:-cloudinit}
 GCP_SSH_KEY_FILE=${GCP_SSH_KEY_FILE:-}
 

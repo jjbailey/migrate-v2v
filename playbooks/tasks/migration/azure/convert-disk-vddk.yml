@@ -1,0 +1,132 @@
+---
+# playbooks/tasks/migration/azure/convert-disk-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Start one disk's stream-and-convert in the background and remember its job
+# ID. The datastore-direct counterpart of convert-disk.yml: instead of reading
+# an exported VMDK, nbdkit serves the source VM's frozen disk over a Unix socket
+# and qemu-img converts that raw stream to the fixed VHD Azure requires (see
+# convert-disk.yml for the format). The caller decides when to collect the job,
+# which is what lets a conversion overlap the previous disk's upload.
+#
+# A copy of openstack/convert-disk-vddk.yml, which documents the backends and
+# the nbdkit lifecycle; only the output format and the Azure names differ.
+#
+# Expects: azure_convert_disk (a planned disk entry from import.yml), the
+# vCenter facts and datacenter (plus source_vm_moref and source_snapshot_moref
+# for vddk), or vddk_local=true (a local file, for tests).
+
+- name: Write the vCenter password where nbdkit can read it without argv
+  # Per disk, and removed by that disk's own conversion shell when it ends.
+  ansible.builtin.copy:
+    content: "{{ vcenter_password }}"
+    dest: "{{ vddk_socket_dir }}/password-{{ azure_convert_disk.index }}"
+    mode: "0600"
+  when: not (vddk_local | bool)
+  no_log: true
+
+- name: Configure two NFC sessions per disk for OpenVDDK
+  # OpenVDDK-specific; see openstack/convert-disk-vddk.yml.
+  ansible.builtin.copy:
+    content: |
+      OpenVDDK.nbd.sessions = "2"
+    dest: "{{ vddk_socket_dir }}/config-{{ azure_convert_disk.index }}"
+    mode: "0600"
+  when:
+    - not (vddk_local | bool)
+    - vddk_backend_effective == 'vddk'
+
+- name: Assemble the nbdkit plugin and arguments for this disk
+  vars:
+    # "[datastore] dir/disk.vmdk" is served as dir/disk-flat.vmdk.
+    azure_vddk_datastore: "{{ azure_convert_disk.path | regex_replace('^\\[([^\\]]+)\\].*$', '\\1') }}"
+    azure_vddk_relative: "{{ azure_convert_disk.path | regex_replace('^\\[[^\\]]+\\]\\s*(.*)\\.vmdk$', '\\1') }}-flat.vmdk"
+    azure_vddk_password_arg: "password=+{{ vddk_socket_dir }}/password-{{ azure_convert_disk.index }}"
+    azure_vddk_args_vddk: >-
+      {{ (['libdir=' ~ vddk_libdir] if (vddk_libdir | length > 0) else [])
+         + ['config=' ~ vddk_socket_dir ~ '/config-' ~ azure_convert_disk.index,
+            'server=' ~ vcenter_hostname,
+            'user=' ~ vcenter_username,
+            azure_vddk_password_arg,
+            'thumbprint=' ~ vddk_thumbprint,
+            'vm=moref=' ~ (source_vm_moref | default('')),
+            'snapshot=' ~ (source_snapshot_moref | default('')),
+            'transports=' ~ vddk_transports,
+            'file=' ~ azure_convert_disk.path] }}
+    azure_vddk_args_curl: >-
+      {{ ['url=https://' ~ vcenter_hostname ~ '/folder/' ~ (azure_vddk_relative | urlencode)
+            ~ '?dcPath=' ~ (datacenter | urlencode) ~ '&dsName=' ~ (azure_vddk_datastore | urlencode),
+          'user=' ~ vcenter_username,
+          azure_vddk_password_arg,
+          'sslverify=' ~ ('true' if (validate_certs | bool) else 'false')]
+         + (['cainfo=' ~ vddk_ca_bundle] if (vddk_ca_bundle | length > 0) else []) }}
+  ansible.builtin.set_fact:
+    azure_vddk_plugin: >-
+      {{ 'file' if (vddk_local | bool) else vddk_backend_effective }}
+    azure_vddk_plugin_args: >-
+      {{ ['file=' ~ azure_convert_disk.path] if (vddk_local | bool)
+         else (azure_vddk_args_vddk if vddk_backend_effective == 'vddk'
+               else azure_vddk_args_curl) }}
+  no_log: true
+
+- name: Start this disk's stream and fixed-VHD conversion atomically
+  # nbdkit -f -r in the background of this shell, its log kept in the run
+  # directory and stopped by the EXIT trap, exactly as in
+  # openstack/convert-disk-vddk.yml. The fixed VHD is written sparse and
+  # force_size keeps the exact virtual size, as in convert-disk.yml; the
+  # temporary name plus the final mv means an interrupted run never leaves a
+  # short VHD that looks complete.
+  vars:
+    # A list; a string from a bare -e key=value is read as a YAML list when it
+    # looks like one, else split on whitespace.
+    azure_convert_argv: >-
+      {{ azure_convert_args if (azure_convert_args is not string)
+         else ((azure_convert_args | from_yaml) if (azure_convert_args | trim).startswith('[')
+               else azure_convert_args.split()) }}
+  # Every value is shell-quoted: run directories and disk paths come from
+  # operator settings and can hold spaces.
+  ansible.builtin.shell: |
+    set -eu
+    socket={{ (vddk_socket_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.sock') | quote }}
+    pidfile={{ (vddk_socket_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.pid') | quote }}
+    password={{ (vddk_socket_dir ~ '/password-' ~ azure_convert_disk.index) | quote }}
+    log={{ (migration_run_dir ~ '/nbdkit-disk-' ~ azure_convert_disk.index ~ '.log') | quote }}
+    temporary={{ (azure_staging_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.vhd.tmp') | quote }}
+    rm -f "$socket" "$pidfile" "$temporary"
+    {{ vddk_nbdkit_bin | quote }} -f -r -U "$socket" --pidfile "$pidfile" \
+      {{ azure_vddk_plugin | quote }} {{ azure_vddk_plugin_args | map('quote') | join(' ') }} \
+      2> "$log" &
+    nbdkit_pid=$!
+    trap 'kill "$nbdkit_pid" 2> /dev/null || true; rm -f "$password" || true' EXIT
+    waited=0
+    until [ -s "$pidfile" ] ; do
+      if ! kill -0 "$nbdkit_pid" 2> /dev/null ; then
+        echo "nbdkit exited before serving $socket: $(cat "$log")" >&2
+        exit 1
+      fi
+      if [ "$waited" -ge 600 ] ; then
+        echo "nbdkit did not serve $socket within 60s: $(cat "$log")" >&2
+        exit 1
+      fi
+      sleep 0.1
+      waited=$((waited + 1))
+    done
+    if ! {{ qemu_img_bin | quote }} convert {{ azure_convert_argv | map('string') | map('quote') | join(' ') }} \
+      -f raw -O vpc -o subformat=fixed,force_size=on \
+      "nbd+unix:///?socket=$socket" "$temporary" ; then
+      echo "nbdkit log ($log): $(cat "$log")" >&2
+      exit 1
+    fi
+    mv -f "$temporary" {{ (azure_staging_dir ~ '/disk-' ~ azure_convert_disk.index ~ '.vhd') | quote }}
+  async: "{{ azure_convert_async_timeout | int }}"
+  poll: 0
+  register: azure_convert_started
+  changed_when: true
+  no_log: true
+
+- name: Remember this disk's conversion job
+  ansible.builtin.set_fact:
+    azure_convert_jobs: >-
+      {{ azure_convert_jobs
+         | combine({azure_convert_disk.index | string: azure_convert_started.ansible_job_id}) }}
+
