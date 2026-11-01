@@ -141,8 +141,12 @@
     network_interface_names:
       - "{{ azure_vm_name }}-nic"
     data_disks: "{{ azure_data_disk_attachments | default([]) }}"
+    # Managed boot diagnostics storage. Without type: managed the module
+    # creates a randomly named <vm name>NNNN storage account per VM, with
+    # none of the settings this project requires.
     boot_diagnostics:
       enabled: true
+      type: managed
     tags:
       MigratedFrom: "{{ vm_name }}"
       SourceMigrationId: "{{ azure_migration_id_effective | default('manual', true) }}"
