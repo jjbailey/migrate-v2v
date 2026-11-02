@@ -68,6 +68,7 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
   `pyVmomi`, `openstacksdk`, `google-auth`, `requests`, `PyYAML`, and - for
   Azure - the `azure.azcollection` SDK requirements listed in its own
   `requirements.txt` (see the note in [requirements.yml](requirements.yml)).
+  [requirements.txt](requirements.txt) lists the rest with minimum versions.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
 - For the datastore-direct OpenStack migration
@@ -153,6 +154,7 @@ Install the required host tools, then verify them:
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
+python3 -m pip install -r requirements.txt   # into python3 on PATH and Ansible's Python
 ansible --version
 govc version
 ovftool --version
@@ -930,8 +932,8 @@ Common failures:
 - Azure: "not a multiple of 1 MiB": Azure cannot image a disk whose virtual
   size is not a whole number of MiB. Resize the source disk to a whole MiB
   multiple and migrate again.
-- Azure: "Storage account ... is in <region>, but images are created in
-  <region>": point the vault's `storage_account` at an account in the same
+- Azure: "Storage account ... is in `<region>`, but images are created in
+  `<region>`": point the vault's `storage_account` at an account in the same
   region as `location`, because Azure only creates an image from a VHD staged
   in the image's region.
 - Azure: an imported UEFI guest will not boot from its Gen1 image: the source
@@ -960,6 +962,13 @@ The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 works too.
 
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.
+
+The control host is assumed to be single-user, or used only by trusted
+admins. `no_log` keeps credentials out of Ansible output, but some tasks
+still expose them to `ps` while they run: the vCenter password in the
+`ovftool` export URL and in `GOVC_PASSWORD` for `govc` calls, and the AWS
+keys in the AWS plays' `environment:`. On a shared host, mount `/proc` with
+`hidepid=2`.
 
 - **`vaults/vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
   a vCenter entry: `vcenter_hostname`, `vcenter_username`, `vcenter_password`,

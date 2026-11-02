@@ -276,6 +276,38 @@ else
     fail "installed Ansible collections do not match requirements.yml"
 fi
 
+echo "== Python requirements =="
+# Playbooks run bin/ scripts with the python3 on PATH, while collection modules
+# run under the Python that runs ansible-playbook; both need requirements.txt.
+ansible_python="$(ansible-playbook --version 2>/dev/null | sed -n 's/^ *python version = .*(\(\/[^)]*\))$/\1/p')"
+for python_bin in python3 "${ansible_python:-python3}" ; do
+    if "$python_bin" - << 'PYTHON' ; then
+from importlib.metadata import PackageNotFoundError, version
+
+from packaging.requirements import Requirement
+
+problems = []
+for line in open("requirements.txt", encoding="utf-8"):
+    line = line.split("#", 1)[0].strip()
+    if not line:
+        continue
+    requirement = Requirement(line)
+    try:
+        installed = version(requirement.name)
+    except PackageNotFoundError:
+        problems.append(f"{requirement.name}: not installed")
+        continue
+    if not requirement.specifier.contains(installed, prereleases=True):
+        problems.append(f"{requirement.name}: {installed} does not satisfy {requirement.specifier}")
+if problems:
+    raise SystemExit("; ".join(problems))
+PYTHON
+        echo "  ok   $python_bin satisfies requirements.txt"
+    else
+        fail "$python_bin does not satisfy requirements.txt"
+    fi
+done
+
 if [ "$failures" -ne 0 ] ; then
     echo "Validation FAILED: $failures problem(s)." >&2
     exit 1

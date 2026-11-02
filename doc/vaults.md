@@ -197,7 +197,7 @@ staging storage account, and the storage account VHDs are staged in (3-24
 lowercase letters and digits; created when missing, used as-is when it
 exists). Select a subscription with `-e
 azure_target_project=<vault-key-or-subscription-id>`; a single-entry map is
-auto-selected. This is the same file and schema `dib7-bcc` uses, so the two
+auto-selected. This is the same file and schema `dib7` uses, so the two
 repositories can share one vault.
 
 Credentials reach the `azure.azcollection` modules through `module_defaults`,
