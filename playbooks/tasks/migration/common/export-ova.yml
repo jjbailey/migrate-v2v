@@ -29,6 +29,8 @@
     # The password belongs in the URL, not on stdin: ovftool only reads a
     # password interactively, and with a pipe on fd 0 it spins forever
     # retrying the "turn echo off" ioctl instead of ever calling read().
+    # no_log keeps it out of Ansible output, not out of ps: local users can
+    # read it for the whole export (see "Secrets" in README.md).
     vcenter_export_url: >-
       vi://{{ vcenter_username | urlencode | replace('/', '%2F') }}:{{
       vcenter_password | urlencode | replace('/', '%2F') }}@{{ vcenter_hostname

@@ -1,0 +1,14 @@
+# Python dependencies of the bin/ scripts and the collections' controller-side
+# modules. Install them into both interpreters that use them: the python3 on
+# PATH (playbooks run bin/ scripts with it) and the Python that runs
+# ansible-playbook. tests/validate.sh checks both. The Azure SDK stays in the
+# Azure collection's own requirements.txt and is installed separately; see
+# requirements.yml.
+PyYAML>=6.0
+requests>=2.18.4
+pyvmomi>=8.0
+boto3>=1.34.0
+botocore>=1.34.0
+openstacksdk>=1.0.0
+keystoneauth1>=5.0
+google-auth>=2.0
