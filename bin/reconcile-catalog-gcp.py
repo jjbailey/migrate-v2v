@@ -6,13 +6,16 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
+from vault_common import environment_source, match_project, vault_projects
 
 import google.auth
 import google.auth.exceptions
 from google.auth.transport.requests import AuthorizedSession
+from google.oauth2 import service_account
 
 COMPUTE_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 COMPUTE_API = "https://compute.googleapis.com/compute/v1/projects"
@@ -98,6 +101,47 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
 def candidate_count(migration_catalog, deployment_catalog, project_id):
     return sum(1 for entry in migration_catalog["migrations"] if entry.get("target_platform") == "gcp" and entry.get("status") == "completed" and entry.get("gcp_project") == project_id) + sum(1 for entry in deployment_catalog["deployments"] if entry.get("target_platform") == "gcp" and entry.get("status") != "retired" and entry.get("gcp_project") == project_id)
 
+def credentials_for(project_id, load_projects, vault, credentials_file=None):
+    """--credentials-file, then GOOGLE_APPLICATION_CREDENTIALS, then the
+    vault, then the remaining Google defaults (gcloud login, metadata server).
+
+    The vault entry is matched by key, gcp_project, or project_id, as
+    select-project.yml does, and its service_account_key authenticates.
+    load_projects is only called when neither the flag nor the environment
+    decided.
+
+    Returns (credentials, the project the credentials carry, source).
+    """
+    credential_args = {"scopes": [COMPUTE_SCOPE]}
+    if credentials_file:
+        credentials, credential_project = google.auth.load_credentials_from_file(
+            credentials_file, **credential_args)
+        credential_project = credential_project or getattr(credentials, "project_id", None)
+        return credentials, credential_project, f"file {credentials_file}"
+    if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip():
+        credentials, _ = google.auth.default(**credential_args)
+        return (credentials, getattr(credentials, "project_id", None),
+                environment_source("GOOGLE_APPLICATION_CREDENTIALS", vault))
+    key, entry = match_project(load_projects(), project_id, ("gcp_project", "project_id"))
+    if entry is not None:
+        raw = entry.get("service_account_key", "")
+        try:
+            info = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError(
+                f"vault entry '{key}' service_account_key is not valid JSON: {error}")
+        credentials = service_account.Credentials.from_service_account_info(
+            info, **credential_args)
+        return credentials, info.get("project_id"), f"vault entry '{key}'"
+    # google.auth.default() reports the ambient default project (gcloud
+    # config, GOOGLE_CLOUD_PROJECT), which says nothing about where the
+    # credentials live or what they can reach. Only a project the
+    # credentials themselves carry, as a service account does, is a
+    # reason to refuse.
+    credentials, _ = google.auth.default(**credential_args)
+    return (credentials, getattr(credentials, "project_id", None),
+            "Google application default credentials")
+
 def main():
     repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -110,7 +154,11 @@ def main():
         help="GCP project; inferred when the catalogs contain one project",
     )
     parser.add_argument("--credentials-file", type=Path,
-                        help="service-account JSON; otherwise use standard Google credentials")
+                        help="service-account JSON, instead of the vault")
+    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/gcp.yml",
+                        help="GCP vault for the service account when "
+                             "GOOGLE_APPLICATION_CREDENTIALS is unset "
+                             "(default: vaults/gcp.yml)")
     parser.add_argument("--dry-run", action="store_true",
                         help="report stale entries without writing either catalog")
     parser.add_argument("--force", action="store_true",
@@ -129,26 +177,16 @@ def main():
             "catalog contains multiple GCP projects; provide --project-id"
         )
     validate_scope(migration_catalog, deployment_catalog, project_id)
-    credential_args = {"scopes": [COMPUTE_SCOPE]}
-    if args.credentials_file:
-        credentials, credential_project = google.auth.load_credentials_from_file(
-            args.credentials_file, **credential_args)
-        credential_project = credential_project or getattr(credentials, "project_id", None)
-    else:
-        # google.auth.default() reports the ambient default project (gcloud
-        # config, GOOGLE_CLOUD_PROJECT), which says nothing about where the
-        # credentials live or what they can reach. Only a project the
-        # credentials themselves carry, as a service account does, is a
-        # reason to refuse.
-        credentials, _ = google.auth.default(**credential_args)
-        credential_project = getattr(credentials, "project_id", None)
+    credentials, credential_project, source = credentials_for(
+        project_id, lambda: vault_projects(args.vault, "gcp_projects"),
+        args.vault, args.credentials_file)
     if credential_project and str(credential_project) != str(project_id):
         raise ValueError(
             f"resolved GCP credentials belong to project {credential_project}, "
             f"not --project-id {project_id}")
     session = AuthorizedSession(credentials)
 
-    print(f"GCP scope: project_id={project_id}")
+    print(f"GCP scope: project_id={project_id} (credentials: {source})")
     stale_migrations, stale_deployments = find_missing_resources(
         session, project_id, migration_catalog, deployment_catalog)
     retired_migrations = [entry for entry in migration_catalog["migrations"] if entry.get("target_platform") == "gcp" and entry.get("status") == "retired" and entry.get("gcp_project") == project_id]

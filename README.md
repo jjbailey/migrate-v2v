@@ -247,7 +247,9 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     whose AMIs are gone, and active AWS deployment entries whose EC2 instances
     are gone or terminated. It supports `--dry-run`, region/profile selection,
     `--project-id`/`--account-id`, account verification, and the same `--force`
-    safety guard.
+    safety guard. Exported AWS credentials win; otherwise `vaults/aws.yml` is
+    used (see
+    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools)).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
     entries whose managed images or snapshots are gone. It supports `--dry-run`,
@@ -1342,15 +1344,14 @@ marked `retired`; it never deletes cloud resources. It scopes one subscription
 per run (inferred when the catalog holds one, else `--subscription`, alias
 `--project`), verifies each row's image ID belongs to that subscription, and
 refuses unusually large removals unless `--force` is supplied. Use `--dry-run`
-first. Unlike the playbooks, it does not read the vault; export the service
-principal as `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
-`AZURE_SECRET` (or `AZURE_CLIENT_SECRET`), or rely on `DefaultAzureCredential`
-(`az login`, managed identity):
+first. Exported `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
+`AZURE_SECRET` (or `AZURE_CLIENT_SECRET`) are used when set. Otherwise it uses
+the service principal from `vaults/azure.yml`, matched by subscription ID
+(`--project` also accepts a vault key; `--vault` names another file), and
+only then `DefaultAzureCredential` (`az login`, managed identity), so a
+personal login blocked by Entra ID security defaults does not matter:
 
 ```bash
-export AZURE_TENANT=<tenant-id>
-export AZURE_CLIENT_ID=<client-id>
-export AZURE_SECRET=<client-secret>
 ./bin/reconcile-catalog-azure.py --dry-run
 ./bin/reconcile-catalog-azure.py
 ```
@@ -1397,18 +1398,18 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 ## GCP Project Reconciliation
 
 GCP migration and deployment catalog entries are scoped by `gcp_project`.
-When more than one project is present, pass the project ID explicitly and scope
-credentials with `--credentials-file` or standard Google credentials:
+When more than one project is present, pass the project ID explicitly.
+Credentials come from `--credentials-file`, else an exported
+`GOOGLE_APPLICATION_CREDENTIALS`, else the `vaults/gcp.yml` entry whose key,
+`gcp_project`, or `project_id` matches, else the gcloud application-default
+login:
 
 ```bash
-./bin/reconcile-catalog-gcp.py \
-  --project-id my-project-a \
-  --credentials-file /path/to/service-account.json \
-  --dry-run
+./bin/reconcile-catalog-gcp.py --project-id my-project-a --dry-run
 ```
 
-Entries for other projects are left untouched. When no `--credentials-file` is
-given, the ambient default project from Application Default Credentials (gcloud
+Entries for other projects are left untouched. When the credentials come
+from Google's defaults, the ambient default project from Application Default Credentials (gcloud
 config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run is refused only when the
 credentials themselves carry a different project, as a service account key does.
 
@@ -1446,35 +1447,30 @@ rows that are checked.
 One run reconciles one project: `--project-id` accepts a project name or ID
 and is required whenever the
 catalogs hold more than one OpenStack project, and entries for other projects
-are left alone rather than treated as an error. Repeat per project, scoping
-the standard `openstacksdk` environment or `--cloud <name>` auth to each
-project in turn.
+are left alone rather than treated as an error. Repeat per project.
 
-OpenStack authentication comes from the standard `openstacksdk` environment or
-`clouds.yaml` configuration. Unlike the AWS and GCP reconcilers, which find
-`~/.aws` or Application Default Credentials on their own, this script does not
-read the encrypted `vaults/` files and has no default cloud, so it exits with
-"missing required OpenStack environment variable(s)" unless you pick one of:
+OpenStack authentication comes from `--cloud <name>` (a `clouds.yaml`
+entry), else an exported `OS_CLOUD` or `OS_*` RC environment, else the
+`vaults/openstack.yml` entry whose key, `project_name`, or `project_id`
+matches the project in scope (used alone, with nothing filled in from
+`clouds.yaml`). With none of those the run stops and says so:
 
 ```bash
-# 1. Name a clouds.yaml entry (~/.config/openstack/clouds.yaml)
+# Nothing exported: the vault entry for the catalog's project
+./bin/reconcile-catalog-openstack.py --dry-run
+
+# A clouds.yaml entry (~/.config/openstack/clouds.yaml)
 ./bin/reconcile-catalog-openstack.py --cloud my-cloud \
   --project-id my-project-a --region-name US-WEST-OR-1 --dry-run
 
-# 2. Select it for the shell with OS_CLOUD
-export OS_CLOUD=my-cloud
-
-# 3. Source an OpenStack RC file (OS_AUTH_URL, OS_USERNAME, OS_PASSWORD,
-#    OS_PROJECT_NAME or OS_PROJECT_ID, ...) downloaded from the dashboard
+# An RC file overrides the vault for this shell
 source ~/my-project-a-openrc.sh
 ./bin/reconcile-catalog-openstack.py \
   --project-id my-project-a --region-name US-WEST-OR-1 --dry-run
 ```
 
-Each project needs its own `--cloud` entry or RC file, so source or name the one
-matching `--project-id` before every run. `--region-name` defaults to the catalog's region
-for that project; use `--cloud <name>`
-for a named `clouds.yaml` entry and `--project-id` (name or ID) to select the project.
+`--region-name` defaults to the catalog's region for that project, and
+`--project-id` (name or ID) selects the project.
 The authenticated project ID must match `--project-id` (string-compared, so
 either form works), and it must have entries
 in the requested region; other projects' entries are out of scope and kept.

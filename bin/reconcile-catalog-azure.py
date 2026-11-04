@@ -16,6 +16,7 @@ from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.core.tools import parse_resource_id
 
 from catalog_common import read_snapshot, remove_migration_entries
+from vault_common import environment_source, match_project, vault_projects
 
 # A managed image or snapshot resource ID, as azure_rm_image_info and
 # azure_rm_snapshot_info report them.
@@ -28,19 +29,47 @@ RESOURCE_ID_PATTERN = re.compile(
 def credential_from_environment():
     """Prefer the AZURE_* names azure.azcollection reads, then the SDK's own.
 
-    The playbook never exports credentials (see select-project.yml), so an
-    operator reconciling by hand supplies them: AZURE_TENANT or
-    AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_SECRET or
+    AZURE_TENANT or AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_SECRET or
     AZURE_CLIENT_SECRET. EnvironmentCredential spells the tenant and secret
-    differently, so accept either, and fall back to DefaultAzureCredential
-    (az login, managed identity) when neither is set.
+    differently, so accept either. Returns None unless all three are set.
     """
     tenant = os.environ.get("AZURE_TENANT") or os.environ.get("AZURE_TENANT_ID")
     client_id = os.environ.get("AZURE_CLIENT_ID")
     secret = os.environ.get("AZURE_SECRET") or os.environ.get("AZURE_CLIENT_SECRET")
     if tenant and client_id and secret:
         return ClientSecretCredential(tenant, client_id, secret)
-    return DefaultAzureCredential()
+    return None
+
+def resolve_subscription(projects, requested):
+    """Map a vault key passed as --project to its subscription ID."""
+    if requested and projects and requested in projects:
+        subscription = projects[requested].get("subscription_id")
+        if subscription:
+            return str(subscription)
+    return requested
+
+def credential_for(subscription, load_projects, vault):
+    """AZURE_* variables, then the vault's service principal, then az login.
+
+    Exported variables are a deliberate per-shell choice, so they win. The
+    vault entry is matched by subscription ID, as select-project.yml does.
+    DefaultAzureCredential (az login, managed identity) comes last, since a
+    cached login is easily stale or blocked by Entra ID security defaults.
+    load_projects is only called when the environment did not decide.
+    """
+    credential = credential_from_environment()
+    if credential:
+        return credential, environment_source("AZURE_* environment", vault)
+    key, entry = match_project(load_projects(), subscription, ("subscription_id",))
+    if entry is not None:
+        missing = [name for name in ("tenant_id", "client_id", "client_secret")
+                   if not str(entry.get(name, "") or "").strip()]
+        if missing:
+            raise ValueError(f"vault entry '{key}' is missing {', '.join(missing)}")
+        return ClientSecretCredential(
+            str(entry["tenant_id"]), str(entry["client_id"]),
+            str(entry["client_secret"])), f"vault entry '{key}'"
+    return DefaultAzureCredential(), "DefaultAzureCredential"
 
 def catalog_scope(migration_catalog):
     subscriptions = set()
@@ -109,7 +138,11 @@ def main(argv=None):
     parser.add_argument("--migration-catalog", type=Path,
                         default=repo_dir / "catalogs/migration-catalog.json")
     parser.add_argument("--subscription", "--project", dest="subscription",
-                        help="only reconcile this Azure subscription ID")
+                        help="only reconcile this Azure subscription ID "
+                             "(or vault key)")
+    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/azure.yml",
+                        help="Azure vault for the service principal when AZURE_* is unset "
+                             "(default: vaults/azure.yml)")
     parser.add_argument("--dry-run", action="store_true",
                         help="report stale entries without writing the catalog")
     parser.add_argument("--force", action="store_true",
@@ -121,15 +154,25 @@ def main(argv=None):
     if not subscriptions:
         print("no Azure catalog entries found")
         return 0
-    subscription = args.subscription or (
+    loaded = {}
+    def load_projects():
+        if "projects" not in loaded:
+            loaded["projects"] = vault_projects(args.vault, "azure_projects")
+        return loaded["projects"]
+    # A --project that is not a catalog subscription may be a vault key.
+    requested = args.subscription
+    if requested and requested not in subscriptions:
+        requested = resolve_subscription(load_projects(), requested)
+    subscription = requested or (
         next(iter(subscriptions)) if len(subscriptions) == 1 else None)
     if not subscription:
         raise ValueError(
             "catalog contains multiple Azure subscriptions; provide --subscription")
     subscription = str(subscription)
 
-    client = ComputeManagementClient(credential_from_environment(), subscription)
-    print(f"Azure scope: subscription={subscription}")
+    credential, source = credential_for(subscription, load_projects, args.vault)
+    client = ComputeManagementClient(credential, subscription)
+    print(f"Azure scope: subscription={subscription} (credentials: {source})")
     stale = find_missing_resources(client, subscription, migration_catalog)
     retired = [
         entry for entry in migration_catalog["migrations"]

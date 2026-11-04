@@ -240,9 +240,13 @@ unchanged.
 A full copy of a snapshot does not need CBT, so it is **off by default**.
 `-e vddk_require_cbt=true` (or `REQUIRE_CBT=true`) makes the playbook
 insist on it. `bin/enable-cbt.py` (pyVmomi) can enable it ahead of time: it
-reconfigures the VM without a power cycle and is idempotent. It needs
-`VCENTER_HOSTNAME`, `VCENTER_USERNAME`, and `VCENTER_PASSWORD`, and `--datacenter`,
-`--vm`, and optionally `--insecure`.
+reconfigures the VM without a power cycle and is idempotent. It takes
+`--vm`. Exported `VCENTER_USERNAME` and `VCENTER_PASSWORD` (with
+`VCENTER_HOSTNAME` or `--vcenter` for the host, and `--datacenter`) are used
+when set; otherwise the vCenter, credentials, datacenter, and
+`validate_certs` come from `vaults/vsphere.yml` (`--vcenter
+<key-or-hostname>` picks an entry, as `vsphere_target_vcenter` does).
+`--insecure` skips certificate checks.
 
 Setting `ctkEnabled` in the VM's ExtraConfig (for example with `govc vm.change
 -e`) does **not** work: vCenter leaves `changeTrackingEnabled` false. govc has no

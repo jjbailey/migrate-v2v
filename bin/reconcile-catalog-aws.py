@@ -6,12 +6,14 @@
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
+from vault_common import environment_source, match_project, vault_projects
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 NOT_FOUND_CODES = {
     "InvalidAMIID.NotFound",
@@ -119,6 +121,44 @@ def candidate_count(migration_catalog, deployment_catalog, account_id, requested
                       and (not requested_region or entry.get("aws_region") == requested_region))
     return migrations + deployments
 
+# Exported variables that select AWS credentials on purpose; boto3 reads them.
+AWS_ENVIRONMENT = ("AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_WEB_IDENTITY_TOKEN_FILE")
+
+def session_for(account_id, load_projects, vault, profile=None):
+    """--profile, then AWS_* variables, then the vault, then boto3's chain.
+
+    The vault entry is matched by key or aws_account_id, as
+    select-project.yml does, and may name an aws_profile or carry access
+    keys. Without one, boto3's remaining chain (the default ~/.aws profile,
+    an instance profile) is used. load_projects is only called when neither
+    the flag nor the environment decided.
+    """
+    if profile:
+        return boto3.Session(profile_name=profile), f"profile {profile}"
+    exported = [name for name in AWS_ENVIRONMENT if os.environ.get(name, "").strip()]
+    if exported:
+        return boto3.Session(), environment_source(
+            f"{exported[0]} environment", vault)
+    key, entry = match_project(load_projects(), account_id or (),
+                               ("aws_account_id", "account_id"))
+    if entry is not None:
+        entry_profile = str(entry.get("aws_profile", "")
+                            or entry.get("profile", "") or "").strip()
+        if entry_profile:
+            return (boto3.Session(profile_name=entry_profile),
+                    f"vault entry '{key}' (profile {entry_profile})")
+        key_id = str(entry.get("aws_access_key_id", "") or "").strip()
+        secret = str(entry.get("aws_secret_access_key", "") or "").strip()
+        if not (key_id and secret):
+            raise ValueError(
+                f"vault entry '{key}' has neither aws_profile nor "
+                "aws_access_key_id/aws_secret_access_key")
+        token = str(entry.get("aws_session_token", "") or "").strip()
+        return boto3.Session(
+            aws_access_key_id=key_id, aws_secret_access_key=secret,
+            aws_session_token=token or None), f"vault entry '{key}'"
+    return boto3.Session(), "boto3 default chain"
+
 def main():
     repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -128,7 +168,11 @@ def main():
                         default=repo_dir / "catalogs/deployment-catalog.json")
     parser.add_argument(
         "--region", help="only reconcile AWS entries in this region")
-    parser.add_argument("--profile", help="boto3/AWS CLI profile")
+    parser.add_argument("--profile",
+                        help="boto3/AWS CLI profile, instead of the vault")
+    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/aws.yml",
+                        help="AWS vault for credentials when AWS_* is unset "
+                             "(default: vaults/aws.yml)")
     parser.add_argument(
         "--project-id", "--account-id", dest="account_id",
         help="AWS account ID; verify and reconcile only this account")
@@ -146,8 +190,11 @@ def main():
         raise ValueError(
             f"catalog contains no AWS entries for region {args.region}")
 
-    session = boto3.Session(
-        profile_name=args.profile) if args.profile else boto3.Session()
+    wanted_account = args.account_id or (
+        next(iter(catalog_accounts)) if len(catalog_accounts) == 1 else None)
+    session, source = session_for(
+        wanted_account, lambda: vault_projects(args.vault, "aws_projects"),
+        args.vault, args.profile)
     authenticated_account = session.client("sts").get_caller_identity()["Account"]
     if args.account_id and str(authenticated_account) != str(args.account_id):
         raise ValueError(
@@ -164,7 +211,7 @@ def main():
     if account_id != str(authenticated_account):
         raise ValueError(
             f"authenticated AWS account {authenticated_account} does not match catalog account {account_id}")
-    print(f"AWS scope: account_id={account_id}, regions={', '.join(sorted(regions if not args.region else {args.region}))}")
+    print(f"AWS scope: account_id={account_id}, regions={', '.join(sorted(regions if not args.region else {args.region}))} (credentials: {source})")
 
     stale_migrations, stale_deployments = find_missing_resources(
         session, migration_catalog, deployment_catalog, account_id, args.region)
@@ -217,5 +264,5 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, json.JSONDecodeError, ClientError) as error:
+    except (OSError, ValueError, json.JSONDecodeError, BotoCoreError, ClientError) as error:
         raise SystemExit(f"reconcile-catalog-aws: {error}")

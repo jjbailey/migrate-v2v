@@ -9,14 +9,26 @@ on a running VM, so the guest is not shut down. Setting the ctkEnabled
 ExtraConfig keys instead does not work: vCenter ignores them and config.changeTrackingEnabled stays false.
 Idempotent: a VM that already tracks changes is left alone.
 
-Credentials come from VCENTER_HOSTNAME, VCENTER_USERNAME and VCENTER_PASSWORD
-(or --vcenter). Needs pyVmomi, which community.vmware already requires.
+Credentials come from VCENTER_USERNAME and VCENTER_PASSWORD when both are
+exported, with VCENTER_HOSTNAME (or --vcenter) naming the host. Otherwise
+they come from vaults/vsphere.yml, selected the way select-vcenter.yml does:
+--vcenter names a vsphere_projects key or vcenter_hostname; without it, the
+legacy flat vcenter_* keys, else the only entry. A vault entry also supplies
+the datacenter and validate_certs. Needs pyVmomi, which community.vmware
+already requires.
 """
 
 import argparse
 import os
 import ssl
 import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from vault_common import read_vault  # noqa: E402
+
+REPO_DIR = Path(__file__).resolve().parents[1]
 
 from pyVim.connect import Disconnect, SmartConnect
 from pyVim.task import WaitForTask
@@ -41,28 +53,79 @@ def find_vm(content, datacenter, name):
         raise ValueError(f"expected exactly one VM named {name!r} in {datacenter!r}, found {len(matches)}")
     return matches[0]
 
+def vault_vcenter(vault, requested):
+    """(name, entry) for the vCenter to use, or (None, None) without one.
+
+    Mirrors select-vcenter.yml. A vault that exists but will not decrypt
+    stops the run rather than falling back to the environment.
+    """
+    if not Path(vault).exists():
+        return None, None
+    data = read_vault(vault) or {}
+    projects = {str(key): value or {} for key, value in (
+        data.get("vsphere_projects") or {}).items()}
+    if requested:
+        for key, entry in projects.items():
+            if requested in {key, str(entry.get("vcenter_hostname", ""))}:
+                return key, entry
+        if requested == str(data.get("vcenter_hostname", "")):
+            return "legacy", data
+        return None, None
+    if str(data.get("vcenter_hostname", "") or "").strip():
+        return "legacy", data
+    if len(projects) == 1:
+        return next(iter(projects.items()))
+    return None, None
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--vcenter", default=os.environ.get("VCENTER_HOSTNAME"))
-    parser.add_argument("--datacenter", required=True)
+    parser.add_argument("--vcenter",
+                        help="vsphere_projects key or vCenter hostname")
+    parser.add_argument("--datacenter",
+                        help="defaults to the vault entry's datacenter")
     parser.add_argument("--vm", required=True)
     parser.add_argument("--insecure", action="store_true", help="do not verify the vCenter certificate")
+    parser.add_argument("--vault", type=Path, default=REPO_DIR / "vaults/vsphere.yml",
+                        help="vSphere vault for credentials when VCENTER_* is unset "
+                             "(default: vaults/vsphere.yml)")
     args = parser.parse_args()
-    user = os.environ.get("VCENTER_USERNAME")
-    password = os.environ.get("VCENTER_PASSWORD")
-    if not (args.vcenter and user and password):
-        raise SystemExit("enable-cbt: set VCENTER_HOSTNAME (or --vcenter), VCENTER_USERNAME and VCENTER_PASSWORD")
+    env_user = os.environ.get("VCENTER_USERNAME")
+    env_password = os.environ.get("VCENTER_PASSWORD")
+    if env_user and env_password:
+        name, entry = None, None
+    else:
+        name, entry = vault_vcenter(args.vault, args.vcenter)
+    if entry is not None:
+        host = str(entry.get("vcenter_hostname", "") or "")
+        user = str(entry.get("vcenter_username", "") or "")
+        password = str(entry.get("vcenter_password", "") or "")
+        datacenter = args.datacenter or str(entry.get("datacenter", "") or "")
+        insecure = args.insecure or str(entry.get("validate_certs", True)).lower() in {"false", "no", "0"}
+        if not (host and user and password):
+            raise SystemExit(f"enable-cbt: vault entry '{name}' is missing vcenter_hostname, "
+                             "vcenter_username or vcenter_password")
+    else:
+        host = args.vcenter or os.environ.get("VCENTER_HOSTNAME")
+        user, password = env_user, env_password
+        datacenter = args.datacenter
+        insecure = args.insecure
+        if not (host and user and password):
+            raise SystemExit("enable-cbt: no vCenter selected from the vault; set "
+                             "VCENTER_HOSTNAME (or --vcenter), VCENTER_USERNAME and "
+                             "VCENTER_PASSWORD, or name a vault entry with --vcenter")
+    if not datacenter:
+        raise SystemExit("enable-cbt: --datacenter is required")
 
     context = ssl.create_default_context()
-    if args.insecure:
+    if insecure:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
     try:
-        service = SmartConnect(host=args.vcenter, user=user, pwd=password, sslContext=context)
+        service = SmartConnect(host=host, user=user, pwd=password, sslContext=context)
     except (OSError, ssl.SSLError, vmodl.MethodFault) as error:
         raise SystemExit(f"enable-cbt: {error}")
     try:
-        vm = find_vm(service.RetrieveContent(), args.datacenter, args.vm)
+        vm = find_vm(service.RetrieveContent(), datacenter, args.vm)
         if vm.config.changeTrackingEnabled:
             print(f"CBT is already enabled on {args.vm}")
             return
