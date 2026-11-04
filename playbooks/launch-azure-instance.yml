@@ -7,8 +7,13 @@
 # managed disk and attached at LUN 0, 1, ... in manifest order.
 #
 # The images are generalized, so Azure provisions the VM: cloud-init (Azure
-# datasource) in the guest creates azure_admin_username with the given SSH key
-# and reports ready. A guest without it fails with OSProvisioningTimedOut.
+# datasource) in the guest creates azure_admin_username with an SSH key and
+# reports ready. A guest without it fails with OSProvisioningTimedOut.
+#
+# The key is an Azure SSH public key resource named azure_ssh_key_name (default
+# cloud) in the project's resource group, the way the AWS and OpenStack
+# launches use a registered key pair. azure_ssh_public_key_file, when set,
+# supplies the key from a local .pub file instead.
 #
 # Azure has no default network, so the play uses a named VNet, subnet, and
 # network security group in the project's resource group, creating each only
@@ -38,6 +43,7 @@
     # cloud-init creates this user with the key below; Azure rejects names
     # such as root and admin.
     azure_admin_username: "azureuser"
+    azure_ssh_key_name: "cloud"
     azure_ssh_public_key_file: ""
     azure_boot_image_id: ""
     azure_data_snapshot_ids: []
@@ -69,17 +75,20 @@
           azure_data_snapshot_ids must be a list. Pass it as JSON, for example
           -e '{"azure_data_snapshot_ids": ["/subscriptions/.../snapshots/x"]}'.
 
-    - name: Require an SSH public key for the admin user
+    - name: Require an SSH key for the admin user
       ansible.builtin.assert:
-        that: azure_ssh_public_key_file | length > 0
+        that: (azure_ssh_key_name | length > 0) or (azure_ssh_public_key_file | length > 0)
         fail_msg: >-
-          Pass -e azure_ssh_public_key_file=<path to a .pub file> (wrapper:
-          AZURE_SSH_KEY_FILE); Azure provisions the admin user with that key.
+          Pass -e azure_ssh_key_name=<Azure SSH public key resource> (wrapper:
+          AZURE_SSH_KEY_NAME, default cloud) or -e azure_ssh_public_key_file=<path
+          to a .pub file> (wrapper: AZURE_SSH_KEY_FILE); Azure provisions the
+          admin user with that key.
 
-    - name: Read the SSH public key for the admin user
+    - name: Read the SSH public key file for the admin user
       ansible.builtin.slurp:
         src: "{{ azure_ssh_public_key_file }}"
       register: azure_ssh_public_key_raw
+      when: azure_ssh_public_key_file | length > 0
 
     - block:
         - name: Select the Azure project for this run

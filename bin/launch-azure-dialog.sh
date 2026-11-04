@@ -12,6 +12,50 @@ DIALOG_NAME=launch-azure-dialog
 # shellcheck source=launch-dialog-common.sh
 source "$script_dir/launch-dialog-common.sh"
 
+# Try to list the Azure SSH public key resources for PROJECT, for the
+# single-select picker. Prints tag\item\status lines for radio(). CURRENT
+# pre-selects the existing value. Returns 1 when the lookup fails so the
+# caller falls back to manual entry. stdin is /dev/null so a missing vault
+# password fails fast instead of prompting inside the dialog.
+load_azure_keypair_choices()
+{
+    local project=$1 current=${2:-} facts args=()
+    [ -x "$script_dir/azure-project-facts.py" ] || return 1
+    [ -n "$project" ] && args+=("$project")
+    args+=(--keypairs)
+    if command -v timeout > /dev/null 2>&1 ; then
+        facts=$(timeout 60 "$script_dir/azure-project-facts.py" "${args[@]}" --json < /dev/null 2> /dev/null) || return 1
+    else
+        facts=$("$script_dir/azure-project-facts.py" "${args[@]}" --json < /dev/null 2> /dev/null) || return 1
+    fi
+    [ -n "$facts" ] || return 1
+    python3 -c '
+import json, sys
+try:
+    facts = json.loads(sys.argv[1])
+except Exception:
+    raise SystemExit(1)
+cur = sys.argv[2] if len(sys.argv) > 2 else ""
+out = []
+for pair in facts.get("keypairs") or []:
+    name = str(pair.get("name") or "").strip()
+    if not name:
+        continue
+    detail = ", ".join([str(part) for part in
+                         (pair.get("type"), pair.get("fingerprint"))
+                         if part]) or "SSH public key"
+    if cur:
+        status = "ON" if name == cur else "OFF"
+    else:
+        status = "ON" if name == "cloud" else "OFF"
+    out.append("%s\t%s\t%s" % (name, detail, status))
+if not out:
+    raise SystemExit(1)
+if cur and not any(row.split("\t")[0] == cur for row in out):
+    out.append("%s\t%s\t%s" % (cur, cur + " (current value, not in list)", "ON"))
+print("\n".join(out))' "$facts" "$current" 2> /dev/null
+}
+
 AZURE_TARGET_PROJECT=$(choose_target "Which Azure subscription should this VM launch into?" vaults/azure.yml azure_projects "${AZURE_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required azure Azure) || abort
 
@@ -34,24 +78,26 @@ if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE
 
 AZURE_ADMIN_USERNAME=$(input_required "Admin user cloud-init creates:" "${AZURE_ADMIN_USERNAME:-azureuser}" "The admin user cannot be empty.") || abort
 
-# Azure has no project-wide key, so every launch needs one.
-default_key=${AZURE_SSH_KEY_FILE:-}
-if [ -z "$default_key" ] ; then
-    for candidate in "$HOME/.ssh/id_ed25519.pub" "$HOME/.ssh/id_rsa.pub" ; do
-        [ -r "$candidate" ] && {
-            default_key=$candidate
-            break
-        }
-    done
+# Like the AWS and OpenStack key pairs, the key is an SSH public key resource
+# registered in the subscription's resource group. Azure provisions the admin
+# user with it, so unlike AWS there is no "no key" choice.
+key_choices=$(load_azure_keypair_choices "$AZURE_TARGET_PROJECT" "${AZURE_SSH_KEY_NAME:-cloud}") || key_choices=""
+picked_key=_other
+if [ -n "$key_choices" ] ; then
+    key_args=(_other "Type a different key name manually (skip the list)" OFF)
+    while IFS=$'\t' read -r key_tag key_label key_state ; do
+        [ -n "$key_tag" ] || continue
+        key_args+=("$key_tag" "$key_label" "$key_state")
+    done <<< "$key_choices"
+    picked_key=$(radio "Which Azure SSH public key should $AZURE_ADMIN_USERNAME use?\n(Select Type manually to enter a known value.)" "${key_args[@]}") || abort
+else
+    say "Could not list SSH public keys for '${AZURE_TARGET_PROJECT:-auto-select}'.\n\nEnter the key name manually instead." 9 || true
 fi
-while : ; do
-    AZURE_SSH_KEY_FILE=$(input "SSH public key file for $AZURE_ADMIN_USERNAME:" "$default_key") || abort
-    [ -r "$AZURE_SSH_KEY_FILE" ] && {
-        AZURE_SSH_KEY_FILE=$(realpath -- "$AZURE_SSH_KEY_FILE")
-        break
-    }
-    bad "That file is not readable: $AZURE_SSH_KEY_FILE" || true
-done
+if [ "$picked_key" = _other ] ; then
+    AZURE_SSH_KEY_NAME=$(input_required "Azure SSH public key resource for $AZURE_ADMIN_USERNAME:" "${AZURE_SSH_KEY_NAME:-cloud}" "The SSH key name cannot be empty.") || abort
+else
+    AZURE_SSH_KEY_NAME=$picked_key
+fi
 
 say "Launch summary for $VM_NAME
 
@@ -62,7 +108,7 @@ say "Launch summary for $VM_NAME
   NSG..........: $AZURE_NSG_NAME
   No public IP.: $AZURE_NO_PUBLIC_IP
   Admin user...: $AZURE_ADMIN_USERNAME
-  SSH key......: $AZURE_SSH_KEY_FILE" 17
+  SSH key......: $AZURE_SSH_KEY_NAME" 17
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
 {
@@ -71,7 +117,8 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \
         "AZURE_NO_PUBLIC_IP=$AZURE_NO_PUBLIC_IP" "AZURE_ADMIN_USERNAME=$AZURE_ADMIN_USERNAME" \
-        "AZURE_SSH_KEY_FILE=$AZURE_SSH_KEY_FILE" "INSTANCE_NAME=$INSTANCE_NAME" ; do
+        "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=" \
+        "INSTANCE_NAME=$INSTANCE_NAME" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-azure-instance.sh")"

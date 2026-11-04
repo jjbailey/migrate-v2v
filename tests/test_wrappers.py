@@ -257,7 +257,19 @@ class LaunchWrapperTests(WrapperTestCase):
         self.assertEqual(extra["azure_vm_size"], "Standard_B2s_v2")
         self.assertEqual(extra["azure_no_public_ip"], "true")
         self.assertEqual(extra["azure_ssh_public_key_file"], str(key))
+        self.assertEqual(extra["azure_ssh_key_name"], "cloud")
         self.assertNotIn("azure_admin_username", extra)
+
+    def test_azure_defaults_to_the_cloud_key_resource(self):
+        self.run_wrapper("launch-azure-instance.sh", {"VM_NAME": "vm"})
+        extra = self.extra_vars()
+        self.assertEqual(extra["azure_ssh_key_name"], "cloud")
+        self.assertNotIn("azure_ssh_public_key_file", extra)
+
+    def test_azure_key_name_override(self):
+        self.run_wrapper("launch-azure-instance.sh", {
+            "VM_NAME": "vm", "AZURE_SSH_KEY_NAME": "other key"})
+        self.assertEqual(self.extra_vars()["azure_ssh_key_name"], "other key")
 
     def test_azure_rejects_an_unreadable_key(self):
         self.run_wrapper("launch-azure-instance.sh", {

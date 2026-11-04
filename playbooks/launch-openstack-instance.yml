@@ -364,6 +364,94 @@
         label: "data disk {{ item.index }}"
       when: os.image_ids | length > 1
 
+    # The server boots from image 0 onto the flavor's root disk, and Nova
+    # aborts the build when that disk is smaller than the image. That happens
+    # only after the data volumes exist, and the server module can bury Nova's
+    # fault under a MODULE FAILURE. Compare the sizes here, before anything is
+    # created, and name the flavors that would fit.
+    - name: Look up the OpenStack flavors
+      openstack.cloud.compute_flavor_info:
+        auth: "{{ openstack_auth }}"
+        region_name: "{{ openstack_region_name }}"
+      register: openstack_flavor_lookup
+      no_log: true
+
+    - name: Look up the OpenStack boot image
+      openstack.cloud.image_info:
+        auth: "{{ openstack_auth }}"
+        region_name: "{{ openstack_region_name }}"
+        name: "{{ os.image_ids[0] }}"
+      register: openstack_boot_image_lookup
+      no_log: true
+
+    - name: Fail when the flavor does not exist
+      ansible.builtin.fail:
+        msg: >-
+          Flavor '{{ openstack_flavor }}' was not found in OpenStack project
+          '{{ openstack_target_project_name }}'
+          (region '{{ openstack_region_name }}').
+      when: >-
+        openstack_flavor_lookup.flavors
+        | selectattr('name', 'equalto', openstack_flavor)
+        | list | length == 0
+        and openstack_flavor_lookup.flavors
+        | selectattr('id', 'equalto', openstack_flavor)
+        | list | length == 0
+
+    - name: Fail when the boot image does not exist
+      ansible.builtin.fail:
+        msg: >-
+          Boot image {{ os.image_ids[0] }} (migration {{ source_migration_id }})
+          is not visible in OpenStack project '{{ openstack_target_project_name }}'.
+          It may have been deleted after the migration; reconcile the catalog
+          with bin/reconcile-catalog-openstack.py or migrate the VM again.
+      when: openstack_boot_image_lookup.images | default([]) | length == 0
+
+    # The largest of the source disk's capacity, the image's virtual size, and
+    # the image's min_disk is what the root disk must hold. A flavor disk of 0
+    # means the cloud sizes the root disk from the image, so it always fits.
+    - name: Compare the flavor root disk with the boot image
+      ansible.builtin.set_fact:
+        openstack_flavor_disk_gib: "{{ openstack_selected_flavor.disk | int }}"
+        openstack_boot_required_gib: "{{ openstack_boot_image_required_gib }}"
+        openstack_fitting_flavors: >-
+          {{ openstack_flavor_lookup.flavors
+             | rejectattr('is_disabled')
+             | selectattr('disk', 'ge', openstack_boot_image_required_gib | int)
+             | sort(attribute='ram')
+             | map(attribute='name')
+             | list }}
+      vars:
+        openstack_selected_flavor: >-
+          {{ (openstack_flavor_lookup.flavors | selectattr('name', 'equalto', openstack_flavor) | list
+              + openstack_flavor_lookup.flavors | selectattr('id', 'equalto', openstack_flavor) | list)
+             | first }}
+        openstack_boot_image: "{{ openstack_boot_image_lookup.images | first }}"
+        openstack_boot_image_required_gib: >-
+          {{ [
+               (((source_artifact_manifest | default({})).disks | default([{}]))[0].capacity_bytes
+                 | default(0, true) | int / 1073741824) | round(0, 'ceil') | int,
+               ((openstack_boot_image.virtual_size | default(0, true) | int) / 1073741824)
+                 | round(0, 'ceil') | int,
+               openstack_boot_image.min_disk | default(0, true) | int
+             ] | max }}
+
+    - name: Require a flavor root disk large enough for the boot image
+      ansible.builtin.assert:
+        that:
+          - >-
+            (openstack_flavor_disk_gib | int == 0)
+            or (openstack_flavor_disk_gib | int >= openstack_boot_required_gib | int)
+        fail_msg: >-
+          Flavor '{{ openstack_flavor }}' has a {{ openstack_flavor_disk_gib }} GiB
+          root disk, but the boot disk of '{{ vm_name }}' needs
+          {{ openstack_boot_required_gib }} GiB. Choose a flavor with a root disk
+          of at least {{ openstack_boot_required_gib }} GiB; the smallest by RAM:
+          {{ openstack_fitting_flavors[:6] | join(', ') }}.
+        success_msg: >-
+          Flavor '{{ openstack_flavor }}' root disk {{ openstack_flavor_disk_gib }} GiB
+          holds the {{ openstack_boot_required_gib }} GiB boot disk.
+
     - name: Require at most one explicit cloud-init user-data source
       ansible.builtin.assert:
         that:

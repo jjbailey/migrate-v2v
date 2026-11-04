@@ -296,6 +296,7 @@ migrate-v2v/
 │   ├── openstack-project-facts.py  # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
 │   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
+│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
 │   ├── inspect-ova.py           # OVA inspection
 │   └── *-vault.sh               # Vault management scripts
 ├── catalogs/                    # Migration and deployment catalogs
@@ -778,13 +779,14 @@ What each kind asks:
   migration for that platform first; a name can also be typed). They then ask
   for the platform's launch settings: subnet, security groups, instance type
   and key pair for AWS; VM size, network names, public IP, admin user, and SSH
-  key for Azure; zone, machine type, network, tags, external IP and
+  key resource for Azure; zone, machine type, network, tags, external IP and
   optional SSH key for GCP; and IP, MAC, floating IP, security group,
   config-drive, user-data, flavor, key pair, and network choices for OpenStack
   (see [OpenStack Launch Networking](#openstack-launch-networking)).
   Wherever the cloud API can list valid values, the dialog offers a live
   picker (backed by `bin/openstack-project-facts.py`,
-  `bin/aws-project-facts.py`, or `bin/gcp-project-facts.py`) with the
+  `bin/aws-project-facts.py`, `bin/gcp-project-facts.py`, or
+  `bin/azure-project-facts.py`) with the
   current value pre-selected. Long single-select lists lead with a
   `Type manually (skip the list)` row so a known value can be typed without
   scrolling, and a failed lookup falls back to manual entry instead of
@@ -1360,8 +1362,7 @@ creates a VM from the newest completed Azure migration of `VM_NAME` in the
 selected subscription:
 
 ```bash
-VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub \
-AZURE_SSH_KEY_FILE=~/.ssh/id_ed25519.pub ./bin/launch-azure-instance.sh
+VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 ```
 
 - The boot image becomes the OS disk (`<vm>-osdisk`, `StandardSSD_LRS`), and
@@ -1370,8 +1371,17 @@ AZURE_SSH_KEY_FILE=~/.ssh/id_ed25519.pub ./bin/launch-azure-instance.sh
   disk.
 - The images are generalized, so Azure provisions the VM: cloud-init with the
   Azure datasource creates `AZURE_ADMIN_USERNAME` (default `azureuser`) with
-  the key in `AZURE_SSH_KEY_FILE`, which every launch needs. A guest without
-  it fails with `OSProvisioningTimedOut`.
+  an SSH key, which every launch needs. A guest without it fails with
+  `OSProvisioningTimedOut`.
+- Like the AWS and OpenStack key pairs, the key is an Azure SSH public key
+  resource, `AZURE_SSH_KEY_NAME` (default `cloud`), in the vault's resource
+  group. A missing key stops the launch before anything is created. Register
+  one once with
+  `az sshkey create --resource-group <rg> --name cloud --public-key @<file>.pub`.
+  `AZURE_SSH_KEY_FILE=<file>.pub` supplies the key from a local file instead.
+  `./bin/azure-project-facts.py <subscription>` lists the key resources with
+  their SHA256 fingerprints (as `ssh-keygen -l` prints them), and the launch
+  dialog offers them as a picker.
 - Networking lives in the vault's resource group: the VNet
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
   `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`, default

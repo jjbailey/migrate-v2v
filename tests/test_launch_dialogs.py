@@ -29,6 +29,7 @@ if '--inputbox' in args:
         'EC2 key pair': 'cloud',
         'VM size': 'Standard_B2s_v2',
         'Admin user': 'azureuser',
+        'SSH public key resource': 'cloud',
         'SSH public key file': os.environ.get('TEST_KEY', ''),
         'GCP zone': 'us-central1-a',
         'Machine type': 'e2-standard-2',
@@ -135,6 +136,8 @@ class LaunchDialogTests(unittest.TestCase):
                     self.assertIn("export AWS_INSTANCE_TYPE=''", command)
                 elif platform == "azure":
                     self.assertIn("export INSTANCE_NAME=''", command)
+                    self.assertIn("export AZURE_SSH_KEY_NAME='cloud'", command)
+                    self.assertIn("export AZURE_SSH_KEY_FILE=''", command)
                 elif platform == "gcp":
                     self.assertIn("export GCP_SSH_KEY_FILE=''", command)
                 subprocess.run(["bash", "-n", files[0]], check=True)
