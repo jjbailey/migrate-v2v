@@ -28,6 +28,9 @@
     openstack_security_groups: []
     openstack_security_group_ids: []
     openstack_key_name: ""
+    # Login user for the printed ssh command. Migrated images set
+    # disable_root: false, so cloud-init puts the key pair on root too.
+    launch_ssh_user: "root"
     openstack_auto_ip: false
     openstack_availability_zone: ""
     openstack_volume_type: ""
@@ -834,4 +837,19 @@
             path: "/tmp/.{{ launch_result.server.id | default('openstack-instance') }}.openstack-deployment-entry.json"
             state: absent
           failed_when: false
+
+    # Prefer a floating IP, then any fixed address.
+    - name: Show how to log in
+      ansible.builtin.include_tasks: tasks/show-ssh-command.yml
+      vars:
+        openstack_server_addrs: >-
+          {{ (launch_result.server.addresses | default({}, true)).values() | flatten }}
+        ssh_host: >-
+          {{ launch_result.server.access_ipv4
+             | default((openstack_server_addrs | selectattr('OS-EXT-IPS:type', 'defined')
+                        | selectattr('OS-EXT-IPS:type', 'equalto', 'floating')
+                        | map(attribute='addr') | list
+                        + openstack_server_addrs | map(attribute='addr') | list
+                        + ['']) | first, true) }}
+        ssh_user: "{{ launch_ssh_user }}"
 

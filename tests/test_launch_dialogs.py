@@ -36,7 +36,7 @@ if '--inputbox' in args:
         'Network:': 'default',
         'Subnetwork': '',
         'Network tags': 'web,ssh',
-        'OpenStack flavor': 's1-4',
+        'OpenStack flavor': 's1-8',
         'SSH key pair name': 'cloud',
         'OpenStack network name': 'Ext-Net',
         'Network UUID': '',

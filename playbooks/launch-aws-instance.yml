@@ -28,6 +28,9 @@
     security_groups: []
     key_name: ""
     assign_public_ip: true
+    # Login user for the printed ssh command. Migrated images set
+    # disable_root: false, so cloud-init puts the key pair on root too.
+    launch_ssh_user: "root"
     instance_name: "{{ vm_name }}"
     extra_tags: {}
 
@@ -189,4 +192,12 @@
             path: "/tmp/.{{ launch_result.instances[0].instance_id | default('aws-instance') }}.deployment-entry.json"
             state: absent
           failed_when: false
+
+    - name: Show how to log in
+      ansible.builtin.include_tasks: tasks/show-ssh-command.yml
+      vars:
+        ssh_host: >-
+          {{ launch_result.instances[0].public_ip_address
+             | default(launch_result.instances[0].private_ip_address | default(''), true) }}
+        ssh_user: "{{ launch_ssh_user }}"
 

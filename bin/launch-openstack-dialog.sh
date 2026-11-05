@@ -311,7 +311,7 @@ case "$ud_mode" in
 esac
 
 while : ; do
-    FLAVOR=$(pick_os_value "Which flavor (instance size) should the instance use?" "$PROJECT" "--flavors" "flavors" "${OS_FLAVOR:-${FLAVOR:-}}" "s1-4" "OpenStack flavor (instance size):") || abort
+    FLAVOR=$(pick_os_value "Which flavor (instance size) should the instance use?" "$PROJECT" "--flavors" "flavors" "${OS_FLAVOR:-${FLAVOR:-}}" "s1-8" "OpenStack flavor (instance size):") || abort
     KEY_NAME=$(pick_os_value "Which SSH key pair should the instance use?" "$PROJECT" "--keypairs" "keypairs" "${OS_KEY_NAME:-${KEY_NAME:-}}" "cloud" "SSH key pair name registered in OpenStack:") || abort
     NETWORK=$(pick_os_value "Which network should the instance attach to?" "$PROJECT" "--networks" "networks" "${OS_NETWORK:-${NETWORK:-}}" "Ext-Net" "OpenStack network name:") || abort
     [ -n "$FLAVOR" ] && [ -n "$KEY_NAME" ] && [ -n "$NETWORK" ] && break

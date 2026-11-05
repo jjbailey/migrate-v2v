@@ -254,8 +254,7 @@
               Azure VM {{ azure_vm_name }} ({{ azure_vm_size }}) in
               {{ azure_resource_group }}: private IP {{ azure_private_ip or 'unknown' }},
               public IP {{ azure_public_ip or 'none' }}, data disks
-              {{ azure_data_disk_names | join(', ') or 'none' }}. Log in as
-              {{ azure_admin_username }}{{ ('@' ~ azure_public_ip) if azure_public_ip else '' }}.
+              {{ azure_data_disk_names | join(', ') or 'none' }}.
 
         - name: Build the Azure deployment catalog entry
           ansible.builtin.set_fact:
@@ -291,6 +290,12 @@
               - --entry
               - "/tmp/.{{ azure_vm_name }}.azure-deployment-entry.json"
           changed_when: true
+
+        - name: Show how to log in
+          ansible.builtin.include_tasks: tasks/show-ssh-command.yml
+          vars:
+            ssh_host: "{{ azure_public_ip or azure_private_ip }}"
+            ssh_user: "{{ azure_admin_username }}"
 
       always:
         - name: Remove the temporary Azure deployment entry
