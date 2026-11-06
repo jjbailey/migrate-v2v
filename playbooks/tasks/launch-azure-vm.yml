@@ -8,8 +8,42 @@
 # task carries the service principal.
 #
 # Expects: azure_vm_name, azure_boot_image_id_effective,
-# azure_data_snapshot_ids_effective, azure_migration_id_effective, and
-# azure_ssh_public_key_raw.
+# azure_data_snapshot_ids_effective, azure_migration_id_effective,
+# azure_ssh_key_name, and azure_ssh_public_key_raw when
+# azure_ssh_public_key_file is set.
+
+# The key is resolved first so a missing one stops the launch before any
+# network or disk is created. The resource group is listed and filtered
+# because the info module fails outright on a key that does not exist.
+- name: List the Azure SSH public keys in the resource group
+  azure.azcollection.azure_rm_sshpublickey_info:
+    resource_group: "{{ azure_resource_group }}"
+  register: azure_ssh_key_lookup
+  when: azure_ssh_public_key_file | length == 0
+
+- name: Fail when the Azure SSH public key does not exist
+  ansible.builtin.fail:
+    msg: >-
+      No SSH public key named '{{ azure_ssh_key_name }}' in resource group
+      {{ azure_resource_group }}. Available:
+      {{ azure_ssh_key_lookup.ssh_keys | default([]) | map(attribute='name') | join(', ') or '<none>' }}.
+      Create it with: az sshkey create --resource-group {{ azure_resource_group }}
+      --name {{ azure_ssh_key_name }} --public-key @<path to .pub file>,
+      or pass AZURE_SSH_KEY_FILE.
+  when:
+    - azure_ssh_public_key_file | length == 0
+    - >-
+      azure_ssh_key_lookup.ssh_keys | default([])
+      | selectattr('name', 'equalto', azure_ssh_key_name) | list | length == 0
+
+- name: Select the SSH public key for the admin user
+  ansible.builtin.set_fact:
+    azure_ssh_public_key_data: >-
+      {{ ((azure_ssh_public_key_raw.content | b64decode)
+          if (azure_ssh_public_key_file | length > 0)
+          else (azure_ssh_key_lookup.ssh_keys
+                | selectattr('name', 'equalto', azure_ssh_key_name)
+                | first).public_key) | trim }}
 
 # The VNet listing returns its subnets as well; the subnet info module fails
 # outright on a subnet that does not exist.
@@ -137,7 +171,7 @@
     ssh_password_enabled: false
     ssh_public_keys:
       - path: "/home/{{ azure_admin_username }}/.ssh/authorized_keys"
-        key_data: "{{ (azure_ssh_public_key_raw.content | b64decode).strip() }}"
+        key_data: "{{ azure_ssh_public_key_data }}"
     network_interface_names:
       - "{{ azure_vm_name }}-nic"
     data_disks: "{{ azure_data_disk_attachments | default([]) }}"

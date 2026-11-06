@@ -36,3 +36,42 @@ def read_vault(vault):
     if result.returncode != 0:
         raise SystemExit(f"could not decrypt {vault}")
     return yaml.safe_load(result.stdout) or {}
+
+def vault_projects(vault, map_name):
+    """The vault's <map_name> entries keyed by string, or None without a file.
+
+    The bin/ tools take credentials in this order: an explicit command-line
+    flag, then credential variables exported in the environment, then the
+    vault, then cached logins (az login, ~/.aws, gcloud). Callers decrypt
+    the vault only when no flag or variable decided, so a user working from
+    exported credentials is never prompted for the vault password. A vault
+    that exists but cannot be decrypted stops the run instead of falling
+    through to a cached login.
+    """
+    path = Path(vault)
+    if not path.exists():
+        return None
+    data = read_vault(path) or {}
+    return {str(key): value or {} for key, value in (
+        data.get(map_name) or {}).items()}
+
+def match_project(projects, wanted, fields):
+    """First (key, entry) whose key or one of fields equals a wanted value.
+
+    wanted is one identity or an iterable of them; comparisons are on
+    strings, case-insensitively. Returns (None, None) when nothing matches.
+    """
+    if isinstance(wanted, str):
+        wanted = {wanted}
+    wanted = {str(value).lower() for value in wanted or () if str(value)}
+    for key, entry in (projects or {}).items():
+        identities = {key} | {str(entry.get(field, "") or "") for field in fields}
+        if {identity.lower() for identity in identities if identity} & wanted:
+            return key, entry
+    return None, None
+
+def environment_source(label, vault):
+    """Describe an environment credential source, noting a skipped vault."""
+    if Path(vault).exists():
+        return f"{label}; {Path(vault).name} not consulted"
+    return label

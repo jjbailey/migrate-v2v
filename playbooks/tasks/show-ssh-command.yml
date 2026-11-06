@@ -1,0 +1,24 @@
+---
+# playbooks/tasks/show-ssh-command.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Print a ready-to-paste ssh command for a launched instance. Every launch
+# playbook includes this as its last task, so the command ends the output.
+#
+# Inputs:
+#   ssh_host  public address, or the private one when there is none
+#   ssh_user  login user for this cloud
+#   launch_ssh_private_key  local private key path (default ~/.ssh/cloud,
+#                           matching the "cloud" key pair); -e
+#                           launch_ssh_private_key= omits -i
+
+- name: Show the ssh command for the new instance
+  ansible.builtin.debug:
+    msg: >-
+      {%- set key = launch_ssh_private_key | default('~/.ssh/cloud') -%}
+      {%- if ssh_host | default('', true) | length > 0 -%}
+      ssh {{ ('-i ' ~ key ~ ' ') if key | length > 0 else '' }}{{ ssh_user }}@{{ ssh_host }}
+      {%- else -%}
+      No IP address was reported for the instance; look it up in the console.
+      {%- endif -%}
+

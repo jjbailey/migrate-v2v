@@ -263,6 +263,59 @@ class AzureReconcileLogicTests(unittest.TestCase):
             reconcile_azure.find_missing_resources(client, "sub-a", migrations), [])
 
 @unittest.skipIf(reconcile_azure is None, "needs the Azure SDK")
+class AzureReconcileCredentialTests(unittest.TestCase):
+    """AZURE_* variables first, then the vault, then az login."""
+
+    VAULT = Path("/nonexistent/azure.yml")
+    PROJECTS = {"lab": {"subscription_id": "SUB-A", "tenant_id": "t",
+                        "client_id": "c", "client_secret": "s"}}
+    ENVIRONMENT = {"AZURE_TENANT_ID": "et", "AZURE_CLIENT_ID": "ec",
+                   "AZURE_CLIENT_SECRET": "es"}
+
+    def setUp(self):
+        patcher = mock.patch.dict(reconcile_azure.os.environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def credential_for(self, subscription, projects):
+        return reconcile_azure.credential_for(
+            subscription, lambda: projects, self.VAULT)
+
+    def test_environment_wins_without_decrypting_the_vault(self):
+        reconcile_azure.os.environ.update(self.ENVIRONMENT)
+        def unused():
+            raise AssertionError("vault decrypted")
+        with mock.patch.object(reconcile_azure, "ClientSecretCredential") as csc:
+            _, source = reconcile_azure.credential_for("sub-a", unused, self.VAULT)
+        csc.assert_called_once_with("et", "ec", "es")
+        self.assertEqual(source, "AZURE_* environment")
+
+    def test_vault_entry_matched_by_subscription(self):
+        with mock.patch.object(reconcile_azure, "ClientSecretCredential") as csc:
+            _, source = self.credential_for("sub-a", self.PROJECTS)
+        csc.assert_called_once_with("t", "c", "s")
+        self.assertEqual(source, "vault entry 'lab'")
+
+    def test_default_credential_last(self):
+        for projects in (self.PROJECTS, None):
+            with mock.patch.object(reconcile_azure, "DefaultAzureCredential") as dac:
+                _, source = self.credential_for("sub-b", projects)
+            dac.assert_called_once_with()
+            self.assertEqual(source, "DefaultAzureCredential")
+
+    def test_incomplete_vault_entry_is_an_error(self):
+        projects = {"lab": dict(self.PROJECTS["lab"], client_secret="")}
+        with self.assertRaisesRegex(ValueError, "missing client_secret"):
+            self.credential_for("sub-a", projects)
+
+    def test_project_key_resolves_to_its_subscription(self):
+        self.assertEqual(
+            reconcile_azure.resolve_subscription(self.PROJECTS, "lab"), "SUB-A")
+        self.assertEqual(
+            reconcile_azure.resolve_subscription(self.PROJECTS, "sub-x"), "sub-x")
+        self.assertIsNone(reconcile_azure.resolve_subscription(None, None))
+
+@unittest.skipIf(reconcile_azure is None, "needs the Azure SDK")
 class AzureReconcileMainTests(unittest.TestCase):
 
     def setUp(self):
@@ -280,7 +333,9 @@ class AzureReconcileMainTests(unittest.TestCase):
                 for entry in json.loads(self.migrations.read_text())["migrations"]]
 
     def run_main(self, *args, client=None):
-        with mock.patch.object(reconcile_azure, "credential_from_environment",
+        with mock.patch.object(reconcile_azure, "credential_for",
+                               return_value=(None, "test")), \
+             mock.patch.object(reconcile_azure, "vault_projects",
                                return_value=None), \
              mock.patch.object(reconcile_azure, "ComputeManagementClient",
                                return_value=client or FakeClient()):

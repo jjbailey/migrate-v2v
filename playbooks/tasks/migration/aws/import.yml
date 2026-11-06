@@ -23,8 +23,15 @@
 - name: Upload the OVA to the staging bucket
   # The CLI uploads a multi-gigabyte OVA as parallel multipart chunks and
   # resumes a failed part; s3_object pushes the whole file in one stream.
+  # Keys on stdin, not environment:; see aws_cli_stdin in vars/aws-common.yml.
   ansible.builtin.command:
+    stdin: "{{ aws_cli_stdin }}"
     argv:
+      - "{{ playbook_dir }}/../bin/exec-with-stdin-env.sh"
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
+      - AWS_SESSION_TOKEN
+      - "--"
       - aws
       - s3
       - cp

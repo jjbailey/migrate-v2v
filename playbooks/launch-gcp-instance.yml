@@ -33,6 +33,9 @@
     gcp_ssh_user: "cloudinit"
     gcp_ssh_public_key_file: ""
     gcp_disk_type: "pd-balanced"
+    # Login user for the printed ssh command; cloud-init gives root the
+    # project key too (see gcp_ssh_user above).
+    launch_ssh_user: "root"
     gcp_boot_image_name: ""
     gcp_data_image_names: []
     gcp_migration_id: ""
@@ -287,6 +290,15 @@
               - --entry
               - "/tmp/.{{ gcp_instance_name }}.gcp-deployment-entry.json"
           changed_when: true
+
+        - name: Show how to log in
+          ansible.builtin.include_tasks: tasks/show-ssh-command.yml
+          vars:
+            gcp_nic0: "{{ ((gcp_instance_description.stdout | from_json).networkInterfaces | default([{}], true)) | first }}"
+            ssh_host: >-
+              {{ ((gcp_nic0.accessConfigs | default([{}], true)) | first).natIP
+                 | default(gcp_nic0.networkIP | default(''), true) }}
+            ssh_user: "{{ launch_ssh_user }}"
 
       always:
         - name: Remove the temporary GCP deployment entry

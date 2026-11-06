@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 
 from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
+from vault_common import environment_source, match_project, vault_projects
 
 import keystoneauth1.exceptions
 import openstack
@@ -354,6 +355,34 @@ def describe_deployment(entry, missing_server, missing_volumes, orphan_ports=Non
         + note
     )
 
+def connect_for(load_projects, vault, wanted, region_name, cloud=None):
+    """--cloud, then OS_CLOUD / OS_* variables, then the vault entry.
+
+    The vault entry is matched by key, project_name, or project_id against
+    the catalog's identities for the project, as select-project.yml does,
+    and used alone: an openrc or clouds.yaml for another project must not
+    fill in what the entry leaves out. load_projects is only called when
+    neither the flag nor the environment decided.
+    """
+    if cloud:
+        return openstack.connect(cloud=cloud, region_name=region_name), f"cloud {cloud}"
+    if os.environ.get("OS_CLOUD") or os.environ.get("OS_AUTH_URL"):
+        validate_openstack_environment(None)
+        return (openstack.connect(region_name=region_name),
+                environment_source("OS_* environment", vault))
+    key, auth = match_project(load_projects(), wanted, ("project_name", "project_id"))
+    if auth is None:
+        raise ValueError(
+            f"no OpenStack credentials: {Path(vault).name} has no entry for project "
+            f"{', '.join(sorted(wanted))}; add one, set OS_CLOUD or the OS_* "
+            "variables, or use --cloud")
+    options = {name: (str(value) if name == "project_id" else value)
+               for name, value in auth.items() if value not in (None, "")}
+    options["region_name"] = region_name
+    return (openstack.connect(load_envvars=False, load_yaml_config=False,
+                              **options),
+            f"vault entry '{key}'")
+
 def main():
     repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -369,7 +398,14 @@ def main():
     )
     parser.add_argument(
         "--cloud",
-        help="named clouds.yaml entry; otherwise use standard OpenStack settings",
+        help="named clouds.yaml entry, instead of the vault",
+    )
+    parser.add_argument(
+        "--vault",
+        type=Path,
+        default=repo_dir / "vaults/openstack.yml",
+        help="OpenStack vault for credentials when OS_CLOUD/OS_* is unset "
+        "(default: vaults/openstack.yml)",
     )
     parser.add_argument(
         "--region-name",
@@ -412,7 +448,7 @@ def main():
         raise ValueError(
             "catalog contains multiple OpenStack projects "
             f"({', '.join(sorted(projects))}); reconcile one project per run "
-            "with --project-id, scoping --cloud/standard auth env to that project"
+            "with --project-id"
         )
     if args.region_name:
         region_name = args.region_name
@@ -444,12 +480,9 @@ def main():
     # invocation can only check that project's resources.
     project_id = preferred_project_identity(
         requested_projects, migration_catalog, deployment_catalog)
-    validate_openstack_environment(args.cloud)
-    connect_args = {}
-    if args.cloud:
-        connect_args["cloud"] = args.cloud
-    connect_args["region_name"] = region_name
-    connection = openstack.connect(**connect_args)
+    connection, source = connect_for(
+        lambda: vault_projects(args.vault, "openstack_projects"), args.vault,
+        requested_projects, region_name, args.cloud)
     authenticated_identities = validate_scope(
         connection,
         migration_catalog,
@@ -459,7 +492,7 @@ def main():
     )
     print(
         f"OpenStack scope: project_id={connection.current_project_id}, "
-        f"region={region_name}"
+        f"region={region_name} (credentials: {source})"
     )
     stale_migrations, stale_deployments = find_missing_resources(
         connection, migration_catalog, deployment_catalog, authenticated_identities,

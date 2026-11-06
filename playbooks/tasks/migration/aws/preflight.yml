@@ -20,6 +20,7 @@
       profile provides credentials.
   when:
     - aws_task_env | length == 0
+    - aws_module_defaults | length == 0
     - not aws_cred_file.stat.exists
 
 - name: Check the AWS CLI

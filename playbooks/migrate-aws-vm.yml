@@ -11,6 +11,8 @@
   connection: local
   gather_facts: false
   environment: "{{ aws_task_env }}"
+  module_defaults:
+    group/amazon.aws.aws: "{{ aws_module_defaults }}"
 
   vars_files:
     - vars/migration-common.yml

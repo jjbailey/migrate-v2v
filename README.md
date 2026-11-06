@@ -68,7 +68,8 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
   `pyVmomi`, `openstacksdk`, `google-auth`, `requests`, `PyYAML`, and - for
   Azure - the `azure.azcollection` SDK requirements listed in its own
   `requirements.txt` (see the note in [requirements.yml](requirements.yml)).
-  [requirements.txt](requirements.txt) lists the rest with minimum versions.
+  [requirements.txt](requirements.txt) pins `ansible-core` and the rest to
+  the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
 - For the datastore-direct OpenStack migration
@@ -247,7 +248,9 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     whose AMIs are gone, and active AWS deployment entries whose EC2 instances
     are gone or terminated. It supports `--dry-run`, region/profile selection,
     `--project-id`/`--account-id`, account verification, and the same `--force`
-    safety guard.
+    safety guard. Exported AWS credentials win; otherwise `vaults/aws.yml` is
+    used (see
+    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools)).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
     entries whose managed images or snapshots are gone. It supports `--dry-run`,
@@ -296,6 +299,7 @@ migrate-v2v/
 │   ├── openstack-project-facts.py  # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
 │   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
+│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
 │   ├── inspect-ova.py           # OVA inspection
 │   └── *-vault.sh               # Vault management scripts
 ├── catalogs/                    # Migration and deployment catalogs
@@ -778,13 +782,14 @@ What each kind asks:
   migration for that platform first; a name can also be typed). They then ask
   for the platform's launch settings: subnet, security groups, instance type
   and key pair for AWS; VM size, network names, public IP, admin user, and SSH
-  key for Azure; zone, machine type, network, tags, external IP and
+  key resource for Azure; zone, machine type, network, tags, external IP and
   optional SSH key for GCP; and IP, MAC, floating IP, security group,
   config-drive, user-data, flavor, key pair, and network choices for OpenStack
   (see [OpenStack Launch Networking](#openstack-launch-networking)).
   Wherever the cloud API can list valid values, the dialog offers a live
   picker (backed by `bin/openstack-project-facts.py`,
-  `bin/aws-project-facts.py`, or `bin/gcp-project-facts.py`) with the
+  `bin/aws-project-facts.py`, `bin/gcp-project-facts.py`, or
+  `bin/azure-project-facts.py`) with the
   current value pre-selected. Long single-select lists lead with a
   `Type manually (skip the list)` row so a known value can be typed without
   scrolling, and a failed lookup falls back to manual entry instead of
@@ -964,10 +969,13 @@ works too.
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.
 
 The control host is assumed to be single-user, or used only by trusted
-admins. `no_log` keeps credentials out of Ansible output, but some tasks
-still expose them to `ps` while they run: the vCenter password in the
-`ovftool` export URL and in `GOVC_PASSWORD` for `govc` calls, and the AWS
-keys in the AWS plays' `environment:`. On a shared host, mount `/proc` with
+admins. `no_log` keeps credentials out of Ansible output, and secrets stay
+out of `environment:`, which Ansible puts on an `sh -c 'VAR=...'` command
+line that `ps` shows to every local user: `govc` calls and the AWS S3 upload
+read theirs on stdin through `bin/exec-with-stdin-env.sh`, and the
+`amazon.aws` and Azure modules take theirs as module parameters. One
+exposure remains: the vCenter password in the `ovftool` export URL, readable
+in `ps` for the whole export. On a shared host, mount `/proc` with
 `hidepid=2`.
 
 - **`vaults/vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
@@ -1340,15 +1348,14 @@ marked `retired`; it never deletes cloud resources. It scopes one subscription
 per run (inferred when the catalog holds one, else `--subscription`, alias
 `--project`), verifies each row's image ID belongs to that subscription, and
 refuses unusually large removals unless `--force` is supplied. Use `--dry-run`
-first. Unlike the playbooks, it does not read the vault; export the service
-principal as `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
-`AZURE_SECRET` (or `AZURE_CLIENT_SECRET`), or rely on `DefaultAzureCredential`
-(`az login`, managed identity):
+first. Exported `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
+`AZURE_SECRET` (or `AZURE_CLIENT_SECRET`) are used when set. Otherwise it uses
+the service principal from `vaults/azure.yml`, matched by subscription ID
+(`--project` also accepts a vault key; `--vault` names another file), and
+only then `DefaultAzureCredential` (`az login`, managed identity), so a
+personal login blocked by Entra ID security defaults does not matter:
 
 ```bash
-export AZURE_TENANT=<tenant-id>
-export AZURE_CLIENT_ID=<client-id>
-export AZURE_SECRET=<client-secret>
 ./bin/reconcile-catalog-azure.py --dry-run
 ./bin/reconcile-catalog-azure.py
 ```
@@ -1360,8 +1367,7 @@ creates a VM from the newest completed Azure migration of `VM_NAME` in the
 selected subscription:
 
 ```bash
-VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub \
-AZURE_SSH_KEY_FILE=~/.ssh/id_ed25519.pub ./bin/launch-azure-instance.sh
+VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 ```
 
 - The boot image becomes the OS disk (`<vm>-osdisk`, `StandardSSD_LRS`), and
@@ -1370,8 +1376,17 @@ AZURE_SSH_KEY_FILE=~/.ssh/id_ed25519.pub ./bin/launch-azure-instance.sh
   disk.
 - The images are generalized, so Azure provisions the VM: cloud-init with the
   Azure datasource creates `AZURE_ADMIN_USERNAME` (default `azureuser`) with
-  the key in `AZURE_SSH_KEY_FILE`, which every launch needs. A guest without
-  it fails with `OSProvisioningTimedOut`.
+  an SSH key, which every launch needs. A guest without it fails with
+  `OSProvisioningTimedOut`.
+- Like the AWS and OpenStack key pairs, the key is an Azure SSH public key
+  resource, `AZURE_SSH_KEY_NAME` (default `cloud`), in the vault's resource
+  group. A missing key stops the launch before anything is created. Register
+  one once with
+  `az sshkey create --resource-group <rg> --name cloud --public-key @<file>.pub`.
+  `AZURE_SSH_KEY_FILE=<file>.pub` supplies the key from a local file instead.
+  `./bin/azure-project-facts.py <subscription>` lists the key resources with
+  their SHA256 fingerprints (as `ssh-keygen -l` prints them), and the launch
+  dialog offers them as a picker.
 - Networking lives in the vault's resource group: the VNet
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
   `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`, default
@@ -1387,18 +1402,18 @@ AZURE_SSH_KEY_FILE=~/.ssh/id_ed25519.pub ./bin/launch-azure-instance.sh
 ## GCP Project Reconciliation
 
 GCP migration and deployment catalog entries are scoped by `gcp_project`.
-When more than one project is present, pass the project ID explicitly and scope
-credentials with `--credentials-file` or standard Google credentials:
+When more than one project is present, pass the project ID explicitly.
+Credentials come from `--credentials-file`, else an exported
+`GOOGLE_APPLICATION_CREDENTIALS`, else the `vaults/gcp.yml` entry whose key,
+`gcp_project`, or `project_id` matches, else the gcloud application-default
+login:
 
 ```bash
-./bin/reconcile-catalog-gcp.py \
-  --project-id my-project-a \
-  --credentials-file /path/to/service-account.json \
-  --dry-run
+./bin/reconcile-catalog-gcp.py --project-id my-project-a --dry-run
 ```
 
-Entries for other projects are left untouched. When no `--credentials-file` is
-given, the ambient default project from Application Default Credentials (gcloud
+Entries for other projects are left untouched. When the credentials come
+from Google's defaults, the ambient default project from Application Default Credentials (gcloud
 config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run is refused only when the
 credentials themselves carry a different project, as a service account key does.
 
@@ -1436,35 +1451,30 @@ rows that are checked.
 One run reconciles one project: `--project-id` accepts a project name or ID
 and is required whenever the
 catalogs hold more than one OpenStack project, and entries for other projects
-are left alone rather than treated as an error. Repeat per project, scoping
-the standard `openstacksdk` environment or `--cloud <name>` auth to each
-project in turn.
+are left alone rather than treated as an error. Repeat per project.
 
-OpenStack authentication comes from the standard `openstacksdk` environment or
-`clouds.yaml` configuration. Unlike the AWS and GCP reconcilers, which find
-`~/.aws` or Application Default Credentials on their own, this script does not
-read the encrypted `vaults/` files and has no default cloud, so it exits with
-"missing required OpenStack environment variable(s)" unless you pick one of:
+OpenStack authentication comes from `--cloud <name>` (a `clouds.yaml`
+entry), else an exported `OS_CLOUD` or `OS_*` RC environment, else the
+`vaults/openstack.yml` entry whose key, `project_name`, or `project_id`
+matches the project in scope (used alone, with nothing filled in from
+`clouds.yaml`). With none of those the run stops and says so:
 
 ```bash
-# 1. Name a clouds.yaml entry (~/.config/openstack/clouds.yaml)
+# Nothing exported: the vault entry for the catalog's project
+./bin/reconcile-catalog-openstack.py --dry-run
+
+# A clouds.yaml entry (~/.config/openstack/clouds.yaml)
 ./bin/reconcile-catalog-openstack.py --cloud my-cloud \
   --project-id my-project-a --region-name US-WEST-OR-1 --dry-run
 
-# 2. Select it for the shell with OS_CLOUD
-export OS_CLOUD=my-cloud
-
-# 3. Source an OpenStack RC file (OS_AUTH_URL, OS_USERNAME, OS_PASSWORD,
-#    OS_PROJECT_NAME or OS_PROJECT_ID, ...) downloaded from the dashboard
+# An RC file overrides the vault for this shell
 source ~/my-project-a-openrc.sh
 ./bin/reconcile-catalog-openstack.py \
   --project-id my-project-a --region-name US-WEST-OR-1 --dry-run
 ```
 
-Each project needs its own `--cloud` entry or RC file, so source or name the one
-matching `--project-id` before every run. `--region-name` defaults to the catalog's region
-for that project; use `--cloud <name>`
-for a named `clouds.yaml` entry and `--project-id` (name or ID) to select the project.
+`--region-name` defaults to the catalog's region for that project, and
+`--project-id` (name or ID) selects the project.
 The authenticated project ID must match `--project-id` (string-compared, so
 either form works), and it must have entries
 in the requested region; other projects' entries are out of scope and kept.
