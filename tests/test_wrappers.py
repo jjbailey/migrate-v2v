@@ -303,5 +303,29 @@ class DefaultsTests(unittest.TestCase):
             with self.subTest(script=path.name):
                 self.assertNotIn("/work/migrate-v2v", path.read_text())
 
+class ExecWithStdinEnvTests(unittest.TestCase):
+    """bin/exec-with-stdin-env.sh: secrets arrive on stdin, not in argv."""
+
+    SHOW = 'printf "%s|%s|%s" "$A" "$B" "${C-unset}"'
+
+    def run_helper(self, stdin, *argv):
+        env = {key: value for key, value in os.environ.items() if key not in {"A", "B", "C"}}
+        return subprocess.run([str(BIN / "exec-with-stdin-env.sh"), *argv], input=stdin,
+                              capture_output=True, text=True, env=env, check=False)
+
+    def test_exports_one_line_per_name_and_skips_empty_lines(self):
+        result = self.run_helper("one two\n\n", "A", "B", "C", "--", "sh", "-c", self.SHOW)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "one two||unset")
+
+    def test_last_line_without_newline_is_read(self):
+        result = self.run_helper("x\ny", "A", "B", "--", "sh", "-c", self.SHOW)
+        self.assertEqual(result.stdout, "x|y|unset")
+
+    def test_rejects_bad_names_and_missing_command(self):
+        self.assertEqual(self.run_helper("", "1BAD", "--", "true").returncode, 2)
+        self.assertEqual(self.run_helper("", "A", "--").returncode, 2)
+        self.assertEqual(self.run_helper("", "--", "true").returncode, 2)
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,11 +4,16 @@
 # ansible-playbook. tests/validate.sh checks both. The Azure SDK stays in the
 # Azure collection's own requirements.txt and is installed separately; see
 # requirements.yml.
-PyYAML>=6.0
-requests>=2.18.4
-pyvmomi>=8.0
-boto3>=1.34.0
-botocore>=1.34.0
-openstacksdk>=1.0.0
-keystoneauth1>=5.0
-google-auth>=2.0
+#
+# Pinned to the versions the workflows are verified against, ansible-core
+# included (community.vmware 5.10.0 needs it to stay on 2.18; see
+# requirements.yml). Bump them together.
+ansible-core==2.18.18
+PyYAML==6.0.2
+requests==2.34.2
+pyvmomi==8.0.3.0.1
+boto3==1.42.54
+botocore==1.42.54
+openstacksdk==4.7.0
+keystoneauth1==5.10.0
+google-auth==2.40.1

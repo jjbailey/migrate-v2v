@@ -13,6 +13,10 @@ govc_url: "{{ GOVC_URL }}"
 govc_username: "{{ GOVC_USERNAME }}"
 govc_password: "{{ GOVC_PASSWORD }}"
 govc_bin: govc
+# govc tasks set GOVC_URL/GOVC_USERNAME/GOVC_INSECURE in environment: but
+# pass the password on stdin through this helper, so it never lands on the
+# `sh -c 'VAR=...'` command line Ansible builds from environment:.
+stdin_env_bin: "{{ playbook_dir }}/../bin/exec-with-stdin-env.sh"
 govc_insecure: "{{ '1' if not (validate_certs | bool) else GOVC_INSECURE | string }}"
 
 discard_failed_artifacts: false

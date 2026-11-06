@@ -68,7 +68,8 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
   `pyVmomi`, `openstacksdk`, `google-auth`, `requests`, `PyYAML`, and - for
   Azure - the `azure.azcollection` SDK requirements listed in its own
   `requirements.txt` (see the note in [requirements.yml](requirements.yml)).
-  [requirements.txt](requirements.txt) lists the rest with minimum versions.
+  [requirements.txt](requirements.txt) pins `ansible-core` and the rest to
+  the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
 - For the datastore-direct OpenStack migration
@@ -968,10 +969,13 @@ works too.
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.
 
 The control host is assumed to be single-user, or used only by trusted
-admins. `no_log` keeps credentials out of Ansible output, but some tasks
-still expose them to `ps` while they run: the vCenter password in the
-`ovftool` export URL and in `GOVC_PASSWORD` for `govc` calls, and the AWS
-keys in the AWS plays' `environment:`. On a shared host, mount `/proc` with
+admins. `no_log` keeps credentials out of Ansible output, and secrets stay
+out of `environment:`, which Ansible puts on an `sh -c 'VAR=...'` command
+line that `ps` shows to every local user: `govc` calls and the AWS S3 upload
+read theirs on stdin through `bin/exec-with-stdin-env.sh`, and the
+`amazon.aws` and Azure modules take theirs as module parameters. One
+exposure remains: the vCenter password in the `ovftool` export URL, readable
+in `ps` for the whole export. On a shared host, mount `/proc` with
 `hidepid=2`.
 
 - **`vaults/vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to

@@ -5,18 +5,38 @@
 # Shared by every AWS entry playbook (bootstrap-aws-import.yml,
 # launch-aws-instance.yml, migrate-aws-vm.yml).
 
-# Export vault-held AWS credentials into every task's environment so the
-# boto3-based amazon.aws modules and the aws CLI pick them up. Empty vault
-# entries are skipped so ~/.aws or an instance profile can still satisfy auth.
+# Vault-held AWS access keys never go through `environment:`: Ansible runs
+# each module as `sh -c 'VAR=... python ...'`, which would leave the secret
+# key readable in ps for as long as a multi-GB upload takes. Instead the
+# amazon.aws modules get them through a play-level module_defaults
+# (aws_module_defaults), and the one aws CLI call, the S3 upload in
+# aws/import.yml, reads them on stdin via bin/exec-with-stdin-env.sh
+# (aws_cli_stdin). Only a non-secret aws_profile goes in the environment, and
+# only when there are no keys: amazon.aws refuses a profile and keys together.
+# Empty vault entries are skipped so ~/.aws or an instance profile can still
+# satisfy auth.
 #
-# This must stay a lazily evaluated var, not a set_fact: each play applies it
-# through a play-level `environment:`, which is templated for every task -
-# including the preflight tasks that run before select-project.yml has set
-# aws_profile and the key facts. The default('') guards make it evaluate to {}
-# until then. aws/preflight.yml warns when it is still empty after selection.
+# These must stay lazily evaluated vars, not set_facts: the plays apply them
+# at play level, where they are templated for every task - including the
+# preflight tasks that run before select-project.yml has set aws_profile and
+# the key facts. The default('') guards make them evaluate to {} until then.
+# aws/preflight.yml warns when both are still empty after selection.
+aws_has_keys: >-
+  {{ (aws_access_key_id | default('')) | length > 0
+     and (aws_secret_access_key | default('')) | length > 0 }}
 aws_task_env: >-
-  {{ ({'AWS_PROFILE': aws_profile} if (aws_profile | default('')) | length > 0 else {})
-     | combine({'AWS_ACCESS_KEY_ID': aws_access_key_id, 'AWS_SECRET_ACCESS_KEY': aws_secret_access_key}
-               if (aws_access_key_id | default('')) | length > 0 and (aws_secret_access_key | default('')) | length > 0 else {})
-     | combine({'AWS_SESSION_TOKEN': aws_session_token} if (aws_session_token | default('')) | length > 0 else {}) }}
+  {{ {'AWS_PROFILE': aws_profile}
+     if (aws_profile | default('')) | length > 0 and not (aws_has_keys | bool) else {} }}
+# profile '' stops a shell-exported AWS_PROFILE being read as a conflicting
+# profile next to the keys.
+aws_module_defaults: >-
+  {{ ({'access_key': aws_access_key_id, 'secret_key': aws_secret_access_key, 'profile': ''}
+      | combine({'session_token': aws_session_token} if (aws_session_token | default('')) | length > 0 else {}))
+     if aws_has_keys | bool else {} }}
+# One line each for AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+# AWS_SESSION_TOKEN; exec-with-stdin-env.sh skips the empty ones.
+aws_cli_stdin: |-
+  {{ aws_access_key_id if aws_has_keys | bool else '' }}
+  {{ aws_secret_access_key if aws_has_keys | bool else '' }}
+  {{ (aws_session_token | default('')) if aws_has_keys | bool else '' }}
 

@@ -18,10 +18,11 @@
   environment:
     GOVC_URL: "{{ govc_url }}"
     GOVC_USERNAME: "{{ govc_username }}"
-    GOVC_PASSWORD: "{{ govc_password }}"
     GOVC_INSECURE: "{{ govc_insecure }}"
-  ansible.builtin.command: >-
-    {{ govc_bin }} find /{{ datacenter }}/vm -type m -name "{{ vm_name }}"
+  ansible.builtin.command:
+    stdin: "{{ govc_password }}"
+    cmd: >-
+      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} find /{{ datacenter }}/vm -type m -name "{{ vm_name }}"
   register: source_vm_find
   changed_when: false
   failed_when: source_vm_find.rc != 0 or (source_vm_find.stdout_lines | length != 1)
@@ -35,10 +36,11 @@
   environment:
     GOVC_URL: "{{ govc_url }}"
     GOVC_USERNAME: "{{ govc_username }}"
-    GOVC_PASSWORD: "{{ govc_password }}"
     GOVC_INSECURE: "{{ govc_insecure }}"
-  ansible.builtin.command: >-
-    {{ govc_bin }} vm.info -json "{{ source_vm_path }}"
+  ansible.builtin.command:
+    stdin: "{{ govc_password }}"
+    cmd: >-
+      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} vm.info -json "{{ source_vm_path }}"
   register: source_vm_info
   changed_when: false
   failed_when: source_vm_info.rc != 0
