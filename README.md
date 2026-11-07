@@ -519,7 +519,7 @@ Note that `gcloud compute ssh` and the Cloud Console ephemeral-key flow rely on
 not install. On migrated instances, use ordinary `ssh` with an inherited key.
 
 AWS, Azure, OpenStack, and GCP migrations use persistent run directories under
-`/var/tmp/migrate-v2v/` (the `artifact_root` default, and the wrappers'
+`/work/migrate-v2v/` (the `artifact_root` default, and the wrappers'
 `ARTIFACT_ROOT` default), each in a target/VM/run-ID subtree. After an
 Azure, OpenStack, or GCP OVF run fails, the package, manifest, and referenced
 VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
@@ -561,7 +561,7 @@ If the import finished but a later step failed (the snapshot check, tagging,
 or the catalog append), the run deregisters the imported AMI and deletes its
 snapshots, since no catalog row will ever point at them.
 The local AWS OVA is written under
-`/var/tmp/migrate-v2v/aws/<vm-name>/<run-id>` by default; set
+`/work/migrate-v2v/aws/<vm-name>/<run-id>` by default; set
 `migration_run_dir` to place this potentially large file elsewhere, for example:
 
 ```bash
@@ -732,7 +732,7 @@ an interactive prompt:
 The `bin/` platform wrappers combine their environment-variable settings with
 any Ansible arguments supplied on the command line; for example,
 `./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project`.
-Migration wrappers default their artifact root to `/var/tmp/migrate-v2v`,
+Migration wrappers default their artifact root to `/work/migrate-v2v`,
 the same as the playbooks, and accept `ARTIFACT_ROOT` to override it. The wrappers are useful when you want the
 playbook runner, vault handling, and verbosity applied consistently.
 
@@ -811,7 +811,7 @@ the file already exists. Cancelling at any prompt, or pressing Esc, exits with
 "Nothing was run."
 
 The migrate dialogs write `ARTIFACT_ROOT` into the script, defaulting to
-`/var/tmp/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
+`/work/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
 artifacts belong on another filesystem. The shared widgets and the
 terminal handling live in `bin/launch-dialog-common.sh`; the migration prompts
 and command generation live in `bin/migrate-dialog-common.sh`. Ready-to-run

@@ -28,7 +28,7 @@
     # snapshot, its run directory, and any blobs and images it created.
     # Nothing else runs.
     discard_run_id: ""
-    artifact_root: "/var/tmp/migrate-v2v"
+    artifact_root: "/work/migrate-v2v"
     qemu_img_bin: qemu-img
     # Extra qemu-img convert arguments. -m keeps several coroutines in flight
     # and -W lets them write out of order, which a default single-threaded

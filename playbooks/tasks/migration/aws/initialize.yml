@@ -15,7 +15,7 @@
 
 - name: Derive AWS artifact root and VM slug
   ansible.builtin.set_fact:
-    aws_artifact_root: "{{ artifact_root | default('/var/tmp/migrate-v2v') }}"
+    aws_artifact_root: "{{ artifact_root | default('/work/migrate-v2v') }}"
     aws_vm_slug: "{{ vm_name | regex_replace('[^A-Za-z0-9_.-]', '_') }}"
 
 - name: Derive the AWS migration artifact directory

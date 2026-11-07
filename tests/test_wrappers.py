@@ -110,7 +110,7 @@ class MigrateWrapperTests(WrapperTestCase):
             with self.subTest(script=script):
                 self.run_wrapper(script, {"VM_NAME": "vm"})
                 self.assertEqual(
-                    self.extra_vars()["artifact_root"], "/var/tmp/migrate-v2v")
+                    self.extra_vars()["artifact_root"], "/work/migrate-v2v")
                 self.run_wrapper(script, {
                     "VM_NAME": "vm", "ARTIFACT_ROOT": "/srv/my artifacts"})
                 self.assertEqual(
@@ -298,10 +298,10 @@ class StageV2vTests(WrapperTestCase):
         })
 
 class DefaultsTests(unittest.TestCase):
-    def test_no_wrapper_defaults_under_work(self):
+    def test_no_old_artifact_defaults_in_wrappers(self):
         for path in sorted(BIN.glob("*.sh")):
             with self.subTest(script=path.name):
-                self.assertNotIn("/work/migrate-v2v", path.read_text())
+                self.assertNotIn("/var/tmp/migrate-v2v", path.read_text())
 
 class ExecWithStdinEnvTests(unittest.TestCase):
     """bin/exec-with-stdin-env.sh: secrets arrive on stdin, not in argv."""
