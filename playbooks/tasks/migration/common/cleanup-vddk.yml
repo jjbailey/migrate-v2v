@@ -24,7 +24,21 @@
   when:
     - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
-  failed_when: false
+  register: cleanup_run_dir_remove
+  # ignore_errors rather than failed_when: false, so a failed removal keeps
+  # its failed flag: the discard report below must not claim the directory
+  # is gone when it is not.
+  ignore_errors: true
+
+- name: Count a run directory the discard could not remove
+  ansible.builtin.set_fact:
+    discard_unremoved_artifacts: >-
+      {{ discard_unremoved_artifacts | default([])
+         + ['run directory ' ~ migration_run_dir] }}
+  when:
+    - cleanup_run_dir_remove is not skipped
+    - cleanup_run_dir_remove is failed
+    - discard_failed_artifacts | bool
 
 # A run refused by a check before its snapshot (an unsupported disk, a disk
 # the curl backend cannot read) wrote no manifest and took no snapshot, so it

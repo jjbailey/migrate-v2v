@@ -222,7 +222,22 @@
     - not (migration_succeeded | default(false) | bool)
     - discard_failed_artifacts | bool
   changed_when: true
-  failed_when: false
+  # ignore_errors rather than failed_when: false, so each item keeps its real
+  # failed flag for the report below.
+  ignore_errors: true
+  register: gcp_image_remove
+
+- name: Report images the discard could not remove
+  ansible.builtin.debug:
+    msg: >-
+      Could not remove Compute image {{ item.item }} in project
+      {{ gcp_project }}; remove it with gcloud compute images delete
+      {{ item.item }} --project={{ gcp_project }} or rerun the discard.
+      Detail: {{ item.stderr | default('(none reported)') | trim }}
+  loop: "{{ gcp_image_remove.results | default([]) | selectattr('failed', 'defined')
+            | selectattr('failed') | list }}"
+  loop_control:
+    label: "{{ item.item }}"
 
 - name: Warn about images a still-running import may create
   ansible.builtin.debug:

@@ -42,7 +42,10 @@
         label: "{{ item }}"
       when: (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
       register: azure_blob_remove
-      failed_when: false
+      # ignore_errors rather than failed_when: false, so a discard can count
+      # each blob it could not remove (below). After a successful migration
+      # a leftover blob is only reported.
+      ignore_errors: true
 
     - name: Report staged VHD blobs that could not be removed
       ansible.builtin.debug:
@@ -101,19 +104,24 @@
       ignore_errors: true
       register: azure_snapshot_remove
 
-    - name: Record which images and snapshots the discard removed
+    - name: Record which blobs, images and snapshots the discard removed
       vars:
+        azure_blob_results: "{{ azure_blob_remove.results | default([]) }}"
         azure_image_results: "{{ azure_image_remove.results | default([]) }}"
         azure_snapshot_results: "{{ azure_snapshot_remove.results | default([]) }}"
       ansible.builtin.set_fact:
         discard_removed_artifacts: >-
           {{ discard_removed_artifacts | default([])
+             + (azure_blob_results | rejectattr('skipped', 'defined') | rejectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'blob ') | list)
              + (azure_image_results | rejectattr('skipped', 'defined') | rejectattr('failed')
                 | map(attribute='item') | map('regex_replace', '^', 'image ') | list)
              + (azure_snapshot_results | rejectattr('skipped', 'defined') | rejectattr('failed')
                 | map(attribute='item') | map('regex_replace', '^', 'snapshot ') | list) }}
         discard_unremoved_artifacts: >-
           {{ discard_unremoved_artifacts | default([])
+             + (azure_blob_results | selectattr('failed', 'defined') | selectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'blob ') | list)
              + (azure_image_results | selectattr('failed', 'defined') | selectattr('failed')
                 | map(attribute='item') | map('regex_replace', '^', 'image ') | list)
              + (azure_snapshot_results | selectattr('failed', 'defined') | selectattr('failed')
