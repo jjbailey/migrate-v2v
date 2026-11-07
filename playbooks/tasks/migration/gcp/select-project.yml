@@ -7,7 +7,7 @@
 
 - name: Include the GCP vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/gcp.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/gcp.yml"
   no_log: true
 
 - name: Determine whether a GCP target project was explicitly requested

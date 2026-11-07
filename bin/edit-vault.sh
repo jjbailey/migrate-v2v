@@ -6,7 +6,8 @@
 #
 # The per-target entry points -- aws-vault.sh, azure-vault.sh, gcp-vault.sh,
 # openstack-vault.sh, vsphere-vault.sh -- are symlinks to this
-# script; the name it was invoked as selects vaults/<target>.yml. Set VAULT to
+# script; the name it was invoked as selects
+# $MIGRATE_V2V_VAULT_DIR/<target>.yml. Set VAULT to
 # edit some other file.
 #
 # ansible-vault comes from $DIB7_VENV_BIN (default ~/.dib7/bin) if present,
@@ -32,7 +33,7 @@ if [ "$target" = "$invoked_as" ] || [ -z "$target" ] ; then
     target=""
 fi
 
-VAULT="${VAULT:-vaults/$target.yml}"
+VAULT="${VAULT:-${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/$target.yml}"
 # Prefer the dib7 venv's ansible-vault, else whatever is on PATH.
 VENV_BIN="${DIB7_VENV_BIN:-$HOME/.dib7/bin}"
 ANSIBLE_VAULT="$VENV_BIN/ansible-vault"

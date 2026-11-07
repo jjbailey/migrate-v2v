@@ -104,9 +104,10 @@ echo "== vaults =="
 # The playbooks load every credential from these encrypted files; make sure
 # the required ones exist and are actually vault-encrypted (plaintext here
 # would both fail at runtime and risk leaking secrets into VCS).
-vault_files=$(git ls-files 'vaults/*.yml')
+vault_dir=${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}
+vault_files=$(find "$vault_dir" -maxdepth 1 -type f -name '*.yml' -print 2> /dev/null | sort || true)
 if [ -z "$vault_files" ] ; then
-    echo "  skip vaults (none tracked; public checkout)"
+    echo "  skip vaults (none in $vault_dir; public checkout)"
 fi
 for vault in $vault_files ; do
     if [ -s "$vault" ] && head -n 1 "$vault" | grep -q '^[$]ANSIBLE_VAULT;' ; then
@@ -122,7 +123,7 @@ done
 vault_pass="${VAULT_PASSWORD_FILE:-$HOME/.ssh/dib-vault-pass}"
 if [ -n "$vault_files" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
     echo "== vault schema =="
-    if python3 tests/check_vault_schema.py "$vault_pass" ; then
+    if python3 tests/check_vault_schema.py "$vault_pass" "$vault_dir" ; then
         echo "  ok   vault schemas (vsphere/openstack/aws/gcp/azure)"
     else
         fail "vault schema check failed"

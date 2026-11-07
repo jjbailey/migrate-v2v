@@ -1,5 +1,9 @@
 # Vaults Required by the Playbooks
 
+Vault files live under `/work/migrate-v2v/vaults/` by default. Set
+`MIGRATE_V2V_VAULT_DIR` to use a different directory. The filenames below are
+relative to that directory.
+
 ## Editing a Vault
 
 `bin/aws-vault.sh`, `bin/azure-vault.sh`, `bin/gcp-vault.sh`,
@@ -14,7 +18,7 @@ bin/aws-vault.sh
 Set `VAULT` to point at a different file (e.g. a per-environment vault):
 
 ```sh
-VAULT=vaults/aws-staging.yml bin/aws-vault.sh
+VAULT=/work/migrate-v2v/vaults/aws-staging.yml bin/aws-vault.sh
 ```
 
 ## Credentials for the bin/ Tools

@@ -26,9 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
-
-REPO_DIR = Path(__file__).resolve().parents[1]
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 from pyVim.connect import Disconnect, SmartConnect
 from pyVim.task import WaitForTask
@@ -85,9 +83,10 @@ def main():
                         help="defaults to the vault entry's datacenter")
     parser.add_argument("--vm", required=True)
     parser.add_argument("--insecure", action="store_true", help="do not verify the vCenter certificate")
-    parser.add_argument("--vault", type=Path, default=REPO_DIR / "vaults/vsphere.yml",
+    parser.add_argument("--vault", type=Path, default=default_vault_path("vsphere.yml"),
                         help="vSphere vault for credentials when VCENTER_* is unset "
-                             "(default: vaults/vsphere.yml)")
+                             "(default: $MIGRATE_V2V_VAULT_DIR/vsphere.yml, or "
+                             "/work/migrate-v2v/vaults/vsphere.yml)")
     args = parser.parse_args()
     env_user = os.environ.get("VCENTER_USERNAME")
     env_password = os.environ.get("VCENTER_PASSWORD")

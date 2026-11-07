@@ -11,7 +11,8 @@ from pathlib import Path
 
 from catalog_common import (default_catalog_path, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
-from vault_common import environment_source, match_project, vault_projects
+from vault_common import (default_vault_path, environment_source, match_project,
+                          vault_projects)
 
 import keystoneauth1.exceptions
 import openstack
@@ -385,7 +386,6 @@ def connect_for(load_projects, vault, wanted, region_name, cloud=None):
             f"vault entry '{key}'")
 
 def main():
-    repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--migration-catalog",
@@ -404,9 +404,10 @@ def main():
     parser.add_argument(
         "--vault",
         type=Path,
-        default=repo_dir / "vaults/openstack.yml",
+        default=default_vault_path("openstack.yml"),
         help="OpenStack vault for credentials when OS_CLOUD/OS_* is unset "
-        "(default: vaults/openstack.yml)",
+        "(default: $MIGRATE_V2V_VAULT_DIR/openstack.yml, or "
+        "/work/migrate-v2v/vaults/openstack.yml)",
     )
     parser.add_argument(
         "--region-name",

@@ -13,6 +13,10 @@ a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
 The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
+Runtime artifacts, catalogs, and encrypted vaults live under
+`/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` to use another
+directory for vault files.
+
 ## Prerequisites
 
 - VMware OVF Tool. This repository is tested with the 5.1.0 Linux ZIP;
@@ -86,7 +90,8 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
 - `dialog` or `whiptail` is required only for the interactive dialogs
   (`bin/*-dialog.sh`; see [Interactive Dialogs](#interactive-dialogs)) and
   should be available on `PATH`.
-- Azure migrations use the service principal in `vaults/azure.yml` and the
+- Azure migrations use the service principal in the Azure vault under
+  `/work/migrate-v2v/vaults/` by default, and the
   `azure.azcollection` collection (pinned in
   [requirements.yml](requirements.yml)); install the collection's own Python
   SDK requirements into the environment that runs Ansible, as its note
@@ -97,9 +102,10 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
 
 ## Required Privileges
 
-These playbooks do not create accounts or grant access. Each credential in
-`vaults/` must already be allowed to do what that stage needs. The lists below
-describe the operations the playbooks perform, as a starting point for your
+These playbooks do not create accounts or grant access. Credentials in the
+vaults under `/work/migrate-v2v/vaults/` by default must already be allowed to
+do what that stage needs. The lists below describe the operations the
+playbooks perform, as a starting point for your
 administrator; they are not a tested minimal policy, so tighten or adjust them
 for your environment. Migration and launch can use different credentials, and
 the AWS bootstrap is a one-time administrative step.
@@ -248,8 +254,8 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     whose AMIs are gone, and active AWS deployment entries whose EC2 instances
     are gone or terminated. It supports `--dry-run`, region/profile selection,
     `--project-id`/`--account-id`, account verification, and the same `--force`
-    safety guard. Exported AWS credentials win; otherwise `vaults/aws.yml` is
-    used (see
+    safety guard. Exported AWS credentials win; otherwise the AWS vault under
+    `/work/migrate-v2v/vaults/` is used (see
     [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools)).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
@@ -315,7 +321,6 @@ migrate-v2v/
 │   └── vars/                    # Shared variables
 ├── requirements.yml             # Pinned Ansible collections
 ├── tests/                       # Static validation gate and catalog tests
-└── vaults/                      # Encrypted credentials
 ```
 
 The platform wrappers also accept normal Ansible arguments such as `-e` and
@@ -355,7 +360,7 @@ To see which names and IDs a project can use, run
 `./bin/openstack-project-facts.py <project>`. It lists the images, flavors,
 security groups, networks, and keypairs that project can use, filtered to the
 authenticated project even when the account is an admin. `<project>` is a
-vault key, `project_name`, or `project_id` from `vaults/openstack.yml`. You
+vault key, `project_name`, or `project_id` from the OpenStack vault. You
 can leave it out when the vault has one project or `OS_*` credentials are
 already set; `--cloud <name>` uses a `clouds.yaml` entry instead (that entry
 picks the project, so a `<project>` given with it is ignored with a warning),
@@ -714,7 +719,7 @@ instance's keys, delete and relaunch it.
 
 Credentials (vCenter host/user/password, OpenStack authentication, AWS
 region/bucket/role and access keys, and GCP project/service-account settings)
-come from the encrypted files in `vaults/` - see
+come from the encrypted runtime vaults - see
 "Secrets" below. Anything still passed with `-e` overrides the vault values;
 `-e aws_region=...`, `-e vcenter_hostname=...` and friends still work.
 
@@ -868,7 +873,7 @@ stage-v2v playbook installs a one-time, boot-time reconfigure script to do this.
 bin/stage-v2v.sh -c vcenter.example.com -H my-vm [-a address] [-u ssh_username] [-k ssh_private_key_file]
 ```
 
-The VM is looked up in vCenter using the credentials in `vaults/vsphere.yml`. The same vault entry can
+The VM is looked up in vCenter using the credentials in the vSphere vault. The same vault entry can
 also supply the guest SSH login (`ssh_username`, `ssh_password`,
 `ssh_private_key_file`); see [doc/vaults.md](doc/vaults.md#vsphere-vault).
 Windows guests are detected and skipped, as are VMs that are not CentOS or not
@@ -946,23 +951,25 @@ Common failures:
 
 ## Secrets
 
-All credentials live in the Ansible-vault-encrypted files in `vaults/`. The
-vault password is expected at `~/.ssh/dib-vault-pass` (any of
-`--ask-vault-pass`, `--vault-password-file <file>`, `--vault-id`, or
-`VAULT_PASSWORD_FILE` also works - see `bin/ansible-run.sh`). Edit (or create) a vault with its
-helper, which uses the same password lookup and falls back to a prompt:
+All credentials live in the Ansible-vault-encrypted files under
+`/work/migrate-v2v/vaults/` by default. Set `MIGRATE_V2V_VAULT_DIR` to use
+another directory. The vault password is expected at
+`~/.ssh/dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
+<file>`, `--vault-id`, or `VAULT_PASSWORD_FILE` also works; see
+`bin/ansible-run.sh`). Edit (or create) a vault with its helper, which uses the
+same password lookup and falls back to a prompt:
 
 ```bash
-./bin/aws-vault.sh        # vaults/aws.yml
-./bin/azure-vault.sh      # vaults/azure.yml
-./bin/gcp-vault.sh        # vaults/gcp.yml
-./bin/openstack-vault.sh  # vaults/openstack.yml
-./bin/vsphere-vault.sh    # vaults/vsphere.yml
+./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
+./bin/azure-vault.sh      # /work/migrate-v2v/vaults/azure.yml
+./bin/gcp-vault.sh        # /work/migrate-v2v/vaults/gcp.yml
+./bin/openstack-vault.sh  # /work/migrate-v2v/vaults/openstack.yml
+./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml
 ```
 
 The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 `bin/edit-vault.sh` for any other file. Plain
-`ansible-vault edit vaults/aws.yml --vault-password-file ~/.ssh/dib-vault-pass`
+`ansible-vault edit "${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/aws.yml" --vault-password-file ~/.ssh/dib-vault-pass`
 works too.
 
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.
@@ -1357,7 +1364,7 @@ per run (inferred when the catalog holds one, else `--subscription`, alias
 refuses unusually large removals unless `--force` is supplied. Use `--dry-run`
 first. Exported `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
 `AZURE_SECRET` (or `AZURE_CLIENT_SECRET`) are used when set. Otherwise it uses
-the service principal from `vaults/azure.yml`, matched by subscription ID
+the service principal from the Azure vault, matched by subscription ID
 (`--project` also accepts a vault key; `--vault` names another file), and
 only then `DefaultAzureCredential` (`az login`, managed identity), so a
 personal login blocked by Entra ID security defaults does not matter:
@@ -1412,7 +1419,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 GCP migration and deployment catalog entries are scoped by `gcp_project`.
 When more than one project is present, pass the project ID explicitly.
 Credentials come from `--credentials-file`, else an exported
-`GOOGLE_APPLICATION_CREDENTIALS`, else the `vaults/gcp.yml` entry whose key,
+`GOOGLE_APPLICATION_CREDENTIALS`, else the GCP vault entry whose key,
 `gcp_project`, or `project_id` matches, else the gcloud application-default
 login:
 
@@ -1463,7 +1470,7 @@ are left alone rather than treated as an error. Repeat per project.
 
 OpenStack authentication comes from `--cloud <name>` (a `clouds.yaml`
 entry), else an exported `OS_CLOUD` or `OS_*` RC environment, else the
-`vaults/openstack.yml` entry whose key, `project_name`, or `project_id`
+OpenStack vault entry whose key, `project_name`, or `project_id`
 matches the project in scope (used alone, with nothing filled in from
 `clouds.yaml`). With none of those the run stops and says so:
 

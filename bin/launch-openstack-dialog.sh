@@ -151,7 +151,7 @@ print("\n".join(out))' "$facts" 2> /dev/null
 }
 
 # Project first: it decides where the instance and its volumes land.
-PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" vaults/openstack.yml openstack_projects "${OS_PROJECT_NAME:-}") || abort
+PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/openstack.yml" openstack_projects "${OS_PROJECT_NAME:-}") || abort
 VM_NAME=$(choose_vm_required openstack OpenStack) || abort
 
 FIXED_IPS_JSON=""
@@ -335,7 +335,8 @@ say "Launch summary for ${VM_NAME}
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 {
     printf '#!/bin/bash\n'
-    for pair in "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
+    for pair in "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
+        "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
         "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=" \
         "OS_SECURITY_GROUPS_JSON=$SGS_JSON" "OS_SECURITY_GROUP_IDS_JSON=$SG_IDS_JSON" \
         "OS_PRESERVE_MAC=$PRESERVE_MAC" "OS_MAC_ADDRESSES_JSON=$MAC_JSON" \

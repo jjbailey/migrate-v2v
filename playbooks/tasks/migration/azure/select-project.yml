@@ -22,7 +22,7 @@
 
 - name: Include the Azure vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/azure.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/azure.yml"
   no_log: true
 
 - name: Determine whether an Azure target project was explicitly requested

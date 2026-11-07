@@ -36,7 +36,7 @@
 
 - name: Include the OpenStack vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/openstack.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/openstack.yml"
   no_log: true
 
 - name: Determine whether a target project was explicitly requested

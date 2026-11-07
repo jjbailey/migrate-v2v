@@ -11,10 +11,12 @@ or `./bin/launch-openstack-dialog.sh`.
 
 Prerequisites for every example:
 
-- Vaults under `vaults/` are populated and encrypted (see README "Secrets").
+- Vaults under `/work/migrate-v2v/vaults/` are populated and encrypted (see
+  README "Secrets").
 - Collections from `requirements.yml` are installed.
 - For OpenStack launches, a completed OpenStack migration for `vm_name` already
-  exists in `catalogs/migration-catalog.json` (or you pass image IDs explicitly).
+  exists in `/work/migrate-v2v/catalogs/migration-catalog.json` (or you pass
+  image IDs explicitly).
 
 ---
 
@@ -318,7 +320,7 @@ openstack port list --server '<server-id>' -c ID -c MAC_Address -c Fixed_IPs
 # Catalog row written by the launcher
 jq --arg vm my-vm \
   '.deployments[] | select(.vm_name == $vm and .target_platform == "openstack")' \
-  catalogs/deployment-catalog.json
+  /work/migrate-v2v/catalogs/deployment-catalog.json
 ```
 
 When cleaning up a MAC/fixed-IP instance, delete the server **and** its ports

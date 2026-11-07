@@ -24,10 +24,9 @@ import re
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 COMPUTE_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 COMPUTE_API = "https://compute.googleapis.com/compute/v1/projects"
@@ -170,7 +169,7 @@ def main():
     parser.add_argument("project", nargs="?",
                         help="vault key, gcp_project, or project_id "
                              "(omit for a single-entry vault)")
-    parser.add_argument("--vault", default=str(REPO_DIR / "vaults/gcp.yml"))
+    parser.add_argument("--vault", default=str(default_vault_path("gcp.yml")))
     parser.add_argument("--zones", dest="list_zones", action="store_true",
                         help="list up zones")
     parser.add_argument("--machine-types", dest="list_types",

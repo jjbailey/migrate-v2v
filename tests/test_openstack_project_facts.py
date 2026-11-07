@@ -273,7 +273,7 @@ class FlavorTests(unittest.TestCase):
 class ConnectTests(unittest.TestCase):
     def args(self, **overrides):
         values = {"cloud": None, "project": None, "region_name": None,
-                  "vault": Path("vaults/openstack.yml")}
+                  "vault": facts.default_vault_path("openstack.yml")}
         values.update(overrides)
         return SimpleNamespace(**values)
 

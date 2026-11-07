@@ -74,7 +74,7 @@
           No AWS credentials resolved: vaults/aws.yml has an empty
           aws_secret_access_key and ~/.aws/credentials is absent. AWS tasks
           will fail unless an instance profile provides credentials - run
-          ansible-vault edit vaults/aws.yml to add the secret key.
+          ansible-vault edit /work/migrate-v2v/vaults/aws.yml to add the secret key.
       when:
         - aws_task_env | length == 0
         - aws_module_defaults | length == 0

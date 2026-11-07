@@ -4,7 +4,8 @@
 
 # Wrapper to run ansible-playbook with the vault password wired up.
 #
-# All credentials live in the encrypted files in vaults/, so ansible needs
+# All credentials live in the encrypted files under
+# /work/migrate-v2v/vaults/ by default, so ansible needs
 # the vault password to load them. This wrapper
 # appends one of, in order:
 #   1. nothing, if you already passed --ask-vault-pass, --vault-password-file,

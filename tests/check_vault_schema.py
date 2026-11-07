@@ -29,9 +29,9 @@ def require_entry(entries, label, required):
             if not str(entry.get(key) or "").strip():
                 raise ValueError(f"{label}[{name!r}] {key} missing or empty")
 
-def validate_vaults(passfile, repo_dir):
+def validate_vaults(passfile, vault_dir):
     def load(name):
-        return load_vault(passfile, repo_dir / "vaults" / f"{name}.yml")
+        return load_vault(passfile, vault_dir / f"{name}.yml")
 
     vsphere = load("vsphere")
     legacy_ok = all(str(vsphere.get(key) or "").strip()
@@ -112,12 +112,13 @@ def validate_vaults(passfile, repo_dir):
                 "must be 3-24 lowercase letters and digits")
 
 def main():
-    if len(sys.argv) != 2:
-        raise SystemExit(f"usage: {Path(sys.argv[0]).name} VAULT_PASSWORD_FILE")
+    if len(sys.argv) != 3:
+        raise SystemExit(
+            f"usage: {Path(sys.argv[0]).name} VAULT_PASSWORD_FILE VAULT_DIR")
     passfile = Path(sys.argv[1])
-    repo_dir = Path(__file__).resolve().parents[1]
+    vault_dir = Path(sys.argv[2])
     try:
-        validate_vaults(passfile, repo_dir)
+        validate_vaults(passfile, vault_dir)
     except (OSError, subprocess.CalledProcessError, ValueError, yaml.YAMLError) as error:
         raise SystemExit(f"vault schema check failed: {error}") from error
 

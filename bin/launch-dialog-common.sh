@@ -10,6 +10,8 @@ set -euo pipefail
 
 MIGRATE_V2V_CATALOG_DIR=${MIGRATE_V2V_CATALOG_DIR:-/work/migrate-v2v/catalogs}
 export MIGRATE_V2V_CATALOG_DIR
+MIGRATE_V2V_VAULT_DIR=${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}
+export MIGRATE_V2V_VAULT_DIR
 
 # dialog and whiptail both draw on stdout and write the answer on stderr, so
 # dlg() swaps the two to let $(dlg ...) capture the answer.

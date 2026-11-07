@@ -186,7 +186,7 @@ load_aws_instance_type_choices()
     return 0
 }
 
-AWS_TARGET_PROJECT=$(choose_target "Which AWS account should this VM launch into?" vaults/aws.yml aws_projects "${AWS_TARGET_PROJECT:-}") || abort
+AWS_TARGET_PROJECT=$(choose_target "Which AWS account should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/aws.yml" aws_projects "${AWS_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required aws AWS) || abort
 
 while : ; do
@@ -318,6 +318,8 @@ say "Launch summary for $VM_NAME
 file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
 {
     printf '#!/bin/bash\n'
+    printf 'export MIGRATE_V2V_VAULT_DIR=%s\n' "$(quote "$MIGRATE_V2V_VAULT_DIR")"
+    printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export AWS_TARGET_PROJECT=%s\n' "$(quote "$AWS_TARGET_PROJECT")"
     printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
     printf 'export AWS_SUBNET_ID=%s\n' "$(quote "$AWS_SUBNET_ID")"

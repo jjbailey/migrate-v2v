@@ -7,7 +7,7 @@
 
 - name: Include the AWS vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/aws.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml"
   no_log: true
 
 - name: Determine whether an AWS target project was explicitly requested

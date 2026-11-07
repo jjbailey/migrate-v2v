@@ -16,7 +16,8 @@ from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.core.tools import parse_resource_id
 
 from catalog_common import default_catalog_path, read_snapshot, remove_migration_entries
-from vault_common import environment_source, match_project, vault_projects
+from vault_common import (default_vault_path, environment_source, match_project,
+                          vault_projects)
 
 # A managed image or snapshot resource ID, as azure_rm_image_info and
 # azure_rm_snapshot_info report them.
@@ -133,16 +134,16 @@ def candidate_count(migration_catalog, subscription):
         and entry.get("azure_subscription_id") == subscription)
 
 def main(argv=None):
-    repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migration-catalog", type=Path,
                         default=default_catalog_path("migration-catalog.json"))
     parser.add_argument("--subscription", "--project", dest="subscription",
                         help="only reconcile this Azure subscription ID "
                              "(or vault key)")
-    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/azure.yml",
+    parser.add_argument("--vault", type=Path, default=default_vault_path("azure.yml"),
                         help="Azure vault for the service principal when AZURE_* is unset "
-                             "(default: vaults/azure.yml)")
+                             "(default: $MIGRATE_V2V_VAULT_DIR/azure.yml, or "
+                             "/work/migrate-v2v/vaults/azure.yml)")
     parser.add_argument("--dry-run", action="store_true",
                         help="report stale entries without writing the catalog")
     parser.add_argument("--force", action="store_true",

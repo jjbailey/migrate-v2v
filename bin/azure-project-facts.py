@@ -28,10 +28,9 @@ import json
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 REQUIRED_KEYS = ("tenant_id", "subscription_id", "client_id",
                  "client_secret", "resource_group")
@@ -127,7 +126,7 @@ def main(argv=None):
     parser.add_argument("project", nargs="?",
                         help="vault key or subscription ID "
                              "(omit for a single-entry vault)")
-    parser.add_argument("--vault", default=str(REPO_DIR / "vaults/azure.yml"))
+    parser.add_argument("--vault", default=str(default_vault_path("azure.yml")))
     parser.add_argument("--keypairs", dest="list_keypairs", action="store_true",
                         help="list SSH public key resources (the default)")
     parser.add_argument("--resource-group",

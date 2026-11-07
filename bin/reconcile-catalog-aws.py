@@ -11,7 +11,8 @@ from pathlib import Path
 
 from catalog_common import (default_catalog_path, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
-from vault_common import environment_source, match_project, vault_projects
+from vault_common import (default_vault_path, environment_source, match_project,
+                          vault_projects)
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -161,7 +162,6 @@ def session_for(account_id, load_projects, vault, profile=None):
     return boto3.Session(), "boto3 default chain"
 
 def main():
-    repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migration-catalog", type=Path,
                         default=default_catalog_path("migration-catalog.json"))
@@ -171,9 +171,10 @@ def main():
         "--region", help="only reconcile AWS entries in this region")
     parser.add_argument("--profile",
                         help="boto3/AWS CLI profile, instead of the vault")
-    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/aws.yml",
+    parser.add_argument("--vault", type=Path, default=default_vault_path("aws.yml"),
                         help="AWS vault for credentials when AWS_* is unset "
-                             "(default: vaults/aws.yml)")
+                             "(default: $MIGRATE_V2V_VAULT_DIR/aws.yml, or "
+                             "/work/migrate-v2v/vaults/aws.yml)")
     parser.add_argument(
         "--project-id", "--account-id", dest="account_id",
         help="AWS account ID; verify and reconcile only this account")

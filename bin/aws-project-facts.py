@@ -30,10 +30,9 @@ import os
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 def select_vault_entry(vault, requested):
     data = read_vault(vault)
@@ -216,7 +215,7 @@ def main():
     parser.add_argument("project", nargs="?",
                         help="vault key, account ID, or profile "
                              "(omit for a single-entry vault)")
-    parser.add_argument("--vault", default=str(REPO_DIR / "vaults/aws.yml"))
+    parser.add_argument("--vault", default=str(default_vault_path("aws.yml")))
     parser.add_argument("--subnet",
                         help="filter groups to this subnet's VPC (e.g. subnet-abc)")
     parser.add_argument("--subnets", dest="list_subnets", action="store_true",

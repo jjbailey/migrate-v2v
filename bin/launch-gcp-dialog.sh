@@ -12,7 +12,7 @@ DIALOG_NAME=launch-gcp-dialog
 # shellcheck source=launch-dialog-common.sh
 source "$script_dir/launch-dialog-common.sh"
 
-GCP_TARGET_PROJECT=$(choose_target "Which GCP project should this VM launch into?" vaults/gcp.yml gcp_projects "${GCP_TARGET_PROJECT:-}") || abort
+GCP_TARGET_PROJECT=$(choose_target "Which GCP project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/gcp.yml" gcp_projects "${GCP_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required gcp GCP) || abort
 
 # Query one gcp-project-facts.py section and format tag\item\status lines
@@ -170,7 +170,8 @@ say "Launch summary for $VM_NAME
 file=$(mktemp "${TMPDIR:-/tmp}/launch-gcp.XXXXXX")
 {
     printf '#!/bin/bash\n'
-    for pair in "VM_NAME=$VM_NAME" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
+    for pair in "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
+        "VM_NAME=$VM_NAME" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
         "GCP_NETWORK=$GCP_NETWORK" "GCP_SUBNETWORK=$GCP_SUBNETWORK" "GCP_TAGS_JSON=$GCP_TAGS_JSON" \
         "GCP_NO_ADDRESS=$GCP_NO_ADDRESS" "GCP_TARGET_PROJECT=$GCP_TARGET_PROJECT" \
         "GCP_SSH_USER=$GCP_SSH_USER" "GCP_SSH_KEY_FILE=$GCP_SSH_KEY_FILE" ; do

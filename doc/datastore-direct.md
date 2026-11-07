@@ -176,7 +176,8 @@ not been exercised against Azure.
   signals), `nbdkit`, `qemu-img`, `govc`, and the Ansible collections in
   `requirements.yml`. No `ovftool`.
 - For the `vddk` backend: nbdkit's `vddk` plugin and a VixDiskLib (below).
-- vCenter credentials from `vaults/vsphere.yml`, as for the other methods. The
+- vCenter credentials from the vSphere vault under
+  `/work/migrate-v2v/vaults/` by default, as for the other methods. The
   password is handed to nbdkit through a mode-0600 file, never on a command line;
   that file is per disk. The conversion shell removes it when the conversion
   ends; if the controller is killed first, the resume or discard that stops the
@@ -244,7 +245,7 @@ reconfigures the VM without a power cycle and is idempotent. It takes
 `--vm`. Exported `VCENTER_USERNAME` and `VCENTER_PASSWORD` (with
 `VCENTER_HOSTNAME` or `--vcenter` for the host, and `--datacenter`) are used
 when set; otherwise the vCenter, credentials, datacenter, and
-`validate_certs` come from `vaults/vsphere.yml` (`--vcenter
+`validate_certs` come from the vSphere vault (`--vcenter
 <key-or-hostname>` picks an entry, as `vsphere_target_vcenter` does).
 `--insecure` skips certificate checks.
 

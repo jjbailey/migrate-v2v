@@ -56,7 +56,7 @@ if cur and not any(row.split("\t")[0] == cur for row in out):
 print("\n".join(out))' "$facts" "$current" 2> /dev/null
 }
 
-AZURE_TARGET_PROJECT=$(choose_target "Which Azure subscription should this VM launch into?" vaults/azure.yml azure_projects "${AZURE_TARGET_PROJECT:-}") || abort
+AZURE_TARGET_PROJECT=$(choose_target "Which Azure subscription should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/azure.yml" azure_projects "${AZURE_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required azure Azure) || abort
 
 INSTANCE_NAME=$(input "Azure VM name (blank to derive it from $VM_NAME):" "${INSTANCE_NAME:-}") || abort
@@ -114,6 +114,7 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
 {
     printf '#!/bin/bash\n'
     for pair in "VM_NAME=$VM_NAME" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
+        "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \
         "AZURE_NO_PUBLIC_IP=$AZURE_NO_PUBLIC_IP" "AZURE_ADMIN_USERNAME=$AZURE_ADMIN_USERNAME" \

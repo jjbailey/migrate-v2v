@@ -37,7 +37,7 @@
   tasks:
     - name: Include the vSphere vault variables
       ansible.builtin.include_vars:
-        file: "{{ playbook_dir }}/../vaults/vsphere.yml"
+        file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/vsphere.yml"
       run_once: true
       no_log: true
 
