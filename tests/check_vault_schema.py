@@ -31,7 +31,15 @@ def require_entry(entries, label, required):
 
 def validate_vaults(passfile, vault_dir):
     def load(name):
-        return load_vault(passfile, vault_dir / f"{name}.yml")
+        """The decrypted vault, or None for an absent cloud vault.
+
+        vsphere.yml is the source for every migration, so it is required; a
+        cloud vault is only needed on hosts that use that target.
+        """
+        path = vault_dir / f"{name}.yml"
+        if name != "vsphere" and not path.exists():
+            return None
+        return load_vault(passfile, path)
 
     vsphere = load("vsphere")
     legacy_ok = all(str(vsphere.get(key) or "").strip()
@@ -39,77 +47,85 @@ def validate_vaults(passfile, vault_dir):
     projects = vsphere.get("vsphere_projects") or {}
     if not legacy_ok and not projects:
         raise ValueError(
-            "vaults/vsphere.yml: neither the legacy flat vcenter_* "
+            "vsphere.yml: neither the legacy flat vcenter_* "
             "credentials nor vsphere_projects entries found")
-    require_entry(projects.items(), "vaults/vsphere.yml: vsphere_projects",
+    require_entry(projects.items(), "vsphere.yml: vsphere_projects",
                   ("vcenter_hostname", "vcenter_username", "vcenter_password"))
 
     openstack = load("openstack")
-    projects = openstack.get("openstack_projects") or {}
-    legacy = openstack.get("openstack_auth") or {}
-    if not projects and not legacy:
-        raise ValueError(
-            "vaults/openstack.yml: neither openstack_projects nor openstack_auth found")
-    require_entry(projects.items(), "vaults/openstack.yml: openstack_projects",
-                  ("auth_url", "username", "password", "project_name"))
-    for name, entry in projects.items():
-        if str(entry.get("project_name")) != str(name):
+    if openstack is not None:
+        projects = openstack.get("openstack_projects") or {}
+        legacy = openstack.get("openstack_auth") or {}
+        if not projects and not legacy:
             raise ValueError(
-                f"vaults/openstack.yml: openstack_projects[{name!r}] "
-                "project_name disagrees with its key")
+                "openstack.yml: neither openstack_projects nor openstack_auth found")
+        require_entry(projects.items(), "openstack.yml: openstack_projects",
+                      ("auth_url", "username", "password", "project_name"))
+        if legacy:
+            # select-project.yml asserts the same keys on the legacy mapping.
+            require_entry([("legacy", legacy)], "openstack.yml: openstack_auth",
+                          ("auth_url", "username", "password", "project_name"))
+        for name, entry in projects.items():
+            if str(entry.get("project_name")) != str(name):
+                raise ValueError(
+                    f"openstack.yml: openstack_projects[{name!r}] "
+                    "project_name disagrees with its key")
 
     aws = load("aws")
-    projects = aws.get("aws_projects") or {}
-    entries = projects.items() if projects else (
-        [("legacy", aws)] if aws.get("aws_region") else [])
-    if not entries:
-        raise ValueError(
-            "vaults/aws.yml: neither aws_projects nor legacy aws_region found")
-    require_entry(entries, "vaults/aws.yml: aws_projects",
-                  ("aws_region", "s3_bucket", "vmimport_role_name"))
-    for name, entry in entries:
-        account_id = entry.get("aws_account_id", entry.get("account_id"))
-        if account_id is not None and not str(account_id).strip():
+    if aws is not None:
+        projects = aws.get("aws_projects") or {}
+        entries = projects.items() if projects else (
+            [("legacy", aws)] if aws.get("aws_region") else [])
+        if not entries:
             raise ValueError(
-                f"vaults/aws.yml: aws_projects[{name!r}] account ID is empty")
+                "aws.yml: neither aws_projects nor legacy aws_region found")
+        require_entry(entries, "aws.yml: aws_projects",
+                      ("aws_region", "s3_bucket", "vmimport_role_name"))
+        for name, entry in entries:
+            account_id = entry.get("aws_account_id", entry.get("account_id"))
+            if account_id is not None and not str(account_id).strip():
+                raise ValueError(
+                    f"aws.yml: aws_projects[{name!r}] account ID is empty")
 
     gcp = load("gcp")
-    projects = gcp.get("gcp_projects") or {}
-    entries = projects.items() if projects else (
-        [("legacy", gcp)] if gcp.get("gcp_project") else [])
-    if not entries:
-        raise ValueError(
-            "vaults/gcp.yml: neither gcp_projects nor legacy gcp_project found")
-    require_entry(entries, "vaults/gcp.yml: gcp_projects",
-                  ("gcp_project", "gcs_bucket", "gcp_import_location", "service_account_key"))
-    for name, entry in entries:
-        if projects and str(entry.get("gcp_project")) != str(name):
+    if gcp is not None:
+        projects = gcp.get("gcp_projects") or {}
+        entries = projects.items() if projects else (
+            [("legacy", gcp)] if gcp.get("gcp_project") else [])
+        if not entries:
             raise ValueError(
-                f"vaults/gcp.yml: gcp_projects[{name!r}] "
-                "gcp_project disagrees with its key")
-        try:
-            client_email = json.loads(entry["service_account_key"]).get("client_email")
-        except (TypeError, json.JSONDecodeError) as error:
-            raise ValueError(
-                f"vaults/gcp.yml: gcp_projects[{name!r}] service_account_key "
-                f"is not valid JSON: {error}") from error
-        if not str(client_email or "").strip():
-            raise ValueError(
-                f"vaults/gcp.yml: gcp_projects[{name!r}] "
-                "service_account_key.client_email missing or empty")
+                "gcp.yml: neither gcp_projects nor legacy gcp_project found")
+        require_entry(entries, "gcp.yml: gcp_projects",
+                      ("gcp_project", "gcs_bucket", "service_account_key"))
+        for name, entry in entries:
+            if projects and str(entry.get("gcp_project")) != str(name):
+                raise ValueError(
+                    f"gcp.yml: gcp_projects[{name!r}] "
+                    "gcp_project disagrees with its key")
+            try:
+                client_email = json.loads(entry["service_account_key"]).get("client_email")
+            except (TypeError, json.JSONDecodeError) as error:
+                raise ValueError(
+                    f"gcp.yml: gcp_projects[{name!r}] service_account_key "
+                    f"is not valid JSON: {error}") from error
+            if not str(client_email or "").strip():
+                raise ValueError(
+                    f"gcp.yml: gcp_projects[{name!r}] "
+                    "service_account_key.client_email missing or empty")
 
     azure = load("azure")
-    projects = azure.get("azure_projects") or {}
-    if not projects:
-        raise ValueError("vaults/azure.yml: no azure_projects entries found")
-    require_entry(projects.items(), "vaults/azure.yml: azure_projects",
-                  ("tenant_id", "subscription_id", "client_id", "client_secret",
-                   "resource_group", "location", "storage_account"))
-    for name, entry in projects.items():
-        if not re.fullmatch(r"[a-z0-9]{3,24}", str(entry.get("storage_account") or "")):
-            raise ValueError(
-                f"vaults/azure.yml: azure_projects[{name!r}] storage_account "
-                "must be 3-24 lowercase letters and digits")
+    if azure is not None:
+        projects = azure.get("azure_projects") or {}
+        if not projects:
+            raise ValueError("azure.yml: no azure_projects entries found")
+        require_entry(projects.items(), "azure.yml: azure_projects",
+                      ("tenant_id", "subscription_id", "client_id", "client_secret",
+                       "resource_group", "location", "storage_account"))
+        for name, entry in projects.items():
+            if not re.fullmatch(r"[a-z0-9]{3,24}", str(entry.get("storage_account") or "")):
+                raise ValueError(
+                    f"azure.yml: azure_projects[{name!r}] storage_account "
+                    "must be 3-24 lowercase letters and digits")
 
 def main():
     if len(sys.argv) != 3:

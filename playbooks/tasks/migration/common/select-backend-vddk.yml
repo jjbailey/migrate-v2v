@@ -69,12 +69,14 @@
 # fall back from vddk to curl, curl would read only the base -flat.vmdk of a VM
 # that had snapshots and upload a stale image, so the backend the manifest
 # records is reused and a resume that cannot use it fails. The manifest path
-# mirrors each target's initialize, which runs after this file. A discard reads no
-# disks, so it skips this.
+# mirrors each target's initialize, which runs after this file: a
+# -e migration_run_dir override (an extra var, so already set here) wins over
+# the derived run directory. A discard reads no disks, so it skips this.
 - name: Check the manifest of the run being resumed
   ansible.builtin.stat:
     path: >-
-      {{ artifact_root }}/{{ migration_target }}/{{ vm_name | regex_replace('[^A-Za-z0-9_.-]', '_') }}/{{ resume_run_id }}/artifact-manifest.json
+      {{ migration_run_dir | default(artifact_root ~ '/' ~ migration_target ~ '/'
+         ~ (vm_name | regex_replace('[^A-Za-z0-9_.-]', '_')) ~ '/' ~ resume_run_id, true) }}/artifact-manifest.json
   register: resume_backend_manifest_stat
   when:
     - resume_run_id | length > 0

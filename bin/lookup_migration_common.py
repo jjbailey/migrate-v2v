@@ -54,7 +54,8 @@ def build_parser(with_status=False, with_project=False, with_region=False):
     if with_region:
         parser.add_argument(
             "--region",
-            help="only consider migrations in this region; legacy rows with no region stay eligible",
+            help="only consider migrations recorded in this region (OpenStack also keeps "
+                 "older rows with no recorded region)",
         )
     return parser
 

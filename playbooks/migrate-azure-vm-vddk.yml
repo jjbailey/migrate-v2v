@@ -134,6 +134,14 @@
           ansible.builtin.import_tasks: tasks/migration/common/append-catalog.yml
           when: not (migration_discard_only | bool)
 
+        # Reached only when every discard lookup above succeeded; the
+        # discard report in common/cleanup-vddk.yml relies on it, since an
+        # always: section cannot see which task failed.
+        - name: Mark the discard lookups complete
+          ansible.builtin.set_fact:
+            discard_lookup_complete: true
+          when: migration_discard_only | bool
+
       always:
         - name: Stop disk streams still running after a failure
           ansible.builtin.import_tasks: tasks/migration/common/stop-streams-vddk.yml

@@ -5,7 +5,7 @@
 """Show the images, flavors, security groups, networks, and keypairs one
 OpenStack project can use.
 
-Credentials come from vaults/openstack.yml (openstack_projects, matched by
+Credentials come from $MIGRATE_V2V_VAULT_DIR/openstack.yml (openstack_projects, matched by
 vault key, project_name, or project_id, the same way select-project.yml does),
 or from --cloud / the standard OS_* environment. Every listing is filtered to
 what the authenticated project can actually use, so an admin account does not

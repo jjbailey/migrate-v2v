@@ -2,7 +2,7 @@
 # playbooks/tasks/migration/gcp/select-project.yml
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
-# Select one GCP project from vaults/gcp.yml.
+# Select one GCP project from $MIGRATE_V2V_VAULT_DIR/gcp.yml.
 # Supports gcp_projects plus the legacy top-level gcp_project mapping.
 
 - name: Include the GCP vault variables
@@ -37,7 +37,7 @@
   ansible.builtin.fail:
     msg: >-
       GCP project '{{ gcp_target_project_requested }}' matches no vault key,
-      gcp_project, or project_id in vaults/gcp.yml under gcp_projects.
+      gcp_project, or project_id in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/gcp.yml under gcp_projects.
       Available: {{ gcp_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
     - gcp_target_project_explicit | bool
@@ -48,7 +48,7 @@
     gcp_project_config:
       gcp_project: "{{ gcp_project }}"
       gcs_bucket: "{{ gcs_bucket }}"
-      gcp_import_location: "{{ gcp_import_location }}"
+      gcp_import_location: "{{ gcp_import_location | default('') }}"
       service_account_key: "{{ service_account_key }}"
     gcp_target_project_name: "{{ gcp_project | string }}"
   when:
@@ -77,27 +77,47 @@
       the legacy top-level gcp_project mapping.
   when: gcp_target_project_name is not defined or (gcp_target_project_name | string | length) == 0
 
+# The entry holds the service-account key, so only the names of what is
+# missing or malformed leave the no_log task; the assert can then show its
+# message (a no_log assert hides it). A key stored as a YAML mapping rather
+# than a JSON string is named as such instead of failing inside from_json.
+- name: List the required GCP project keys that are missing or malformed
+  ansible.builtin.set_fact:
+    gcp_project_problems: >-
+      {%- set cfg = gcp_project_config | default({}) -%}
+      {%- set problems = [] -%}
+      {%- for key in ['gcp_project', 'gcs_bucket', 'service_account_key'] -%}
+      {%- if cfg[key] is not defined or ((cfg[key] | string | trim) == '') -%}
+      {%- set _ = problems.append(key ~ ' missing') -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- if cfg.service_account_key is mapping -%}
+      {%- set _ = problems.append('service_account_key is a YAML mapping; store the JSON key file contents as a string') -%}
+      {%- elif cfg.service_account_key is defined and (cfg.service_account_key | string | trim) != '' -%}
+      {%- if ((cfg.service_account_key | from_json).client_email | default('') | string | trim) == '' -%}
+      {%- set _ = problems.append('service_account_key has no client_email') -%}
+      {%- endif -%}
+      {%- endif -%}
+      {{ problems }}
+  no_log: true
+
 - name: Validate the selected GCP project configuration
   ansible.builtin.assert:
     that:
       - gcp_project_config is defined
-      - gcp_project_config.gcp_project is defined and (gcp_project_config.gcp_project | string | trim | length) > 0
-      - gcp_project_config.gcs_bucket is defined and (gcp_project_config.gcs_bucket | string | trim | length) > 0
-      - gcp_project_config.gcp_import_location is defined and (gcp_project_config.gcp_import_location | string | trim | length) > 0
-      - gcp_project_config.service_account_key is defined and (gcp_project_config.service_account_key | string | trim | length) > 0
-      - (gcp_project_config.service_account_key | from_json).client_email is defined
-      - (gcp_project_config.service_account_key | from_json).client_email | length > 0
+      - gcp_project_problems | length == 0
     fail_msg: >-
-      The selected GCP project must define gcp_project, gcs_bucket,
-      gcp_import_location, and a service_account_key JSON document with
-      client_email.
-  no_log: true
+      GCP project '{{ gcp_target_project_name | default('?') }}' must define
+      gcp_project, gcs_bucket, and a service_account_key JSON document with
+      client_email: {{ gcp_project_problems | join('; ') }}.
 
 - name: Normalize the selected GCP project values
   ansible.builtin.set_fact:
     gcp_project: "{{ gcp_project_config.gcp_project | string }}"
     gcs_bucket: "{{ gcp_project_config.gcs_bucket | string }}"
-    gcp_import_location: "{{ gcp_project_config.gcp_import_location | string }}"
+    # The import job's region only; us-central1 when the entry leaves it
+    # out. -e gcp_import_location=us-east1 (an extra var) still overrides it.
+    gcp_import_location: "{{ gcp_project_config.gcp_import_location | default('us-central1', true) | string }}"
     service_account_key: "{{ gcp_project_config.service_account_key }}"
     gcp_target_project_name: "{{ gcp_target_project_name | string }}"
   no_log: true

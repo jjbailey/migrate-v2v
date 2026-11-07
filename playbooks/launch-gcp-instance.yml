@@ -33,9 +33,11 @@
     gcp_ssh_user: "cloudinit"
     gcp_ssh_public_key_file: ""
     gcp_disk_type: "pd-balanced"
-    # Login user for the printed ssh command; cloud-init gives root the
-    # project key too (see gcp_ssh_user above).
-    launch_ssh_user: "root"
+    # Login user for the printed ssh command. Empty picks the source guest's
+    # cloud-init default user (debian, ubuntu, ...) from the migration's
+    # recorded guest ID, else root, which migrated images (disable_root:
+    # false) also give the key to; see tasks/show-ssh-command.yml.
+    launch_ssh_user: ""
     gcp_boot_image_name: ""
     gcp_data_image_names: []
     gcp_migration_id: ""
@@ -117,6 +119,7 @@
                 gcp_boot_image_name: "{{ (gcp_migration_lookup.stdout | from_json).gcp_boot_image_name }}"
                 gcp_data_image_names: "{{ (gcp_migration_lookup.stdout | from_json).gcp_data_image_names }}"
                 gcp_migration_id: "{{ (gcp_migration_lookup.stdout | from_json).migration_id }}"
+                gcp_source_guest_id: "{{ (gcp_migration_lookup.stdout | from_json).source_guest_id | default('') }}"
 
         - name: Require a boot image
           ansible.builtin.assert:
@@ -300,6 +303,7 @@
               {{ ((gcp_nic0.accessConfigs | default([{}], true)) | first).natIP
                  | default(gcp_nic0.networkIP | default(''), true) }}
             ssh_user: "{{ launch_ssh_user }}"
+            ssh_guest_id: "{{ gcp_source_guest_id | default('') }}"
 
       always:
         - name: Remove the temporary GCP deployment entry

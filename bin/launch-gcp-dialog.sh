@@ -109,7 +109,7 @@ while : ; do
     bad "Zone, machine type, and network cannot be empty." || true
 done
 while : ; do
-    sub_choices=$(load_gcp_section_choices "$GCP_TARGET_PROJECT" "--subnetworks" "subnetworks" "${GCP_SUBNETWORK:-}" --zone "$GCP_ZONE") || sub_choices=""
+    sub_choices=$(load_gcp_section_choices "$GCP_TARGET_PROJECT" "--subnetworks" "subnetworks" "${GCP_SUBNETWORK:-}" --zone "$GCP_ZONE" --network "$GCP_NETWORK") || sub_choices=""
     if [ -z "$sub_choices" ] ; then
         GCP_SUBNETWORK=$(input "Subnetwork (optional):" "${GCP_SUBNETWORK:-}") || abort
         break

@@ -8,6 +8,24 @@
 # resume can reuse them, like the GCS staging objects. Images and snapshots
 # are only removed on an explicit discard of a failed run.
 
+# A failed upload can leave the next disk's conversion running in the
+# background (import-disk.yml starts it before uploading). Wait for every
+# conversion to end before cleanup or a resume touches the same staging files,
+# as openstack/cleanup.yml does; the datastore-direct method stops its streams
+# first (stop-streams-vddk.yml), so its conversions end at once.
+- name: Wait for background disk conversions to end
+  ansible.builtin.async_status:
+    jid: "{{ item.value }}"
+  register: azure_convert_drain
+  until: azure_convert_drain.finished | bool
+  retries: "{{ azure_convert_poll_retries | int }}"
+  delay: "{{ azure_convert_poll_delay | int }}"
+  loop: "{{ azure_convert_jobs | default({}) | dict2items }}"
+  loop_control:
+    label: "disk {{ item.key }}"
+  when: not (migration_succeeded | default(false) | bool)
+  failed_when: false
+
 - name: Clean up Azure resources
   module_defaults:
     group/azure.azcollection.all: "{{ azure_module_defaults | default({}) }}"
@@ -64,7 +82,10 @@
       when:
         - not (migration_succeeded | default(false) | bool)
         - discard_failed_artifacts | bool
-      failed_when: false
+      # ignore_errors rather than failed_when: false, so each item keeps its
+      # real failed flag for the report below and common/cleanup-vddk.yml.
+      ignore_errors: true
+      register: azure_image_remove
 
     - name: Remove data snapshots created by this failed run
       azure.azcollection.azure_rm_snapshot:
@@ -77,5 +98,37 @@
       when:
         - not (migration_succeeded | default(false) | bool)
         - discard_failed_artifacts | bool
-      failed_when: false
+      ignore_errors: true
+      register: azure_snapshot_remove
+
+    - name: Record which images and snapshots the discard removed
+      vars:
+        azure_image_results: "{{ azure_image_remove.results | default([]) }}"
+        azure_snapshot_results: "{{ azure_snapshot_remove.results | default([]) }}"
+      ansible.builtin.set_fact:
+        discard_removed_artifacts: >-
+          {{ discard_removed_artifacts | default([])
+             + (azure_image_results | rejectattr('skipped', 'defined') | rejectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'image ') | list)
+             + (azure_snapshot_results | rejectattr('skipped', 'defined') | rejectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'snapshot ') | list) }}
+        discard_unremoved_artifacts: >-
+          {{ discard_unremoved_artifacts | default([])
+             + (azure_image_results | selectattr('failed', 'defined') | selectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'image ') | list)
+             + (azure_snapshot_results | selectattr('failed', 'defined') | selectattr('failed')
+                | map(attribute='item') | map('regex_replace', '^', 'snapshot ') | list) }}
+      when:
+        - not (migration_succeeded | default(false) | bool)
+        - discard_failed_artifacts | bool
+
+    - name: Report images and snapshots the discard could not remove
+      ansible.builtin.debug:
+        msg: >-
+          Could not remove {{ item }} in resource group {{ azure_resource_group }};
+          remove it manually or rerun the discard.
+      loop: "{{ discard_unremoved_artifacts | default([]) | select('match', '^(image|snapshot) ') | list }}"
+      when:
+        - not (migration_succeeded | default(false) | bool)
+        - discard_failed_artifacts | bool
 

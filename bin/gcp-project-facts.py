@@ -5,7 +5,7 @@
 """List the Compute zones, machine types, networks, and subnetworks one
 GCP project can use.
 
-Credentials come from vaults/gcp.yml (gcp_projects, matched by vault key,
+Credentials come from $MIGRATE_V2V_VAULT_DIR/gcp.yml (gcp_projects, matched by vault key,
 gcp_project, or project_id, the same way select-project.yml does). The
 service_account_key JSON in the vault entry authenticates the Compute API.
 
@@ -183,6 +183,8 @@ def main():
                         help="list subnetworks in --region (or --zone)")
     parser.add_argument("--zone", help="zone for --machine-types")
     parser.add_argument("--region", help="region for --subnetworks")
+    parser.add_argument("--network",
+                        help="with --subnetworks, only this network's subnetworks")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="machine-readable output for scripting")
     args = parser.parse_args()
@@ -223,6 +225,11 @@ def main():
             if not region:
                 raise SystemExit("--subnetworks needs --region (or --zone)")
             rows = gather_subnetworks(session, project_id, region)
+            # A subnetwork of another VPC cannot be combined with --network
+            # at launch, so the dialog lists only the chosen network's.
+            network = short_name(str(args.network or "").strip())
+            if network:
+                rows = [row for row in rows if row["network"] == network]
     except SystemExit:
         raise
     except Exception as error:

@@ -219,70 +219,83 @@ else
     AUTO_IP=false
 fi
 
-SGS_JSON=""
-SG_IDS_JSON=""
-sg_mode=$(radio "Which security groups should the instance use?" \
-    pick "Choose from this project's groups (recommended)" ON \
-    names "Type group names manually" OFF \
-    ids "By UUID" OFF \
-    none "None (cloud default policy applies)" OFF) || abort
-case "$sg_mode" in
-    pick)
-        sg_choices=$(load_security_group_choices "$PROJECT") || sg_choices=""
-        if [ -z "$sg_choices" ] ; then
-            say "Could not list security groups for '${PROJECT:-auto-select}'.\\n\\nEnter the names manually instead." 9 || true
+# Fixed IPs and preserved or manual MACs need pre-created ports, and the
+# playbook creates those only with explicit security groups.
+needs_ports=false
+if [ "$PRESERVE_MAC" = true ] || { [ -n "$FIXED_IPS_JSON" ] && [ "$FIXED_IPS_JSON" != '[]' ] ; } ; then
+    needs_ports=true
+fi
+while : ; do
+    SGS_JSON=""
+    SG_IDS_JSON=""
+    sg_mode=$(radio "Which security groups should the instance use?" \
+        pick "Choose from this project's groups (recommended)" ON \
+        names "Type group names manually" OFF \
+        ids "By UUID" OFF \
+        none "None (cloud default policy applies)" OFF) || abort
+    case "$sg_mode" in
+        pick)
+            sg_choices=$(load_security_group_choices "$PROJECT") || sg_choices=""
+            if [ -z "$sg_choices" ] ; then
+                say "Could not list security groups for '${PROJECT:-auto-select}'.\\n\\nEnter the names manually instead." 9 || true
+                while : ; do
+                    sgs=$(input "Security group names, comma-separated:" "default") || abort
+                    [ -n "$sgs" ] && {
+                        SGS_JSON=$(json_list "$sgs")
+                        break
+                    }
+                    bad "Enter at least one security group name." || true
+                done
+            else
+                sg_args=()
+                while IFS=$'\t' read -r sg_tag sg_label sg_state ; do
+                    [ -n "$sg_tag" ] || continue
+                    sg_args+=("$sg_tag" "$sg_label" "$sg_state")
+                done <<< "$sg_choices"
+                while : ; do
+                    picked=$(checklist 'Which security groups should the instance join?\n(Space toggles, Enter confirms ; choose more than one when needed.)' "${sg_args[@]}") || abort
+                    picked=$(printf '%s' "$picked" | sed -e '/^[[:space:]]*$/d' | paste -sd ',' -)
+                    [ -n "$picked" ] && {
+                        SGS_JSON=$(json_list "$picked")
+                        break
+                    }
+                    if yesno 'No security groups selected.\n\nProceed with none (cloud default policy applies)?' no ; then
+                        SGS_JSON='[]'
+                        break
+                    fi
+                done
+            fi
+            ;;
+        names)
             while : ; do
                 sgs=$(input "Security group names, comma-separated:" "default") || abort
-                [ -n "$sgs" ] && {
                     SGS_JSON=$(json_list "$sgs")
+                    [ "$SGS_JSON" != '[]' ] && {
                     break
                 }
                 bad "Enter at least one security group name." || true
             done
-        else
-            sg_args=()
-            while IFS=$'\t' read -r sg_tag sg_label sg_state ; do
-                [ -n "$sg_tag" ] || continue
-                sg_args+=("$sg_tag" "$sg_label" "$sg_state")
-            done <<< "$sg_choices"
+            ;;
+        ids)
             while : ; do
-                picked=$(checklist 'Which security groups should the instance join?\n(Space toggles, Enter confirms ; choose more than one when needed.)' "${sg_args[@]}") || abort
-                picked=$(printf '%s' "$picked" | sed -e '/^[[:space:]]*$/d' | paste -sd ',' -)
-                [ -n "$picked" ] && {
-                    SGS_JSON=$(json_list "$picked")
+                sgids=$(input "Security group UUIDs, comma-separated:" "") || abort
+                SG_IDS_JSON=$(json_list "$sgids")
+                [ "$SG_IDS_JSON" != '[]' ] && {
                     break
                 }
-                if yesno 'No security groups selected.\n\nProceed with none (cloud default policy applies)?' no ; then
-                    SGS_JSON='[]'
-                    break
-                fi
+                bad "Enter at least one security group UUID." || true
             done
-        fi
-        ;;
-    names)
-        while : ; do
-            sgs=$(input "Security group names, comma-separated:" "default") || abort
-                SGS_JSON=$(json_list "$sgs")
-                [ "$SGS_JSON" != '[]' ] && {
-                break
-            }
-            bad "Enter at least one security group name." || true
-        done
-        ;;
-    ids)
-        while : ; do
-            sgids=$(input "Security group UUIDs, comma-separated:" "") || abort
-            SG_IDS_JSON=$(json_list "$sgids")
-            [ "$SG_IDS_JSON" != '[]' ] && {
-                break
-            }
-            bad "Enter at least one security group UUID." || true
-        done
-        ;;
-    none)
-        SGS_JSON='[]'
-        ;;
-esac
+            ;;
+        none)
+            SGS_JSON='[]'
+            ;;
+    esac
+    if [ "$needs_ports" = true ] && { [ -z "$SGS_JSON" ] || [ "$SGS_JSON" = '[]' ] ; } && { [ -z "$SG_IDS_JSON" ] || [ "$SG_IDS_JSON" = '[]' ] ; } ; then
+        bad "Fixed IPs and preserved or manual MACs use pre-created ports, which need at least one security group. Choose one, or go back and use DHCP with auto-assigned MACs." || true
+        continue
+    fi
+    break
+done
 
 if yesno "Attach a config drive?\n\nSay Yes when the metadata service is unavailable. Otherwise No is fine." no ; then
     CONFIG_DRIVE=true

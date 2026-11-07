@@ -130,6 +130,14 @@ class AwsReconcileCredentialTests(CleanEnvironment):
         session, _ = self.session_for("111", lambda: projects)
         session.assert_called_once_with(profile_name="labprof")
 
+    def test_vault_keys_win_over_the_vault_profile(self):
+        # vars/aws-common.yml uses the profile only when there are no keys.
+        projects = {"lab": {**self.PROJECTS["lab"], "aws_profile": "labprof"}}
+        session, _ = self.session_for("111", lambda: projects)
+        session.assert_called_once_with(aws_access_key_id="AK",
+                                        aws_secret_access_key="SK",
+                                        aws_session_token=None)
+
     def test_boto3_chain_last(self):
         for account, projects in (("222", self.PROJECTS), ("111", None), (None, self.PROJECTS)):
             session, source = self.session_for(account, lambda: projects)

@@ -65,9 +65,19 @@ from pathlib import Path
 
 # Paths the docs mention on purpose even though they are gone.
 ALLOWED = {"vaults/env", "vaults/aws-staging.yml"}
+# Runtime vault files under $MIGRATE_V2V_VAULT_DIR, outside the repository,
+# which the docs name by file name.
+RUNTIME_FILES = {f"{name}.yml" for name in ("aws", "azure", "gcp", "openstack", "vsphere")}
 
-tracked = [path for path in subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True).stdout.split()
-           if Path(path).exists()]
+# Outside a Git checkout (a tarball or other copy), fall back to every file
+# below the tree, skipping hidden directories, as the YAML check does.
+try:
+    listed = subprocess.run(["git", "ls-files", "-z"], capture_output=True,
+                            text=True, check=True).stdout.split("\0")
+except (OSError, subprocess.CalledProcessError):
+    listed = [str(path) for path in Path(".").rglob("*")
+              if path.is_file() and not any(part.startswith(".") for part in path.parts)]
+tracked = [path for path in listed if path and Path(path).exists()]
 dirs = {str(parent) + "/" for path in tracked for parent in Path(path).parents if str(parent) != "."}
 basenames = {Path(path).name for path in tracked}
 # The public export excludes private vault and catalog contents (see
@@ -90,6 +100,8 @@ for doc in sorted(path for path in tracked if path.endswith(".md")):
             print(f"  {doc}:{number}: {ref} is not tracked", file=sys.stderr)
             rc = 1
         for name in bare_ref.findall(line):
+            if name in RUNTIME_FILES:
+                continue
             if name not in basenames and not any(ref.endswith("/" + name) for ref in refs):
                 print(f"  {doc}:{number}: {name} is not tracked", file=sys.stderr)
                 rc = 1
@@ -102,25 +114,32 @@ fi
 
 echo "== vaults =="
 # The playbooks load every credential from these encrypted files; make sure
-# the required ones exist and are actually vault-encrypted (plaintext here
-# would both fail at runtime and risk leaking secrets into VCS).
+# each one present is actually vault-encrypted (plaintext here would both fail
+# at runtime and risk leaking secrets). Which ones a host needs depends on its
+# targets; the schema check below requires vsphere.yml when it can decrypt.
 vault_dir=${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}
 vault_files=$(find "$vault_dir" -maxdepth 1 -type f -name '*.yml' -print 2> /dev/null | sort || true)
 if [ -z "$vault_files" ] ; then
     echo "  skip vaults (none in $vault_dir; public checkout)"
 fi
-for vault in $vault_files ; do
+while IFS= read -r vault ; do
+    [ -n "$vault" ] || continue
     if [ -s "$vault" ] && head -n 1 "$vault" | grep -q '^[$]ANSIBLE_VAULT;' ; then
         echo "  ok   $vault"
     else
         fail "$vault is missing, empty, or not an encrypted Ansible vault"
     fi
-done
+done <<< "$vault_files"
 
-# Optional: decrypt the vsphere/openstack vaults and check the multi-vcenter /
-# multi-project schema. Skipped silently when the vault password is missing so
+# Optional: decrypt the vaults and check their schemas (vsphere.yml required,
+# each cloud vault when present). Skipped silently when the vault password is missing so
 # the gate still runs on machines without credentials.
-vault_pass="${VAULT_PASSWORD_FILE:-$HOME/.ssh/dib-vault-pass}"
+# Same lookup as bin/ansible-run.sh: VAULT_PASSWORD_FILE when it names a
+# non-empty file, else the default file.
+vault_pass="$HOME/.ssh/dib-vault-pass"
+if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
+    vault_pass=$VAULT_PASSWORD_FILE
+fi
 if [ -n "$vault_files" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
     echo "== vault schema =="
     if python3 tests/check_vault_schema.py "$vault_pass" "$vault_dir" ; then

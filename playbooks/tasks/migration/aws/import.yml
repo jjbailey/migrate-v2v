@@ -24,21 +24,19 @@
   # The CLI uploads a multi-gigabyte OVA as parallel multipart chunks and
   # resumes a failed part; s3_object pushes the whole file in one stream.
   # Keys on stdin, not environment:; see aws_cli_stdin in vars/aws-common.yml.
+  # With vault keys, drop any AWS_SESSION_TOKEN inherited from the operator's
+  # shell first: it belongs to other credentials, and the CLI would send it
+  # with the vault keys and be rejected. exec-with-stdin-env.sh then exports
+  # the vault's own token, if it has one. Without vault keys the inherited
+  # environment is the credential source and stays as it is.
   ansible.builtin.command:
     stdin: "{{ aws_cli_stdin }}"
-    argv:
-      - "{{ playbook_dir }}/../bin/exec-with-stdin-env.sh"
-      - AWS_ACCESS_KEY_ID
-      - AWS_SECRET_ACCESS_KEY
-      - AWS_SESSION_TOKEN
-      - "--"
-      - aws
-      - s3
-      - cp
-      - "{{ ova_local_path }}"
-      - "s3://{{ s3_bucket }}/{{ s3_key }}"
-      - "--region={{ aws_region }}"
-      - --only-show-errors
+    argv: >-
+      {{ (['env', '-u', 'AWS_SESSION_TOKEN'] if aws_has_keys | bool else [])
+         + [playbook_dir ~ '/../bin/exec-with-stdin-env.sh',
+            'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_SESSION_TOKEN', '--',
+            'aws', 's3', 'cp', ova_local_path, 's3://' ~ s3_bucket ~ '/' ~ s3_key,
+            '--region=' ~ aws_region, '--only-show-errors'] }}
   register: ova_upload
   changed_when: true
 
@@ -131,4 +129,19 @@
     state: present
     tags:
       Name: "{{ vm_name }}"
+
+- name: Tag the AMI's snapshots with the source VM name
+  # VM Import leaves the snapshots behind the AMI untagged, so only the
+  # AMI's block device mappings tie them to the VM. Tag them like the AMI
+  # so a tag search finds them too.
+  amazon.aws.ec2_tag:
+    resource: "{{ item.snapshot_id }}"
+    region: "{{ aws_region }}"
+    state: present
+    tags:
+      Name: "{{ vm_name }}"
+  loop: "{{ import_status.import_image[0].snapshot_details | default([]) }}"
+  loop_control:
+    label: "{{ item.snapshot_id | default('') }}"
+  when: item.snapshot_id | default('', true) | length > 0
 

@@ -50,8 +50,9 @@
     # Unix socket paths are limited to 107 bytes, which a long VM name in the
     # run directory could exceed, so the sockets get a short directory of their own.
     vddk_socket_dir: "/tmp/.vddk-{{ migration_run_id }}"
-    catalog_entry_path: >-
-      /tmp/.{{ vm_name }}-openstack-vddk-{{ migration_run_id }}.catalog-entry.json
+    # Inside the private run directory rather than a predictable /tmp name
+    # built from the raw VM name.
+    catalog_entry_path: "{{ migration_run_dir }}/catalog-entry.json"
 
 - name: Create the persistent OpenStack run directory
   ansible.builtin.file:

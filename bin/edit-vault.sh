@@ -16,9 +16,6 @@
 
 set -eu
 
-script_dir="$(CDPATH= builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null && builtin pwd -P)"
-project_dir="$(CDPATH= builtin cd -- "$script_dir/.." >/dev/null && builtin pwd -P)"
-
 invoked_as="$(basename -- "$0")"
 target="${invoked_as%-vault.sh}"
 if [ "$target" = "edit" ] && [ -z "${VAULT:-}" ] ; then
@@ -39,15 +36,16 @@ VENV_BIN="${DIB7_VENV_BIN:-$HOME/.dib7/bin}"
 ANSIBLE_VAULT="$VENV_BIN/ansible-vault"
 [ -x "$ANSIBLE_VAULT" ] || ANSIBLE_VAULT=$(command -v ansible-vault || true)
 
+# A relative VAULT or MIGRATE_V2V_VAULT_DIR means the current directory, as
+# it does for the Python tools; the playbooks need an absolute one.
 case "$VAULT" in
     /*) ;;
-    *) VAULT="$project_dir/$VAULT" ;;
+    *) VAULT="$PWD/$VAULT" ;;
 esac
 
 [ -n "$ANSIBLE_VAULT" ] || { echo "ansible-vault not found in $VENV_BIN or on PATH" >&2; exit 1; }
 umask 077
 mkdir -p -- "$(dirname -- "$VAULT")"
-[ -s "$VAULT" ] && action=edit || action=create
 
 # Vault password lookup: explicit file, default file, then prompt.
 pass_args=()
@@ -55,6 +53,18 @@ if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
     pass_args=(--vault-password-file "$VAULT_PASSWORD_FILE")
 elif [ -s "$HOME/.ssh/dib-vault-pass" ] ; then
     pass_args=(--vault-password-file "$HOME/.ssh/dib-vault-pass")
+fi
+
+if [ -s "$VAULT" ] ; then
+    action=edit
+elif [ -e "$VAULT" ] ; then
+    # An existing empty file (touched, or a pre-created bind-mount target):
+    # create refuses it because it exists, and edit because it is not vault
+    # data, so encrypt it in place first and then edit it.
+    "$ANSIBLE_VAULT" encrypt --encrypt-vault-id=default "${pass_args[@]}" "$VAULT"
+    action=edit
+else
+    action=create
 fi
 
 exec "$ANSIBLE_VAULT" "$action" --encrypt-vault-id=default "${pass_args[@]}" "$VAULT"

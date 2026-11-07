@@ -11,7 +11,7 @@ Idempotent: a VM that already tracks changes is left alone.
 
 Credentials come from VCENTER_USERNAME and VCENTER_PASSWORD when both are
 exported, with VCENTER_HOSTNAME (or --vcenter) naming the host. Otherwise
-they come from vaults/vsphere.yml, selected the way select-vcenter.yml does:
+they come from $MIGRATE_V2V_VAULT_DIR/vsphere.yml, selected the way select-vcenter.yml does:
 --vcenter names a vsphere_projects key or vcenter_hostname; without it, the
 legacy flat vcenter_* keys, else the only entry. A vault entry also supplies
 the datacenter and validate_certs. Needs pyVmomi, which community.vmware

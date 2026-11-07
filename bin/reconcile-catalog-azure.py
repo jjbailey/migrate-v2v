@@ -83,6 +83,10 @@ def catalog_scope(migration_catalog):
         subscriptions.add(subscription)
     return subscriptions
 
+def same_subscription(entry, subscription):
+    """Subscription IDs are GUIDs, which Azure compares case-insensitively."""
+    return str(entry.get("azure_subscription_id", "")).casefold() == str(subscription).casefold()
+
 def resource_ids(entry):
     """The boot image, then the data snapshots (or, on older rows, images)."""
     data = entry.get("azure_data_snapshot_ids", entry.get("azure_data_image_ids", []))
@@ -94,7 +98,7 @@ def find_missing_resources(client, subscription, migration_catalog):
     for entry in migration_catalog["migrations"]:
         if entry.get("target_platform") != "azure" or entry.get("status") != "completed":
             continue
-        if entry.get("azure_subscription_id") != subscription:
+        if not same_subscription(entry, subscription):
             continue
         ids = resource_ids(entry)
         if not ids or any(not isinstance(value, str) or not value.strip() for value in ids):
@@ -131,7 +135,7 @@ def candidate_count(migration_catalog, subscription):
     return sum(
         1 for entry in migration_catalog["migrations"]
         if entry.get("target_platform") == "azure"
-        and entry.get("azure_subscription_id") == subscription)
+        and same_subscription(entry, subscription))
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
@@ -161,15 +165,23 @@ def main(argv=None):
             loaded["projects"] = vault_projects(args.vault, "azure_projects")
         return loaded["projects"]
     # A --project that is not a catalog subscription may be a vault key.
+    # Subscription IDs compare case-insensitively, as lookup-migration-azure
+    # does; one spelled differently in the catalog, the vault, or on the
+    # command line is the same subscription.
+    folded = {item.casefold() for item in subscriptions}
     requested = args.subscription
-    if requested and requested not in subscriptions:
+    if requested and requested.casefold() not in folded:
         requested = resolve_subscription(load_projects(), requested)
     subscription = requested or (
-        next(iter(subscriptions)) if len(subscriptions) == 1 else None)
+        next(iter(subscriptions)) if len(folded) == 1 else None)
     if not subscription:
         raise ValueError(
             "catalog contains multiple Azure subscriptions; provide --subscription")
     subscription = str(subscription)
+    if subscription.casefold() not in folded:
+        raise ValueError(
+            f"catalog contains no Azure entries for subscription {subscription}; "
+            f"found: {', '.join(sorted(subscriptions))}")
 
     credential, source = credential_for(subscription, load_projects, args.vault)
     client = ComputeManagementClient(credential, subscription)
@@ -179,7 +191,7 @@ def main(argv=None):
         entry for entry in migration_catalog["migrations"]
         if entry.get("target_platform") == "azure"
         and entry.get("status") == "retired"
-        and entry.get("azure_subscription_id") == subscription]
+        and same_subscription(entry, subscription)]
 
     for entry, missing in stale:
         print(

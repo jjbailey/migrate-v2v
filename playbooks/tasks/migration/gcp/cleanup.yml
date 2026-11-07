@@ -37,8 +37,11 @@
   ansible.builtin.debug:
     msg: >-
       Migration did not complete. Staging objects were retained under
-      gs://{{ gcs_bucket }}/{{ gcs_prefix | default('') }} for debugging;
-      re-running the playbook re-uploads them.
+      gs://{{ gcs_bucket }}/{{ gcs_prefix | default('') }}. Resume with
+      -e resume_run_id={{ migration_run_id | default('<run-id>') }} to reuse
+      them. A fresh run uploads under a new prefix and leaves these behind;
+      if you start over, remove them with gcloud storage rm --recursive
+      gs://{{ gcs_bucket }}/{{ gcs_prefix | default('') }}.
   when:
     - gcp_gcs_object_names is defined and gcp_gcs_object_names | length > 0
     - not (migration_succeeded | default(false) | bool)

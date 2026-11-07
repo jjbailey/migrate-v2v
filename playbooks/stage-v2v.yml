@@ -5,7 +5,7 @@
 # Stage the stage-v2v init script on CentOS VMs before virt-v2v migrates them
 # to OpenStack. Windows guests are detected through vCenter and skipped.
 #
-# vCenter credentials come from vaults/vsphere.yml, the same vault and
+# vCenter credentials come from $MIGRATE_V2V_VAULT_DIR/vsphere.yml, the same vault and
 # selection scheme as the migrate playbooks:
 #
 #   vsphere_projects:
@@ -53,11 +53,24 @@
       run_once: true
       no_log: true
 
+    # bin/stage-v2v.sh always passes -c, so a legacy single-vCenter vault is
+    # selected by its vcenter_hostname, as bin/enable-cbt.py does.
+    - name: Use the legacy flat credentials when they match the requested vCenter
+      ansible.builtin.set_fact:
+        vsphere_target_name: legacy
+      when:
+        - vsphere_target_vcenter | default('') | string | trim | length > 0
+        - vsphere_target_name is not defined
+        - vcenter_hostname is defined
+        - (vsphere_target_vcenter | string | trim) == (vcenter_hostname | string | trim)
+      run_once: true
+
     - name: Fail when the requested vCenter matches nothing in the vault
       ansible.builtin.fail:
         msg: >-
           vCenter '{{ vsphere_target_vcenter }}' matches no vault key or
-          vcenter_hostname in vaults/vsphere.yml under vsphere_projects.
+          vcenter_hostname in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/vsphere.yml under vsphere_projects,
+          nor its legacy flat vcenter_hostname.
           Available: {{ vsphere_projects | default({}) | list | join(', ') or '<none>' }}.
       when:
         - vsphere_target_vcenter | default('') | string | trim | length > 0
@@ -118,7 +131,7 @@
           - vcenter_username is defined and (vcenter_username | string | trim | length) > 0
           - vcenter_password is defined and (vcenter_password | string | trim | length) > 0
         fail_msg: >-
-          vaults/vsphere.yml must define the legacy flat vcenter_hostname,
+          {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/vsphere.yml must define the legacy flat vcenter_hostname,
           vcenter_username, and vcenter_password, or a vsphere_projects entry
           with the same keys.
       run_once: true

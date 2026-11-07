@@ -6,8 +6,8 @@ Copy-paste oriented examples for the migration and launch playbooks. Values in
 angle brackets (`<flavor>`, `<network-uuid>`, ...) are placeholders. Use the `bin/` platform wrappers for environment-variable knobs
 combined with explicit Ansible arguments, or `./bin/run-playbook.sh` for full
 direct playbook control. For a guided launch that generates, reviews, saves, or runs the
-wrapper command, use `./bin/launch-aws-dialog.sh`, `./bin/launch-gcp-dialog.sh`,
-or `./bin/launch-openstack-dialog.sh`.
+wrapper command, use `./bin/launch-aws-dialog.sh`, `./bin/launch-azure-dialog.sh`,
+`./bin/launch-gcp-dialog.sh`, or `./bin/launch-openstack-dialog.sh`.
 
 Prerequisites for every example:
 

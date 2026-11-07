@@ -12,6 +12,10 @@ set -euo pipefail
 
 script_dir=$(CDPATH= builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
 repo_dir=$(CDPATH= builtin cd -- "$script_dir/.." > /dev/null && builtin pwd -P)
+# Anchors relative path variables to the caller's directory before the cd.
+# shellcheck source=wrapper-common.sh
+# shellcheck disable=SC1091
+source "$script_dir/wrapper-common.sh"
 
 if [ "$#" -lt 1 ] ; then
     echo "Usage: $0 playbooks/<playbook.yml> [ansible-playbook args]" >&2

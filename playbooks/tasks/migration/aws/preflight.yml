@@ -15,7 +15,7 @@
 - name: Warn if AWS credentials are neither in the vault nor in ~/.aws
   ansible.builtin.debug:
     msg: >-
-      No AWS credentials resolved: vaults/aws.yml has empty access keys and
+      No AWS credentials resolved: {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml has empty access keys and
       ~/.aws/credentials is absent. AWS tasks will fail unless an instance
       profile provides credentials.
   when:

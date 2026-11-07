@@ -40,6 +40,9 @@
     # existing NSG keeps its own rules.
     azure_ssh_source_prefix: "*"
     azure_no_public_ip: false
+    # Delete unattached <vm>-osdisk / <vm>-data-N disks a deleted VM of the
+    # same name left behind, instead of refusing the launch.
+    azure_replace_stale_disks: false
     # cloud-init creates this user with the key below; Azure rejects names
     # such as root and admin.
     azure_admin_username: "azureuser"

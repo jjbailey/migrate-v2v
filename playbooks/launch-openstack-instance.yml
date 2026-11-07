@@ -28,9 +28,11 @@
     openstack_security_groups: []
     openstack_security_group_ids: []
     openstack_key_name: ""
-    # Login user for the printed ssh command. Migrated images set
-    # disable_root: false, so cloud-init puts the key pair on root too.
-    launch_ssh_user: "root"
+    # Login user for the printed ssh command. Empty picks the source guest's
+    # cloud-init default user (debian, ubuntu, ...) from the migration's
+    # recorded guest ID, else root, which migrated images (disable_root:
+    # false) also give the key to; see tasks/show-ssh-command.yml.
+    launch_ssh_user: ""
     openstack_auto_ip: false
     openstack_availability_zone: ""
     openstack_volume_type: ""
@@ -853,4 +855,5 @@
                         + openstack_server_addrs | map(attribute='addr') | list
                         + ['']) | first, true) }}
         ssh_user: "{{ launch_ssh_user }}"
+        ssh_guest_id: "{{ (source_artifact_manifest | default({}, true)).source_guest_id | default('') }}"
 

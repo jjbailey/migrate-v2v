@@ -76,9 +76,10 @@ BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backen
 ```
 
 The wrapper takes the same environment variables as `bin/migrate-openstack-vm.sh`
-(`VM_NAME`, `VSPHERE_TARGET_VCENTER`, `OS_PROJECT_NAME`, `QUIESCE_SNAPSHOT`,
-`VALIDATE_CERTS`, `ARTIFACT_ROOT`), plus `BACKEND`, `COMPRESS`, `REQUIRE_CBT`
-(see below), and `VCENTER_CA_BUNDLE`.
+(`VM_NAME`, `VSPHERE_TARGET_VCENTER`, `VCENTER_DATACENTER`, `OS_PROJECT_NAME`,
+`QUIESCE_SNAPSHOT`, `VALIDATE_CERTS`, `ARTIFACT_ROOT`), plus `BACKEND`,
+`COMPRESS`, `REQUIRE_CBT` (see below), `DISCARD_RUN_ID`, and
+`VCENTER_CA_BUNDLE`.
 Any Ansible arguments after the wrapper's own are passed through. The
 datastore-direct settings are named `vddk_<name>` and shared by both targets;
 the OpenStack playbook still accepts the older `openstack_vddk_<name>`
@@ -99,8 +100,13 @@ snapshot keeps growing as the VM writes, so resume or discard promptly. To give
 up on a failed run, discard it with `-e discard_run_id=<id>` (wrapper:
 `DISCARD_RUN_ID=<id>`, with the same `VM_NAME`): that removes the run's snapshot,
 its run directory, and any images it uploaded, including a partial upload, and
-migrates nothing. (Passing `-e discard_failed_artifacts=true` to a new run does
-not touch an earlier one.)
+migrates nothing. The discard reports only what it actually removed. It fails,
+rather than claiming success, when something could not be removed (it names
+what is left; rerun it once the cause is fixed), when a lookup failed, or when
+it found nothing at all for that run ID and VM name. The last usually means a
+mistyped `DISCARD_RUN_ID` or `VM_NAME`, or a run already discarded.
+(Passing `-e discard_failed_artifacts=true` to a new run does not touch an
+earlier one.)
 
 A resume reads the disks the way the failed run did, using the
 `transfer_backend` its manifest records; `auto` follows the recorded value

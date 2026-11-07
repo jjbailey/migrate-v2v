@@ -12,7 +12,7 @@
 #   migration_target, vddk_require_cbt, vddk_backend_effective
 # Outputs:
 #   source_vm_path, source_vm_folder, source_vm_moref, source_snapshot_moref
-#   (vddk backend), source_firmware, artifact_manifest
+#   (vddk backend), source_firmware, source_guest_id, artifact_manifest
 
 - name: Resolve the source VM inventory path
   environment:
@@ -101,6 +101,17 @@
       {{ (source_vm_info.stdout | from_json).virtualMachines[0].config.firmware | default('bios') }}
   no_log: true
 
+- name: Record the source VM guest OS
+  # vSphere's guest ID (e.g. debian12_64Guest): what VMware Tools reports for
+  # a running VM, else the configured one. Launches map it to the image's
+  # cloud-init default user for the printed ssh command (tasks/show-ssh-command.yml).
+  ansible.builtin.set_fact:
+    source_guest_id: >-
+      {{ ((source_vm_info.stdout | from_json).virtualMachines[0].guest | default({}, true)).guestId
+         | default(((source_vm_info.stdout | from_json).virtualMachines[0].config | default({}, true)).guestId
+                   | default('', true), true) }}
+  no_log: true
+
 - name: Mark the snapshot for best-effort cleanup
   ansible.builtin.set_fact:
     snapshot_cleanup_required: true
@@ -130,5 +141,6 @@
       {{ (vm_manifest_result.stdout | from_json)
          | combine({'source_mac_addresses': source_mac_addresses | default([]),
                     'source_firmware': source_firmware | default('bios'),
+                    'source_guest_id': source_guest_id | default(''),
                     'transfer_backend': vddk_backend_effective}) }}
 

@@ -4,7 +4,7 @@
 
 """List the SSH public key resources one Azure subscription can launch with.
 
-Credentials come from vaults/azure.yml (azure_projects, matched by vault key
+Credentials come from $MIGRATE_V2V_VAULT_DIR/azure.yml (azure_projects, matched by vault key
 or subscription ID, the same way select-project.yml does). The service
 principal in the vault entry is always used, never a logged-in az CLI
 session, so the listing sees what the launch playbook will see.

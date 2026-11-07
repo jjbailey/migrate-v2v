@@ -195,7 +195,29 @@ def validate_scope(
             f"catalog contains no OpenStack entries for authenticated "
             f"project {project_id}"
         )
-    project_regions = {
+    project_regions = recorded_regions(
+        migration_catalog, deployment_catalog, scope_identities)
+    if region_name is None:
+        # Single-region cloud: no row records a region (see main), so every
+        # row belongs to the credentials' default region.
+        if project_regions:
+            raise ValueError(
+                f"project {project_id} has catalog entries in region(s) "
+                f"{', '.join(sorted(project_regions))}; provide --region-name"
+            )
+    elif region_name not in project_regions:
+        hint = ("; omit --region-name to check them in the credentials' "
+                "default region" if not project_regions else "")
+        raise ValueError(
+            f"project {project_id} has no catalog entries in region "
+            f"{region_name}; found: {', '.join(sorted(project_regions)) or '<none>'}"
+            f"{hint}"
+        )
+    return scope_identities
+
+def recorded_regions(migration_catalog, deployment_catalog, project_identities):
+    """Regions recorded on the project's OpenStack rows in either catalog."""
+    return {
         entry.get("openstack_region")
         for catalog, list_key in (
             (migration_catalog, "migrations"),
@@ -203,15 +225,9 @@ def validate_scope(
         )
         for entry in catalog[list_key]
         if entry.get("target_platform") == "openstack"
-        and in_project(entry, scope_identities)
-        and entry.get("openstack_region")
+        and in_project(entry, project_identities)
+        and has_region(entry)
     }
-    if region_name not in project_regions:
-        raise ValueError(
-            f"project {project_id} has no catalog entries in region "
-            f"{region_name}; found: {', '.join(sorted(project_regions)) or '<none>'}"
-        )
-    return scope_identities
 
 def candidate_count(migration_catalog, deployment_catalog, project_id=None, region_name=None):
     migrations = sum(
@@ -380,7 +396,8 @@ def connect_for(load_projects, vault, wanted, region_name, cloud=None):
             "variables, or use --cloud")
     options = {name: (str(value) if name == "project_id" else value)
                for name, value in auth.items() if value not in (None, "")}
-    options["region_name"] = region_name
+    if region_name:
+        options["region_name"] = region_name
     return (openstack.connect(load_envvars=False, load_yaml_config=False,
                               **options),
             f"vault entry '{key}'")
@@ -411,7 +428,8 @@ def main():
     )
     parser.add_argument(
         "--region-name",
-        help="OpenStack region; inferred when the catalogs contain one region",
+        help="OpenStack region; inferred when the catalogs contain one region, "
+             "and the credentials' default when they record none",
     )
     parser.add_argument("--project-id")
     parser.add_argument(
@@ -455,17 +473,8 @@ def main():
     if args.region_name:
         region_name = args.region_name
     else:
-        project_regions = {
-            entry.get("openstack_region")
-            for catalog, list_key in (
-                (migration_catalog, "migrations"),
-                (deployment_catalog, "deployments"),
-            )
-            for entry in catalog[list_key]
-            if entry.get("target_platform") == "openstack"
-            and project_identity(entry) & requested_projects
-            and entry.get("openstack_region")
-        }
+        project_regions = recorded_regions(
+            migration_catalog, deployment_catalog, requested_projects)
         if len(project_regions) == 1:
             region_name = next(iter(project_regions))
         elif len(project_regions) > 1:
@@ -474,9 +483,10 @@ def main():
                 f"{', '.join(sorted(requested_projects))}; provide --region-name"
             )
         else:
-            raise ValueError(
-                "catalog contains no OpenStack region; provide --region-name"
-            )
+            # A single-region cloud whose vault leaves region_name empty
+            # records no region on any row; check all of them against the
+            # credentials' default region.
+            region_name = None
     # One run reconciles one project (see --project-id handling above): a
     # single openstack connection is scoped to one project's auth, so one
     # invocation can only check that project's resources.
@@ -494,7 +504,7 @@ def main():
     )
     print(
         f"OpenStack scope: project_id={connection.current_project_id}, "
-        f"region={region_name} (credentials: {source})"
+        f"region={region_name or '<credentials default>'} (credentials: {source})"
     )
     stale_migrations, stale_deployments = find_missing_resources(
         connection, migration_catalog, deployment_catalog, authenticated_identities,

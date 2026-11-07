@@ -384,5 +384,19 @@ class AzureReconcileMainTests(unittest.TestCase):
         self.assertEqual(self.run_main(), 0)
         self.assertEqual(self.names(), ["a"])
 
+    def test_subscription_matches_regardless_of_case(self):
+        # The lookup compares case-insensitively; reconcile must too, or a
+        # differently cased --subscription silently checks nothing.
+        self.write([azure_migration("a"), azure_migration("b")])
+        status = self.run_main("--subscription", "SUB-A",
+                               client=FakeClient(missing={"a-migration-1-disk-0"}))
+        self.assertEqual(status, 0)
+        self.assertEqual(self.names(), ["b"])
+
+    def test_unknown_subscription_is_an_error(self):
+        self.write([azure_migration("a")])
+        with self.assertRaisesRegex(ValueError, "no Azure entries for subscription sub-x"):
+            self.run_main("--subscription", "sub-x")
+
 if __name__ == "__main__":
     unittest.main()

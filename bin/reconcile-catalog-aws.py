@@ -144,21 +144,23 @@ def session_for(account_id, load_projects, vault, profile=None):
     key, entry = match_project(load_projects(), account_id or (),
                                ("aws_account_id", "account_id"))
     if entry is not None:
+        # Keys before the entry's profile, as vars/aws-common.yml does for
+        # the playbooks.
+        key_id = str(entry.get("aws_access_key_id", "") or "").strip()
+        secret = str(entry.get("aws_secret_access_key", "") or "").strip()
+        if key_id and secret:
+            token = str(entry.get("aws_session_token", "") or "").strip()
+            return boto3.Session(
+                aws_access_key_id=key_id, aws_secret_access_key=secret,
+                aws_session_token=token or None), f"vault entry '{key}'"
         entry_profile = str(entry.get("aws_profile", "")
                             or entry.get("profile", "") or "").strip()
         if entry_profile:
             return (boto3.Session(profile_name=entry_profile),
                     f"vault entry '{key}' (profile {entry_profile})")
-        key_id = str(entry.get("aws_access_key_id", "") or "").strip()
-        secret = str(entry.get("aws_secret_access_key", "") or "").strip()
-        if not (key_id and secret):
-            raise ValueError(
-                f"vault entry '{key}' has neither aws_profile nor "
-                "aws_access_key_id/aws_secret_access_key")
-        token = str(entry.get("aws_session_token", "") or "").strip()
-        return boto3.Session(
-            aws_access_key_id=key_id, aws_secret_access_key=secret,
-            aws_session_token=token or None), f"vault entry '{key}'"
+        raise ValueError(
+            f"vault entry '{key}' has neither aws_profile nor "
+            "aws_access_key_id/aws_secret_access_key")
     return boto3.Session(), "boto3 default chain"
 
 def main():

@@ -14,8 +14,12 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
 Runtime artifacts, catalogs, and encrypted vaults live under
-`/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` to use another
-directory for vault files.
+`/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` for vault files,
+`MIGRATE_V2V_CATALOG_DIR` for the catalogs, or `ARTIFACT_ROOT` (playbooks:
+`-e artifact_root=`) for migration run directories to use another directory.
+Upgrading from a checkout that kept vaults and catalogs in the repository
+needs a one-time move; see [Secrets](#secrets) and
+[Migration Catalog](#migration-catalog).
 
 ## Prerequisites
 
@@ -76,7 +80,7 @@ directory for vault files.
   the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
-- For the datastore-direct OpenStack migration
+- For the datastore-direct OpenStack and Azure migrations
   ([doc/datastore-direct.md](doc/datastore-direct.md)): `nbdkit`, whose `curl`
   plugin is the fallback backend. **Install the `vddk` backend too**: nbdkit's
   `vddk` plugin and a VixDiskLib. It is several times faster (it skips a thin
@@ -510,8 +514,9 @@ instance metadata.
 
 `bin/launch-aws-instance.sh` passes `AWS_KEY_NAME` as the EC2 key pair, and it
 defaults to a key pair named `cloud`, which must already exist in the region;
-set it to the key pair you use. The playbook's `key_name` has no default and
-launches without a key pair when it is empty.
+set it to the key pair you use, or set it empty (`AWS_KEY_NAME=`) to launch
+without a key pair. The playbook's `key_name` has no default and launches
+without a key pair when it is empty.
 
 GCP has no named keypair resource equivalent to AWS or OpenStack. The
 equivalent of a pre-registered keypair is a `cloudinit:`-prefixed entry in the
@@ -556,7 +561,7 @@ it later with:
 
 ./bin/run-playbook.sh playbooks/migrate-gcp-vm.yml \
   -e vm_name=my-vm -e datacenter=Datacenter \
-  -e 'resume_run_id=<run-id>'
+  -e gcp_target_project=my-project -e 'resume_run_id=<run-id>'
 ```
 
 When upgrading with resumable runs from an older checkout, copy its retained
@@ -700,14 +705,27 @@ keypair is registered once in the cloud. Every launched instance then inherits
 it and no per-launch key argument is needed:
 
 ```bash
-# merge, do not overwrite: this metadata key holds every project SSH key
+# merge, do not overwrite: this metadata key holds every project SSH key.
+# Each step runs only if the previous one succeeded, and nothing is written
+# unless the existing keys were read back one per line.
+keys=$(mktemp) &&
 gcloud compute project-info describe --project=my-project \
-  --format="value(commonInstanceMetadata.items.filter(\"key:ssh-keys\").extract(value))" \
-  > /tmp/ssh-keys
-printf 'cloudinit:%s\n' "$(cat ~/.ssh/id_ed25519.pub)" >> /tmp/ssh-keys
+  --format='value(commonInstanceMetadata.items.filter("key:ssh-keys").extract(value).flatten())' \
+  > "$keys" &&
+grep -q . "$keys" &&
+printf 'cloudinit:%s\n' "$(cat ~/.ssh/id_ed25519.pub)" >> "$keys" &&
 gcloud compute project-info add-metadata --project=my-project \
-  --metadata-from-file=ssh-keys=/tmp/ssh-keys
+  --metadata-from-file=ssh-keys="$keys"
+rm -f "$keys"
 ```
+
+Keep `.flatten()`: without it `value()` prints the key list as one
+Python-style `['...\n...']` string, and writing that back replaces every
+project key, including the `cloudinit:` entry, with an unusable value. The
+`grep -q .` guard stops when no existing keys were read (a failed or
+mistyped `describe`). Only if the project genuinely has no `ssh-keys` yet,
+write the new `cloudinit:` line to the file yourself and run just the
+`add-metadata` step.
 
 The `cloudinit:` prefix is required. cloud-init's GCE datasource accepts only
 `cloudinit` or the image's own default user (`debian`, `ubuntu`) and **silently
@@ -979,10 +997,27 @@ same password lookup and falls back to a prompt:
 ./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml
 ```
 
+When upgrading from a checkout that still keeps its vaults in the repository's
+`vaults/` directory, move them once. Until you do, the playbooks fail to find
+`vsphere.yml`, and a vault helper opens a new, empty vault instead of yours.
+The old files do not show in `git status`, because `vaults/.gitignore` ignores
+`*.yml`:
+
+```bash
+install -d -m 700 /work/migrate-v2v /work/migrate-v2v/vaults
+mv -n vaults/*.yml /work/migrate-v2v/vaults/
+chmod 600 /work/migrate-v2v/vaults/*.yml
+```
+
 For a Docker bind mount, mount `/work/migrate-v2v` at that same container path
-and run the container with the host directory owner's UID and GID. The current
-workspace and vault directories are mode `700`, and vault files are mode
-`600`, so a different non-root container user cannot read or write them.
+and run the container with the host directory owner's UID and GID. Create the
+workspace and vault directories with mode `700`, as above (the vault helpers
+create theirs that way), and keep vault files at mode `600`, so a different
+non-root container user cannot read or write them. Directories the playbooks
+and catalog tools create below the workspace follow the process umask. The
+container also needs the vault password (`~/.ssh/dib-vault-pass`, or
+`VAULT_PASSWORD_FILE` pointing at a mounted file) and `ansible-vault`, either
+on `PATH` or under `DIB7_VENV_BIN`.
 
 The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 `bin/edit-vault.sh` for any other file. Plain
@@ -1001,7 +1036,7 @@ exposure remains: the vCenter password in the `ovftool` export URL, readable
 in `ps` for the whole export. On a shared host, mount `/proc` with
 `hidepid=2`.
 
-- **`vaults/vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
+- **`vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
   a vCenter entry: `vcenter_hostname`, `vcenter_username`, `vcenter_password`,
   optional `datacenter` (falls back to the pre-existing `datacenter`
   variable, default `"Datacenter"`), and optional `validate_certs`
@@ -1056,7 +1091,7 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   that only applies when no target is selected). `VALIDATE_CERTS` is
   forwarded only when explicitly set (the vault entry decides otherwise).
 
-- **`vaults/openstack.yml`** - `openstack_projects`, a mapping of project key
+- **`openstack.yml`** - `openstack_projects`, a mapping of project key
   to an OpenStack authentication mapping: `auth_url`, `username`, `password`,
   `project_name`, optional `project_id` (recommended for ID-scoped clouds),
   `user_domain_name`, and `project_domain_name`. Every key stays inside the Ansible-vault-encrypted
@@ -1098,7 +1133,9 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   lookup matching; `-e openstack_target_project` matches a vault key, a
   `project_name`, or a `project_id` (string-compared, so quoting is belt and
   braces rather than load-bearing). `region_name` should be set for
-  multi-region clouds and is recorded on the catalog entry. A legacy vault holding
+  multi-region clouds and is recorded on the catalog entry; on a
+  single-region cloud it may be left empty, and reconciliation then checks
+  those rows in the credentials' default region. A legacy vault holding
   only a single `openstack_auth` mapping still works unmodified: with no
   explicit `-e openstack_target_project` the legacy mapping is used as-is even
   when `openstack_projects` is also present. A single-entry `openstack_projects`
@@ -1106,11 +1143,12 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   flag.
 
   The legacy single-project `openstack_auth` mapping remains supported. The
-  catalog reconciliation script is a separate CLI workflow: it uses the
-  OpenStack SDK environment variables or a `clouds.yaml` entry rather than
-  reading `vaults/openstack.yml` (see "OpenStack Catalog Reconciliation" below).
+  catalog reconciliation script is a separate CLI workflow: it prefers
+  `--cloud`, `OS_CLOUD`, or the OpenStack SDK environment variables and falls
+  back to the matching OpenStack vault entry (see "OpenStack Catalog
+  Reconciliation" below).
 
-- **`vaults/aws.yml`** - `aws_projects`, a mapping of AWS account/project key to
+- **`aws.yml`** - `aws_projects`, a mapping of AWS account/project key to
   `aws_region`, `s3_bucket`, `vmimport_role_name`, and optionally
   `aws_account_id`, `aws_profile`, `aws_access_key_id`, `aws_secret_access_key`,
   and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
@@ -1132,13 +1170,13 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
       # aws_secret_access_key, aws_session_token
   ```
 
-- **`vaults/gcp.yml`** - `gcp_projects`, a mapping of project key to
-  `gcp_project`, `gcs_bucket`, `gcp_import_location`, and a
-  `service_account_key` JSON document for a service account with GCS, Compute,
+- **`gcp.yml`** - `gcp_projects`, a mapping of project key to
+  `gcp_project`, `gcs_bucket`, an optional `gcp_import_location` (default
+  `us-central1`), and a `service_account_key` JSON document for a service account with GCS, Compute,
   Cloud Build, and M2VM permissions. One run targets one project, selected with
   `-e gcp_target_project=<key-or-project-id>`; a single-entry map is selected
   automatically. A legacy flat mapping with `gcp_project`, `gcs_bucket`,
-  `gcp_import_location`, and `service_account_key` remains supported. For
+  optional `gcp_import_location`, and `service_account_key` remains supported. For
   example:
 
   ```yaml
@@ -1157,8 +1195,8 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
         { ... JSON ... }
   ```
 
-  `gcp_import_location` is the region the Migrate to Virtual Machines _import
-  job_ runs in - the value passed to `gcloud compute migration image-imports
+  `gcp_import_location` (default `us-central1` when the entry leaves it out)
+  is the region the Migrate to Virtual Machines _import job_ runs in - the value passed to `gcloud compute migration image-imports
 --location`. It does **not** control where `gcs_bucket` lives (fixed when
   the bucket is created; the import reads the staged VMDK across regions) or
   where the finished image lives (a GCE Compute image is a _global_ resource).
@@ -1176,7 +1214,7 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   retrying in another region is the fastest way to tell a bad artifact apart
   from a bad region.
 
-- **`vaults/azure.yml`** - `azure_projects`, a mapping of subscription key to
+- **`azure.yml`** - `azure_projects`, a mapping of subscription key to
   one service principal (`tenant_id`, `subscription_id`, `client_id`,
   `client_secret`) plus where its migrations land: `resource_group` (must
   already exist), `location`, `storage_account` (3-24 lowercase letters and
@@ -1215,7 +1253,16 @@ differ by method:
   the backing), and an attachment keyed by the vSphere `device_key`.
 
 Both record the ordered `source_mac_addresses` captured from vSphere, when
-available, for OpenStack launches that preserve network identity. The
+available, for OpenStack launches that preserve network identity;
+`source_firmware` (`efi` or `bios`, which sets Azure's Hyper-V generation);
+and `source_guest_id`, vSphere's guest OS ID (what VMware Tools reports, else
+the configured one, such as `debian12_64Guest`). The AWS, GCP, and OpenStack
+launches use it to print the ssh command for the distribution's cloud-init
+default user (`debian`, `ubuntu`, `fedora`, `rocky`, `almalinux`, `centos` for
+CentOS 7, `cloud-user` for RHEL, `ec2-user` for Amazon Linux). An unknown
+guest, or a migration recorded before this field existed, gets `root@`, which
+migrated images also give the key to; `-e launch_ssh_user=<user>` picks the
+user outright. The
 datastore manifest adds `source_vm_name`, `boot_order_source` (`bootOptions`
 when the VM's configured boot order named a disk, otherwise `controller`), and
 `transfer_backend` (which backend read the disks, so a resume reuses it).
@@ -1253,8 +1300,9 @@ project ID and region; GCP records contain the
 project, import location, GCS staging bucket and prefix, the boot image name
 and selfLink, and ordered data-disk image names and selfLinks; Azure records
 contain the subscription ID, resource group, location, storage account,
-container and blob prefix, the Hyper-V generation, and the boot and ordered
-data-disk snapshot names and resource IDs (older rows recorded data disks as
+container and blob prefix, the Hyper-V generation, the boot managed image's
+name and resource ID, and the ordered data-disk snapshot names and resource
+IDs (older rows recorded data disks as
 managed images; they validate, but only their boot disk can be launched). GCP
 launches from its images; Azure launches from the boot image and data snapshots.
 Unlike a catalog that
@@ -1352,8 +1400,8 @@ images and snapshots:
    managed image, but it can from a snapshot, which is how a launch attaches
    data disks; both are billed by used size. The image's Hyper-V generation follows the source VM's firmware - `V2`
    (Gen2/UEFI) for an `efi` guest, `V1` (Gen1/BIOS) otherwise - unless
-   `-e azure_hyper_v_generation=V1|V2` overrides it. A same-named image is
-   or snapshot is deleted and recreated by default
+   `-e azure_hyper_v_generation=V1|V2` overrides it. A same-named image or
+   snapshot is deleted and recreated by default
    (`azure_replace_existing_image: true`);
    the resource ID is derived from the name, so it stays stable across runs
    while its content changes, exactly as GCP does.
@@ -1427,7 +1475,12 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.
   An existing VM of that name is reused only when its tags mark it as a
-  launch of the same migration.
+  launch of the same migration. When there is no such VM but its
+  `<vm>-osdisk` or `<vm>-data-N` disks remain (Azure keeps them when a VM is
+  deleted), the launch stops before creating anything rather than attaching
+  them in place of fresh copies of the snapshots;
+  `-e azure_replace_stale_disks=true` deletes the unattached ones and
+  continues.
 - The launch is recorded in
   `/work/migrate-v2v/catalogs/deployment-catalog.json`.
 
@@ -1479,6 +1532,11 @@ openstack_region recorded" line and is neither checked nor removed. Such a
 row already marked `retired` is still removed, because that goes by status
 rather than by a resource lookup. The `--force` threshold counts only the
 rows that are checked.
+
+When none of the project's rows records a region (a single-region cloud whose
+vault leaves `region_name` empty), omit `--region-name`: the run connects to
+the credentials' default region and checks every row. Passing a region the
+catalogs do not record stops the run instead.
 
 One run reconciles one project: `--project-id` accepts a project name or ID
 and is required whenever the

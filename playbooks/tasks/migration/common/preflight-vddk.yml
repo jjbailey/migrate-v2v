@@ -19,7 +19,7 @@
       - GOVC_PASSWORD is defined and GOVC_PASSWORD | length > 0
       - GOVC_INSECURE is defined
     fail_msg: >-
-      vaults/vsphere.yml must define the vCenter and GOVC credentials.
+      {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/vsphere.yml must define the vCenter and GOVC credentials.
   no_log: true
 
 - name: Check govc
