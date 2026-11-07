@@ -39,8 +39,9 @@
     gcp_boot_image_name: ""
     gcp_data_image_names: []
     gcp_migration_id: ""
-    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
-    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+    migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
+    deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 
   tasks:
     # Bare -e key=[...] arrives as a string, and Ansible extra-vars cannot be

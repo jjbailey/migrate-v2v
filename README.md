@@ -302,7 +302,6 @@ migrate-v2v/
 │   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
 │   ├── inspect-ova.py           # OVA inspection
 │   └── *-vault.sh               # Vault management scripts
-├── catalogs/                    # Migration and deployment catalogs
 ├── doc/                         # Documentation, workflow diagram, presentation
 ├── examples/                    # OpenStack launch matrix and sample cloud-init data
 ├── playbooks/                   # Ansible playbooks
@@ -778,7 +777,7 @@ What each kind asks:
   OpenStack one also asks whether to compress the QCOW2 images (`COMPRESS`,
   default no; yes if `COMPRESS=true` is already set).
 - **Launch dialogs** pick the target project the same way and offer the
-  migrated VM from `catalogs/migration-catalog.json` (newest completed
+  migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
   for the platform's launch settings: subnet, security groups, instance type
   and key pair for AWS; VM size, network names, public IP, admin user, and SSH
@@ -1218,7 +1217,8 @@ parameter.
 ## Migration Catalog
 
 Every successful AWS, Azure, OpenStack, or GCP migration run appends one record to
-`catalogs/migration-catalog.json` via `bin/append-migration-catalog.py`:
+`/work/migrate-v2v/catalogs/migration-catalog.json` via
+`bin/append-migration-catalog.py`:
 `vm_name`, source vCenter/datacenter, `clone_name`, `snapshot_name`, the
 source `artifact_type`, target-neutral `artifact_manifest`, target platform,
 `status`, and `migrated_at`. AWS records additionally contain the S3 location,
@@ -1242,9 +1242,16 @@ the same `import_task_id` replaces its own prior entry. Look here rather than
 scrolling back through playbook output to find an AMI ID.
 
 Browse the migrated images with `bin/list-image-catalog.py` (no cloud credentials
-or API calls needed). It reads this repository's migration catalog by default,
-even when run from another directory, and shows all completed migrations, not
-only the latest for each VM:
+or API calls needed). It reads the runtime migration catalog by default and
+shows all completed migrations, not only the latest for each VM. Set
+`MIGRATE_V2V_CATALOG_DIR` to use another catalog directory. If upgrading from a
+checkout that still stores catalogs in the repository, copy them once before
+removing those files:
+
+```bash
+mkdir -p /work/migrate-v2v/catalogs
+cp catalogs/migration-catalog.json catalogs/deployment-catalog.json /work/migrate-v2v/catalogs/
+```
 
 ```bash
 ./bin/list-image-catalog.py
@@ -1397,7 +1404,8 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.
   An existing VM of that name is reused only when its tags mark it as a
   launch of the same migration.
-- The launch is recorded in `catalogs/deployment-catalog.json`.
+- The launch is recorded in
+  `/work/migrate-v2v/catalogs/deployment-catalog.json`.
 
 ## GCP Project Reconciliation
 
@@ -1499,7 +1507,8 @@ server cannot be reused, and their MACs remain reserved until the ports are
 deleted.
 
 Every successful AWS, Azure, OpenStack, or GCP launch appends one record to
-`catalogs/deployment-catalog.json` via `bin/append-deployment-catalog.py`.
+`/work/migrate-v2v/catalogs/deployment-catalog.json` via
+`bin/append-deployment-catalog.py`.
 AWS records contain `vm_name`, `target_platform`, `ami_id`, the
 `import_task_id` it came from, `instance_id`, `instance_type`, `aws_region`,
 `vpc_subnet_id`, `status`, and `launched_at`. Azure records contain the VM name,

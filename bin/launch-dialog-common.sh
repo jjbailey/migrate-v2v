@@ -8,6 +8,9 @@
 
 set -euo pipefail
 
+MIGRATE_V2V_CATALOG_DIR=${MIGRATE_V2V_CATALOG_DIR:-/work/migrate-v2v/catalogs}
+export MIGRATE_V2V_CATALOG_DIR
+
 # dialog and whiptail both draw on stdout and write the answer on stderr, so
 # dlg() swaps the two to let $(dlg ...) capture the answer.
 if command -v dialog > /dev/null 2>&1 ; then
@@ -171,14 +174,14 @@ choose_vm()
     while IFS= read -r name ; do
         [ -z "$name" ] || choices+=("${name%%$'\t'*}" "${name#*$'\t'}" OFF)
     done < <(
-        python3 -c 'import json,sys,datetime
+        python3 -c 'import json,sys,datetime,os
 def when(v):
     try:
         d=datetime.datetime.fromisoformat(v.replace("Z","+00:00"))
         return d if d.tzinfo else d.replace(tzinfo=datetime.timezone.utc)
     except Exception:
         return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-try: rows=json.load(open("catalogs/migration-catalog.json")).get("migrations",[])
+try: rows=json.load(open(os.path.join(os.environ["MIGRATE_V2V_CATALOG_DIR"],"migration-catalog.json"))).get("migrations",[])
 except Exception: rows=[]
 best={}
 for row in rows:
@@ -191,7 +194,7 @@ for name,stamp in sorted(best.items(), key=lambda item: when(item[1]), reverse=T
     print("%s\t%s" % (name, stamp[:10] or "undated"))' "$platform"
     )
     if [ ${#choices[@]} -eq 0 ] ; then
-        say "No completed ${label} migrations in catalogs/migration-catalog.json.\\n\\nType the VM name manually instead." 10 || true
+        say "No completed ${label} migrations in $MIGRATE_V2V_CATALOG_DIR/migration-catalog.json.\\n\\nType the VM name manually instead." 10 || true
         input "VM name (as recorded in the migration catalog):" ""
         return
     fi

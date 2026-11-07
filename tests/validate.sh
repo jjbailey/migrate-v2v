@@ -70,9 +70,9 @@ tracked = [path for path in subprocess.run(["git", "ls-files"], capture_output=T
            if Path(path).exists()]
 dirs = {str(parent) + "/" for path in tracked for parent in Path(path).parents if str(parent) != "."}
 basenames = {Path(path).name for path in tracked}
-# The public export ships vaults/ and catalogs/ empty (see
-# local/rsync-to-migrate-v2v.sh), so their files are only checked where
-# they are tracked.
+# The public export excludes private vault and catalog contents (see
+# local/rsync-to-migrate-v2v.sh), so tracked files there are only validated
+# when present.
 private_dirs = [d for d in ("vaults/", "catalogs/")
                 if not any(path.startswith(d) and Path(path).name != ".gitignore" for path in tracked)]
 path_ref = re.compile(r"(?<![\w./-])(?:\./)?((?:bin|local|playbooks|tests|doc|examples|catalogs|vaults)/[\w./*-]*)")
@@ -146,7 +146,8 @@ echo "== catalogs =="
 # strings, disk and image order) at write time. Run every row already on
 # disk back through those same validators, so a hand edit or a row written
 # before a validator was tightened is caught here rather than at launch.
-if python3 - << 'PYTHON' ; then
+catalog_dir=${MIGRATE_V2V_CATALOG_DIR:-/work/migrate-v2v/catalogs}
+if python3 - "$catalog_dir" << 'PYTHON' ; then
 import importlib.util
 import json
 import sys
@@ -165,7 +166,8 @@ expected = {
     "deployment-catalog.json": ("deployments", validator("append-deployment-catalog.py")),
 }
 rc = 0
-for path in sorted(Path("catalogs").glob("*.json")) if Path("catalogs").is_dir() else []:
+catalog_dir = Path(sys.argv[1])
+for path in sorted(catalog_dir.glob("*.json")) if catalog_dir.is_dir() else []:
     if path.name not in expected:
         continue
     list_key, validate = expected[path.name]

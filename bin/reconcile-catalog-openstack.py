@@ -9,7 +9,8 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
+from catalog_common import (default_catalog_path, read_snapshot,
+                            remove_deployment_entries, remove_migration_entries)
 from vault_common import environment_source, match_project, vault_projects
 
 import keystoneauth1.exceptions
@@ -389,12 +390,12 @@ def main():
     parser.add_argument(
         "--migration-catalog",
         type=Path,
-        default=repo_dir / "catalogs/migration-catalog.json",
+        default=default_catalog_path("migration-catalog.json"),
     )
     parser.add_argument(
         "--deployment-catalog",
         type=Path,
-        default=repo_dir / "catalogs/deployment-catalog.json",
+        default=default_catalog_path("deployment-catalog.json"),
     )
     parser.add_argument(
         "--cloud",

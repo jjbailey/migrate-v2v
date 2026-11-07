@@ -15,7 +15,7 @@ from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.core.tools import parse_resource_id
 
-from catalog_common import read_snapshot, remove_migration_entries
+from catalog_common import default_catalog_path, read_snapshot, remove_migration_entries
 from vault_common import environment_source, match_project, vault_projects
 
 # A managed image or snapshot resource ID, as azure_rm_image_info and
@@ -136,7 +136,7 @@ def main(argv=None):
     repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migration-catalog", type=Path,
-                        default=repo_dir / "catalogs/migration-catalog.json")
+                        default=default_catalog_path("migration-catalog.json"))
     parser.add_argument("--subscription", "--project", dest="subscription",
                         help="only reconcile this Azure subscription ID "
                              "(or vault key)")

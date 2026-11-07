@@ -3,8 +3,8 @@
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
 # Launches an EC2 instance from an AMI produced by migrate-aws-vm.yml. By default
-# it looks up the most recent completed migration for vm_name in
-# catalogs/migration-catalog.json (via bin/lookup-migration-ami.py); pass an
+# it looks up the most recent completed migration for vm_name in the runtime
+# migration catalog (via bin/lookup-migration-ami.py); pass an
 # explicit ami_id to skip that lookup and launch a specific AMI instead.
 #
 # The AWS region and credentials come from vaults/aws.yml (see README.md
@@ -36,8 +36,9 @@
     instance_name: "{{ vm_name }}"
     extra_tags: {}
 
-    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
-    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+    migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
+    deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 
   tasks:
     # Bare -e key=[...] arrives as a string, and Ansible extra-vars cannot be

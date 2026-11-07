@@ -40,8 +40,9 @@
     openstack_config_drive: false
     extra_metadata: {}
     launch_run_id: ""
-    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
-    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+    migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
+    deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 
   tasks:
     # One run targets one project; the vault holds all of them. Select with

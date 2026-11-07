@@ -18,6 +18,18 @@ import json
 import os
 import stat
 import tempfile
+from pathlib import Path
+
+DEFAULT_CATALOG_DIR = Path(
+    "/work/migrate-v2v/catalogs"
+).expanduser()
+
+def default_catalog_path(filename):
+    """Runtime catalog path, overridable for alternate checkouts or tests."""
+    catalog_dir = Path(
+        os.environ.get("MIGRATE_V2V_CATALOG_DIR") or DEFAULT_CATALOG_DIR
+    ).expanduser()
+    return catalog_dir / filename
 
 def now_utc():
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
