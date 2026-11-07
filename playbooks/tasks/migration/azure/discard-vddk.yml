@@ -31,6 +31,10 @@
 
     # Listing by prefix never fails on an absent blob, but it does on an
     # absent account or container, which a run that failed early never made.
+    # The when: skips an absent account; an absent container is the only
+    # failure tolerated. Any other (credentials, permissions, the service)
+    # fails the lookup, so the discard reports itself incomplete instead of
+    # discarded with the blobs still there.
     - name: List the run's staged blobs
       azure.azcollection.azure_rm_storageblob_info:
         resource_group: "{{ azure_resource_group }}"
@@ -38,7 +42,9 @@
         container_name: "{{ azure_storage_container }}"
         name_starts_with: "{{ azure_blob_prefix }}/"
       register: azure_discard_blobs
-      failed_when: false
+      failed_when:
+        - azure_discard_blobs.failed | default(false) | bool
+        - "'ContainerNotFound' not in (azure_discard_blobs.msg | default('') | string)"
       when: azure_discard_storage_account.storageaccounts | default([]) | length > 0
 
     - name: Queue the retained run's images, snapshots, and blobs for removal
@@ -53,6 +59,8 @@
              | map(attribute='name')
              | select('match', (azure_image_prefix ~ '-disk-') | regex_escape)
              | list | unique }}
+        # The listing comes back under "blob", not "blobs" (azcollection
+        # 4.1.0, pinned in requirements.yml).
         azure_blob_names: >-
-          {{ azure_discard_blobs.blobs | default([]) | map(attribute='name') | list | unique }}
+          {{ azure_discard_blobs.blob | default([], true) | map(attribute='name') | list | unique }}
 
