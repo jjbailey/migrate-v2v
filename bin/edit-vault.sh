@@ -45,6 +45,8 @@ case "$VAULT" in
 esac
 
 [ -n "$ANSIBLE_VAULT" ] || { echo "ansible-vault not found in $VENV_BIN or on PATH" >&2; exit 1; }
+umask 077
+mkdir -p -- "$(dirname -- "$VAULT")"
 [ -s "$VAULT" ] && action=edit || action=create
 
 # Vault password lookup: explicit file, default file, then prompt.

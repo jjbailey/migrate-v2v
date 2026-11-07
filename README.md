@@ -559,6 +559,18 @@ it later with:
   -e 'resume_run_id=<run-id>'
 ```
 
+When upgrading with resumable runs from an older checkout, copy its retained
+run tree from `/var/tmp/migrate-v2v/` before resuming:
+
+```bash
+mkdir -p /work/migrate-v2v
+cp -a /var/tmp/migrate-v2v/. /work/migrate-v2v/
+```
+
+You can instead keep using the old location for a run by setting
+`ARTIFACT_ROOT=/var/tmp/migrate-v2v` on a wrapper, or passing
+`-e artifact_root=/var/tmp/migrate-v2v` to a playbook.
+
 AWS does not resume with `resume_run_id`; a failed AWS import task is
 cancelled while its staged OVA remains in S3 by default for a follow-up import.
 If the import finished but a later step failed (the snapshot check, tagging,
@@ -966,6 +978,11 @@ same password lookup and falls back to a prompt:
 ./bin/openstack-vault.sh  # /work/migrate-v2v/vaults/openstack.yml
 ./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml
 ```
+
+For a Docker bind mount, mount `/work/migrate-v2v` at that same container path
+and run the container with the host directory owner's UID and GID. The current
+workspace and vault directories are mode `700`, and vault files are mode
+`600`, so a different non-root container user cannot read or write them.
 
 The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 `bin/edit-vault.sh` for any other file. Plain
