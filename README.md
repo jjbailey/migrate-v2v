@@ -293,6 +293,7 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
+- [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
 - [migrate-v2v presentation video](doc/migrate_v2v_presentation.mp4) - recorded video of the project presentation
@@ -1658,3 +1659,17 @@ Same accumulate-not-supersede reasoning as the migration catalog - the same
 AMI or image can legitimately be launched more than once, so history is kept
 rather than overwritten; only an exact rerun against the same target resource
 identity replaces its own prior entry.
+
+## License
+
+Copyright (C) 2026 Jack Bailey
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the [LICENSE](LICENSE) file for
+details.

@@ -83,7 +83,7 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 ## Project license
 
 - **Migratekit:** Apache-2.0. ([LICENSE][mk-license])
-- **migrate-v2v:** GPL-3.0. ([LICENSE][mv-license])
+- **migrate-v2v:** GPL-3.0-or-later. ([LICENSE][mv-license])
 
 [mk]: https://github.com/vexxhost/migratekit
 [mk-how]: https://github.com/vexxhost/migratekit#how-it-works
