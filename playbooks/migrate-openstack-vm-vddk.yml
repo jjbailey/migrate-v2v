@@ -52,7 +52,7 @@
     vddk_backend: "{{ openstack_vddk_backend | default('auto') }}"
     # VixDiskLib directory holding lib64/libvixDiskLib.so.8; empty uses the
     # vddk plugin's built-in default.
-    vddk_libdir: "{{ openstack_vddk_libdir | default('') }}"
+    vddk_libdir: "{{ openstack_vddk_libdir | default('/opt/openvddk') }}"
     # VixDiskLib transports to try, colon-separated.
     vddk_transports: "{{ openstack_vddk_transports | default('nbdssl') }}"
     # vCenter certificate SHA-1 thumbprint; empty reads it in preflight.
