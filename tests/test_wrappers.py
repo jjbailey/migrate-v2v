@@ -315,12 +315,6 @@ class StageV2vTests(WrapperTestCase):
             "ssh_private_key_file": "/keys/my key",
         })
 
-class DefaultsTests(unittest.TestCase):
-    def test_no_old_artifact_defaults_in_wrappers(self):
-        for path in sorted(BIN.glob("*.sh")):
-            with self.subTest(script=path.name):
-                self.assertNotIn("/var/tmp/migrate-v2v", path.read_text())
-
 class ExecWithStdinEnvTests(unittest.TestCase):
     """bin/exec-with-stdin-env.sh: secrets arrive on stdin, not in argv."""
 

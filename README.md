@@ -16,7 +16,8 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
 Runtime artifacts, catalogs, and encrypted vaults live under
 `/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` for vault files,
 `MIGRATE_V2V_CATALOG_DIR` for the catalogs, or `ARTIFACT_ROOT` (playbooks:
-`-e artifact_root=`) for migration run directories to use another directory.
+`-e artifact_root=`) for migration run directories to use another directory;
+see [Artifact Root](#artifact-root).
 Upgrading from a checkout that kept vaults and catalogs in the repository
 needs a one-time move; see [Secrets](#secrets) and
 [Migration Catalog](#migration-catalog).
@@ -527,18 +528,59 @@ Note that `gcloud compute ssh` and the Cloud Console ephemeral-key flow rely on
 `google-guest-agent`, which the Migrate to Virtual Machines OS adaptation does
 not install. On migrated instances, use ordinary `ssh` with an inherited key.
 
-AWS, Azure, OpenStack, and GCP migrations use persistent run directories under
-`/work/migrate-v2v/` (the `artifact_root` default, and the wrappers'
-`ARTIFACT_ROOT` default), each in a target/VM/run-ID subtree. After an
-Azure, OpenStack, or GCP OVF run fails, the package, manifest, and referenced
-VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
+### Artifact Root
+
+AWS, Azure, OpenStack, and GCP migrations write their run directories under
+one artifact root, `/work/migrate-v2v` by default, laid out as
+`<artifact-root>/<target>/<vm-name>/<run-id>/` (for example
+`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The root only holds migration
+run directories; vaults and catalogs have their own settings
+(`MIGRATE_V2V_VAULT_DIR`, `MIGRATE_V2V_CATALOG_DIR`).
+
+Change it in whichever way matches how you start the migration:
+
+| Started with                                         | How to change the artifact root                                                                                                                   |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin/migrate-*-vm*.sh` wrappers                      | `ARTIFACT_ROOT=/mnt/migration-storage ./bin/migrate-openstack-vm.sh ...`                                                                          |
+| `bin/*-dialog.sh` front ends                         | export `ARTIFACT_ROOT` before starting the dialog; the generated script records it as an `export ARTIFACT_ROOT=...` line, which you can also edit |
+| `bin/run-playbook.sh` or `ansible-playbook` directly | `-e artifact_root=/mnt/migration-storage`                                                                                                         |
+| One run only, at an exact path                       | `-e migration_run_dir=/mnt/migration-storage/my-vm-run` (replaces the whole `<root>/<target>/<vm>/<run-id>` path)                                 |
+
+```bash
+# Every run of this wrapper goes under /mnt/migration-storage/openstack/...
+export ARTIFACT_ROOT=/mnt/migration-storage
+./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project
+
+# The same, calling the playbook directly
+./bin/run-playbook.sh playbooks/migrate-openstack-vm.yml \
+  -e vm_name=my-vm -e openstack_target_project=my-project \
+  -e artifact_root=/mnt/migration-storage
+```
+
+Notes:
+
+- The directory must be writable by the user running the playbook and have
+  room for the largest exported disk set (see the OpenStack sizing note below);
+  it is created on first use.
+- A relative `ARTIFACT_ROOT` given to a wrapper is resolved against the
+  directory you ran the wrapper from, not the repository.
+- Resume (`resume_run_id`) and discard (`discard_failed_artifacts`,
+  `DISCARD_RUN_ID`) look for the run under the current artifact root, so use
+  the same `ARTIFACT_ROOT` / `artifact_root` (or the same `migration_run_dir`)
+  as the original run. If you change the root between attempts, move the
+  existing `<target>/<vm-name>/<run-id>` tree to the new root first.
+- In a container, bind-mount the chosen root at the same path inside the
+  container so resume finds the runs from either side.
+
+After an Azure, OpenStack, or GCP OVF run fails, the package, manifest, and
+referenced VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
 its OVA in S3 according to its existing flow.
 
 For large OpenStack migrations, the persistent run directory must have enough
 space for the exported OVF disk set plus two temporary QCOW2 files: the disk
 being uploaded and the next disk being converted alongside it. No extracted
-VMDK copy is created. Set `artifact_root` (wrapper: `ARTIFACT_ROOT`) to place
-the normal run hierarchy on another filesystem, or override one run's complete
+VMDK copy is created. Set the [artifact root](#artifact-root) to place the
+normal run hierarchy on another filesystem, or override one run's complete
 directory with `migration_run_dir`:
 
 ```bash
@@ -563,18 +605,6 @@ it later with:
   -e vm_name=my-vm -e datacenter=Datacenter \
   -e gcp_target_project=my-project -e 'resume_run_id=<run-id>'
 ```
-
-When upgrading with resumable runs from an older checkout, copy its retained
-run tree from `/var/tmp/migrate-v2v/` before resuming:
-
-```bash
-mkdir -p /work/migrate-v2v
-cp -a /var/tmp/migrate-v2v/. /work/migrate-v2v/
-```
-
-You can instead keep using the old location for a run by setting
-`ARTIFACT_ROOT=/var/tmp/migrate-v2v` on a wrapper, or passing
-`-e artifact_root=/var/tmp/migrate-v2v` to a playbook.
 
 AWS does not resume with `resume_run_id`; a failed AWS import task is
 cancelled while its staged OVA remains in S3 by default for a follow-up import.
@@ -767,7 +797,8 @@ The `bin/` platform wrappers combine their environment-variable settings with
 any Ansible arguments supplied on the command line; for example,
 `./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project`.
 Migration wrappers default their artifact root to `/work/migrate-v2v`,
-the same as the playbooks, and accept `ARTIFACT_ROOT` to override it. The wrappers are useful when you want the
+the same as the playbooks, and accept `ARTIFACT_ROOT` to override it (see
+[Artifact Root](#artifact-root)). The wrappers are useful when you want the
 playbook runner, vault handling, and verbosity applied consistently.
 
 The interactive `bin/*-dialog.sh` front ends build these wrapper commands for
@@ -846,7 +877,7 @@ the file already exists. Cancelling at any prompt, or pressing Esc, exits with
 
 The migrate dialogs write `ARTIFACT_ROOT` into the script, defaulting to
 `/work/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
-artifacts belong on another filesystem. The shared widgets and the
+artifacts belong on another filesystem (see [Artifact Root](#artifact-root)). The shared widgets and the
 terminal handling live in `bin/launch-dialog-common.sh`; the migration prompts
 and command generation live in `bin/migrate-dialog-common.sh`. Ready-to-run
 examples are collected in
