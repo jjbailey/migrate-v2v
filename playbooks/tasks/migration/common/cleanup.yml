@@ -36,7 +36,8 @@
     path: "{{ catalog_entry_path }}"
     state: absent
   register: cleanup_catalog_entry
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Delete the temporary clone VM
   community.vmware.vmware_guest:
@@ -53,7 +54,8 @@
     - source_vm_folder is defined
   no_log: true
   register: cleanup_clone
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Remove the snapshot from the source VM
   environment:
@@ -76,7 +78,8 @@
   no_log: true
   changed_when: true
   register: cleanup_snapshot
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Warn about best-effort cleanup failures
   ansible.builtin.debug:

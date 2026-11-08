@@ -49,12 +49,22 @@ if '--inputbox' in args:
     print(value, file=sys.stderr, end='')
 elif '--radiolist' in args:
     prompt = args[args.index('--radiolist') + 1]
+    def security_group_mode():
+        # TEST_SG_SEQUENCE answers successive asks in order (state in a file).
+        sequence = os.environ.get('TEST_SG_SEQUENCE')
+        if not sequence:
+            return 'none' if os.environ.get('TEST_PLATFORM') == 'openstack' else 'names'
+        state = os.environ['TEST_SG_STATE']
+        asked = int(open(state).read()) if os.path.exists(state) else 0
+        open(state, 'w').write(str(asked + 1))
+        answers = sequence.split(',')
+        return answers[min(asked, len(answers) - 1)]
     choices = {
         'Which VM': '_other',
-        'Which security groups': 'none' if os.environ.get('TEST_PLATFORM') == 'openstack' else 'names',
+        'Which security groups': security_group_mode() if 'Which security groups' in prompt else None,
         'Which instance type': '_blank',
         'How should the new instance get': 'dhcp',
-        'How should MAC': 'auto',
+        'How should MAC': os.environ.get('TEST_MAC_MODE', 'auto'),
         'Should cloud-init': 'none',
     }
     value = next((value for name, value in choices.items() if name in prompt), None)
@@ -161,6 +171,17 @@ class LaunchDialogTests(unittest.TestCase):
         self.assertEqual(extra["openstack_security_groups"], [])
         self.assertEqual(extra["openstack_network"], "Ext-Net")
         self.assertNotIn("openstack_nics", extra)
+
+    def test_openstack_preserved_macs_require_a_security_group(self):
+        # Preserved MACs use pre-created ports, which the playbook builds only
+        # with explicit security groups, so "None" is asked again.
+        state = self.tmp / "sg-asked"
+        files = self.run_dialog("openstack", TEST_MAC_MODE="preserve",
+                                TEST_SG_SEQUENCE="none,names", TEST_SG_STATE=str(state))
+        self.assertEqual(state.read_text(), "2")
+        command = files[0].read_text()
+        self.assertIn("export OS_SECURITY_GROUPS_JSON='[\"default\",\"web\"]'", command)
+        self.assertIn("export OS_PRESERVE_MAC='true'", command)
 
     def test_cancel_stops_before_command_generation(self):
         self.assertEqual(self.run_dialog("gcp", TEST_CANCEL="1"), [])

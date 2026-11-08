@@ -7,17 +7,45 @@
 #
 # Inputs:
 #   ssh_host  public address, or the private one when there is none
-#   ssh_user  login user for this cloud
+#   ssh_user  login user; empty derives it from ssh_guest_id
+#   ssh_guest_id  the source VM's vSphere guest ID (artifact_manifest
+#                 source_guest_id, e.g. debian12_64Guest); empty or unknown
+#                 means root
 #   launch_ssh_private_key  local private key path (default ~/.ssh/cloud,
 #                           matching the "cloud" key pair); -e
 #                           launch_ssh_private_key= omits -i
+#
+# cloud-init gives the key to the distribution's default user, and migrated
+# images set disable_root: false, so root gets it too. The default user is
+# preferred when the guest ID names a distribution whose default is known;
+# root remains the fallback that works on every migrated guest.
 
 - name: Show the ssh command for the new instance
+  vars:
+    ssh_default_users:
+      - {pattern: '^debian', user: debian}
+      - {pattern: '^ubuntu', user: ubuntu}
+      - {pattern: '^fedora', user: fedora}
+      - {pattern: '^rockylinux', user: rocky}
+      - {pattern: '^almalinux', user: almalinux}
+      - {pattern: '^centos7', user: centos}
+      - {pattern: '^rhel', user: cloud-user}
+      - {pattern: '^amazonlinux', user: ec2-user}
+    ssh_guest: "{{ ssh_guest_id | default('', true) | string | lower }}"
   ansible.builtin.debug:
     msg: >-
       {%- set key = launch_ssh_private_key | default('~/.ssh/cloud') -%}
+      {%- set login = namespace(user=(ssh_user | default('', true) | string)) -%}
+      {%- if not login.user -%}
+      {%- set login.user = 'root' -%}
+      {%- for entry in ssh_default_users -%}
+      {%- if login.user == 'root' and ssh_guest is match(entry.pattern) -%}
+      {%- set login.user = entry.user -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {%- endif -%}
       {%- if ssh_host | default('', true) | length > 0 -%}
-      ssh {{ ('-i ' ~ key ~ ' ') if key | length > 0 else '' }}{{ ssh_user }}@{{ ssh_host }}
+      ssh {{ ('-i ' ~ key ~ ' ') if key | length > 0 else '' }}{{ login.user }}@{{ ssh_host }}
       {%- else -%}
       No IP address was reported for the instance; look it up in the console.
       {%- endif -%}

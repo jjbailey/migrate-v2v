@@ -15,7 +15,7 @@
 
 - name: Derive AWS artifact root and VM slug
   ansible.builtin.set_fact:
-    aws_artifact_root: "{{ artifact_root | default('/var/tmp/migrate-v2v') }}"
+    aws_artifact_root: "{{ artifact_root | default('/work/migrate-v2v') }}"
     aws_vm_slug: "{{ vm_name | regex_replace('[^A-Za-z0-9_.-]', '_') }}"
 
 - name: Derive the AWS migration artifact directory
@@ -26,12 +26,13 @@
 
 - name: Derive AWS migration names and paths
   ansible.builtin.set_fact:
-    snapshot_name: "ansible-export-snap-{{ migration_run_id }}"
+    snapshot_name: "ansible-aws-snap-{{ migration_run_id }}"
     clone_name: "{{ vm_name }}-aws-export-clone-{{ migration_run_id }}"
     ova_local_path: "{{ aws_migration_run_dir }}/{{ vm_name }}-aws-export-clone-{{ migration_run_id }}.ova"
     s3_key: "imports/{{ vm_name }}-aws-export-clone-{{ migration_run_id }}.ova"
-    catalog_entry_path: >-
-      /tmp/.{{ vm_name }}-aws-export-clone-{{ migration_run_id }}.catalog-entry.json
+    # Inside the private run directory rather than a predictable /tmp name
+    # built from the raw VM name.
+    catalog_entry_path: "{{ aws_migration_run_dir }}/catalog-entry.json"
 
 - name: Create the AWS migration artifact directory
   ansible.builtin.file:

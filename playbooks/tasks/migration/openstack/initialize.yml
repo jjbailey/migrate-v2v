@@ -38,14 +38,15 @@
 
 - name: Derive OpenStack migration names and paths
   ansible.builtin.set_fact:
-    snapshot_name: "ansible-openstack-export-snap-{{ migration_run_id }}"
+    snapshot_name: "ansible-openstack-snap-{{ migration_run_id }}"
     clone_name: "{{ vm_name }}-openstack-export-clone-{{ migration_run_id }}"
     ovf_local_path: "{{ migration_run_dir }}/export.ovf"
     artifact_manifest_path: "{{ migration_run_dir }}/artifact-manifest.json"
     openstack_staging_dir: "{{ migration_run_dir }}/disks"
     openstack_image_prefix: "{{ vm_name }}-migration-{{ migration_run_id }}"
-    catalog_entry_path: >-
-      /tmp/.{{ vm_name }}-openstack-export-clone-{{ migration_run_id }}.catalog-entry.json
+    # Inside the private run directory rather than a predictable /tmp name
+    # built from the raw VM name.
+    catalog_entry_path: "{{ migration_run_dir }}/catalog-entry.json"
 
 - name: Create the persistent OpenStack run directory
   ansible.builtin.file:

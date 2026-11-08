@@ -5,7 +5,7 @@
 """Show the images, flavors, security groups, networks, and keypairs one
 OpenStack project can use.
 
-Credentials come from vaults/openstack.yml (openstack_projects, matched by
+Credentials come from $MIGRATE_V2V_VAULT_DIR/openstack.yml (openstack_projects, matched by
 vault key, project_name, or project_id, the same way select-project.yml does),
 or from --cloud / the standard OS_* environment. Every listing is filtered to
 what the authenticated project can actually use, so an admin account does not
@@ -41,10 +41,9 @@ from pathlib import Path
 import keystoneauth1.exceptions
 import openstack
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 def select_vault_auth(vault, requested):
     data = read_vault(vault)
@@ -372,7 +371,7 @@ def main():
         help="vault key, project_name, or project_id in openstack_projects; "
         "optional when the vault has one project or OS_* auth is set")
     parser.add_argument("--vault", type=Path,
-                        default=REPO_DIR / "vaults/openstack.yml")
+                        default=default_vault_path("openstack.yml"))
     parser.add_argument(
         "--cloud", help="named clouds.yaml entry instead of the vault")
     parser.add_argument(

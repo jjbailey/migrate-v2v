@@ -24,7 +24,7 @@ usage()
     cat << EOF
 Usage: $(basename -- "$0") -c vcenter -H vm [-a address] [-u ssh_username] [-k ssh_private_key_file] [-- ansible-playbook args]
 
-  -c vcenter   vCenter hostname (or vaults/vsphere.yml key) to use
+  -c vcenter   vCenter hostname (or $MIGRATE_V2V_VAULT_DIR/vsphere.yml key) to use
   -H vm        VM name, as it appears in vCenter
   -a address   address to SSH to (default: the VM name, which must resolve)
   -u username  SSH username (default: from the vault, else ansible's default)

@@ -4,7 +4,7 @@
 
 """List the EC2 subnets, security groups, and keypairs one AWS account can use.
 
-Credentials come from vaults/aws.yml (aws_projects, matched by vault key,
+Credentials come from $MIGRATE_V2V_VAULT_DIR/aws.yml (aws_projects, matched by vault key,
 account ID, or profile, the same way select-project.yml does), or from the
 standard boto3 chain (env vars, ~/.aws, instance profile). The region comes
 from the vault entry unless --region overrides it.
@@ -30,10 +30,9 @@ import os
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 def select_vault_entry(vault, requested):
     data = read_vault(vault)
@@ -70,13 +69,16 @@ def select_vault_entry(vault, requested):
     )
 
 def make_session(entry, profile_override=None):
+    """An explicit profile, then the entry's keys, then its profile.
+
+    Keys before the entry's profile matches vars/aws-common.yml, which uses
+    a vault profile only when the entry has no keys, so the dialog lists what
+    the playbook will be able to use.
+    """
     import boto3
 
-    profile = (profile_override
-               or str(entry.get("aws_profile", "")
-                      or entry.get("profile", "")).strip())
-    if profile:
-        return boto3.Session(profile_name=profile)
+    if profile_override:
+        return boto3.Session(profile_name=profile_override)
     key_id = str(entry.get("aws_access_key_id", "") or "").strip()
     secret = str(entry.get("aws_secret_access_key", "") or "").strip()
     token = str(entry.get("aws_session_token", "") or "").strip()
@@ -86,6 +88,9 @@ def make_session(entry, profile_override=None):
         if token:
             kwargs["aws_session_token"] = token
         return boto3.Session(**kwargs)
+    profile = str(entry.get("aws_profile", "") or entry.get("profile", "") or "").strip()
+    if profile:
+        return boto3.Session(profile_name=profile)
     return boto3.Session()
 
 def gather_security_groups(client, vpc_id=None):
@@ -216,7 +221,7 @@ def main():
     parser.add_argument("project", nargs="?",
                         help="vault key, account ID, or profile "
                              "(omit for a single-entry vault)")
-    parser.add_argument("--vault", default=str(REPO_DIR / "vaults/aws.yml"))
+    parser.add_argument("--vault", default=str(default_vault_path("aws.yml")))
     parser.add_argument("--subnet",
                         help="filter groups to this subnet's VPC (e.g. subnet-abc)")
     parser.add_argument("--subnets", dest="list_subnets", action="store_true",

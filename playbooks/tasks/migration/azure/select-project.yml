@@ -2,7 +2,7 @@
 # playbooks/tasks/migration/azure/select-project.yml
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
-# Select one Azure subscription/project from vaults/azure.yml.
+# Select one Azure subscription/project from $MIGRATE_V2V_VAULT_DIR/azure.yml.
 # Supports azure_projects only: Azure never had a flat single-target vault, so
 # there is no legacy mapping to keep accepting.
 #
@@ -22,7 +22,7 @@
 
 - name: Include the Azure vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/azure.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/azure.yml"
   no_log: true
 
 - name: Determine whether an Azure target project was explicitly requested
@@ -52,7 +52,7 @@
   ansible.builtin.fail:
     msg: >-
       Azure project '{{ azure_target_project_requested }}' matches no vault key
-      or subscription ID in vaults/azure.yml under azure_projects.
+      or subscription ID in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/azure.yml under azure_projects.
       Available: {{ azure_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
     - azure_target_project_explicit | bool

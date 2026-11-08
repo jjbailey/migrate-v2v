@@ -4,7 +4,7 @@
 
 """Shared catalog locking, validation, and atomic read/write helpers.
 
-Every script that touches catalogs/*.json goes through this module: the
+Every script that touches the catalog JSON files goes through this module: the
 append scripts, the reconcile scripts, and the lookups. The durability
 path (take the lock, write a temporary file, fsync, rename over the
 original) is subtle enough that a second copy of it would eventually
@@ -18,6 +18,16 @@ import json
 import os
 import stat
 import tempfile
+from pathlib import Path
+
+DEFAULT_CATALOG_DIR = Path("/work/migrate-v2v/catalogs")
+
+def default_catalog_path(filename):
+    """Runtime catalog path, overridable for alternate checkouts or tests."""
+    catalog_dir = Path(
+        os.environ.get("MIGRATE_V2V_CATALOG_DIR") or DEFAULT_CATALOG_DIR
+    ).expanduser()
+    return catalog_dir / filename
 
 def now_utc():
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -125,12 +135,27 @@ def require_missing_fields(entry, required, context=None):
             "catalog entry missing" + where + ": " + ", ".join(missing))
 
 def read_snapshot(path, list_key):
+    """Read a catalog under the shared lock when the lock can be taken.
+
+    A missing catalog is reported as such rather than as a missing lock
+    file. A reader that cannot create or open the lock (a read-only mount, a
+    user without write access to the directory) reads without it: writers
+    replace the file atomically (atomic_write_json), so an unlocked read still
+    sees one complete version.
+    """
+    if not path.exists():
+        raise ValueError(f"no catalog at {path}")
     lock_path = path.with_name(path.name + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock:
+    try:
+        lock = lock_path.open("a+", encoding="utf-8")
+    except OSError:
+        return load_catalog(path, list_key)
+    with lock:
         fcntl.flock(lock, fcntl.LOCK_SH)
-        catalog = load_catalog(path, list_key)
-        fcntl.flock(lock, fcntl.LOCK_UN)
-    return catalog
+        try:
+            return load_catalog(path, list_key)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
 
 def _row_fingerprint(entry):
     """Stable identity of one catalog row, not of its cloud resource.

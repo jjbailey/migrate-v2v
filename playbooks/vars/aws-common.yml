@@ -39,4 +39,6 @@ aws_cli_stdin: |-
   {{ aws_access_key_id if aws_has_keys | bool else '' }}
   {{ aws_secret_access_key if aws_has_keys | bool else '' }}
   {{ (aws_session_token | default('')) if aws_has_keys | bool else '' }}
+# aws/import.yml also unsets an inherited AWS_SESSION_TOKEN when there are
+# keys, so an empty token line cannot leave the shell's token in place.
 

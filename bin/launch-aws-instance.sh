@@ -15,7 +15,9 @@ VM_NAME=${VM_NAME:-}
 AWS_TARGET_PROJECT=${AWS_TARGET_PROJECT:-}
 AWS_SUBNET_ID=${AWS_SUBNET_ID:-}
 AWS_SECURITY_GROUPS_JSON=${AWS_SECURITY_GROUPS_JSON:-'["default"]'}
-AWS_KEY_NAME=${AWS_KEY_NAME:-cloud}
+# Unset means the default key pair; set-but-empty (the dialog's "No key
+# pair") means launch without one, so this is "-" rather than ":-".
+AWS_KEY_NAME=${AWS_KEY_NAME-cloud}
 AWS_INSTANCE_TYPE=${AWS_INSTANCE_TYPE:-}
 
 wrapper_require_json_array AWS_SECURITY_GROUPS_JSON "$AWS_SECURITY_GROUPS_JSON"

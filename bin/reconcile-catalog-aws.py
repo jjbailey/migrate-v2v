@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
-from vault_common import environment_source, match_project, vault_projects
+from catalog_common import (default_catalog_path, read_snapshot,
+                            remove_deployment_entries, remove_migration_entries)
+from vault_common import (default_vault_path, environment_source, match_project,
+                          vault_projects)
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -142,37 +144,39 @@ def session_for(account_id, load_projects, vault, profile=None):
     key, entry = match_project(load_projects(), account_id or (),
                                ("aws_account_id", "account_id"))
     if entry is not None:
+        # Keys before the entry's profile, as vars/aws-common.yml does for
+        # the playbooks.
+        key_id = str(entry.get("aws_access_key_id", "") or "").strip()
+        secret = str(entry.get("aws_secret_access_key", "") or "").strip()
+        if key_id and secret:
+            token = str(entry.get("aws_session_token", "") or "").strip()
+            return boto3.Session(
+                aws_access_key_id=key_id, aws_secret_access_key=secret,
+                aws_session_token=token or None), f"vault entry '{key}'"
         entry_profile = str(entry.get("aws_profile", "")
                             or entry.get("profile", "") or "").strip()
         if entry_profile:
             return (boto3.Session(profile_name=entry_profile),
                     f"vault entry '{key}' (profile {entry_profile})")
-        key_id = str(entry.get("aws_access_key_id", "") or "").strip()
-        secret = str(entry.get("aws_secret_access_key", "") or "").strip()
-        if not (key_id and secret):
-            raise ValueError(
-                f"vault entry '{key}' has neither aws_profile nor "
-                "aws_access_key_id/aws_secret_access_key")
-        token = str(entry.get("aws_session_token", "") or "").strip()
-        return boto3.Session(
-            aws_access_key_id=key_id, aws_secret_access_key=secret,
-            aws_session_token=token or None), f"vault entry '{key}'"
+        raise ValueError(
+            f"vault entry '{key}' has neither aws_profile nor "
+            "aws_access_key_id/aws_secret_access_key")
     return boto3.Session(), "boto3 default chain"
 
 def main():
-    repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migration-catalog", type=Path,
-                        default=repo_dir / "catalogs/migration-catalog.json")
+                        default=default_catalog_path("migration-catalog.json"))
     parser.add_argument("--deployment-catalog", type=Path,
-                        default=repo_dir / "catalogs/deployment-catalog.json")
+                        default=default_catalog_path("deployment-catalog.json"))
     parser.add_argument(
         "--region", help="only reconcile AWS entries in this region")
     parser.add_argument("--profile",
                         help="boto3/AWS CLI profile, instead of the vault")
-    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/aws.yml",
+    parser.add_argument("--vault", type=Path, default=default_vault_path("aws.yml"),
                         help="AWS vault for credentials when AWS_* is unset "
-                             "(default: vaults/aws.yml)")
+                             "(default: $MIGRATE_V2V_VAULT_DIR/aws.yml, or "
+                             "/work/migrate-v2v/vaults/aws.yml)")
     parser.add_argument(
         "--project-id", "--account-id", dest="account_id",
         help="AWS account ID; verify and reconcile only this account")

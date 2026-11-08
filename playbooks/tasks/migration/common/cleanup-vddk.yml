@@ -24,7 +24,21 @@
   when:
     - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
-  failed_when: false
+  register: cleanup_run_dir_remove
+  # ignore_errors rather than failed_when: false, so a failed removal keeps
+  # its failed flag: the discard report below must not claim the directory
+  # is gone when it is not.
+  ignore_errors: true
+
+- name: Count a run directory the discard could not remove
+  ansible.builtin.set_fact:
+    discard_unremoved_artifacts: >-
+      {{ discard_unremoved_artifacts | default([])
+         + ['run directory ' ~ migration_run_dir] }}
+  when:
+    - cleanup_run_dir_remove is not skipped
+    - cleanup_run_dir_remove is failed
+    - discard_failed_artifacts | bool
 
 # A run refused by a check before its snapshot (an unsupported disk, a disk
 # the curl backend cannot read) wrote no manifest and took no snapshot, so it
@@ -110,7 +124,8 @@
     path: "{{ catalog_entry_path }}"
     state: absent
   register: cleanup_catalog_entry
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Remove the NBD socket directory
   ansible.builtin.file:
@@ -118,7 +133,8 @@
     state: absent
   when: vddk_socket_dir is defined
   register: cleanup_sockets
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Remove the snapshot from the source VM
   environment:
@@ -142,7 +158,8 @@
   no_log: true
   changed_when: true
   register: cleanup_snapshot
-  failed_when: false
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
 
 - name: Warn about best-effort cleanup failures
   ansible.builtin.debug:
@@ -154,18 +171,83 @@
     (cleanup_sockets.failed | default(false) | bool) or
     (cleanup_snapshot.failed | default(false) | bool)
 
+# A discard reports only what it actually removed. The target cleanup
+# (openstack/cleanup.yml, azure/cleanup.yml) records discard_removed_artifacts
+# and discard_unremoved_artifacts; anything left behind, or nothing found at
+# all, fails the run instead of claiming success.
+- name: Collect the discard outcome
+  ansible.builtin.set_fact:
+    discard_snapshot_removed: >-
+      {{ (snapshot_cleanup_required | default(false) | bool)
+         and cleanup_snapshot is not skipped
+         and not (cleanup_snapshot.failed | default(false) | bool) }}
+    discard_snapshot_left: >-
+      {{ (snapshot_cleanup_required | default(false) | bool)
+         and (cleanup_snapshot is skipped or (cleanup_snapshot.failed | default(false) | bool)) }}
+    # A retained run is known by its manifest, its snapshot, or what it left
+    # in the target; Azure staged blobs count too.
+    discard_found_anything: >-
+      {{ (resume_manifest_stat.stat.exists | default(false) | bool)
+         or (snapshot_cleanup_required | default(false) | bool)
+         or (discard_removed_artifacts | default([]) | length > 0)
+         or (discard_unremoved_artifacts | default([]) | length > 0)
+         or (azure_blob_names | default([]) | length > 0) }}
+  when: migration_discard_only | default(false) | bool
+
+- name: Report a discard that stopped part way
+  ansible.builtin.debug:
+    msg: >-
+      Discard of run {{ migration_run_id }} did not complete: a lookup failed
+      (see the error above), so the snapshot, images, or blobs it was meant to
+      find may still exist. Fix the error and rerun with
+      -e discard_run_id={{ migration_run_id }}; names are derived from the run
+      ID, so the rerun finds whatever is left.
+  when:
+    - migration_discard_only | default(false) | bool
+    - not (discard_lookup_complete | default(false) | bool)
+
+- name: Fail a discard that found nothing for the run
+  ansible.builtin.fail:
+    msg: >-
+      Nothing to discard for run {{ migration_run_id }} of VM '{{ vm_name }}':
+      no manifest at {{ artifact_manifest_path }}, no snapshot
+      '{{ snapshot_name }}' on the VM, and no images or snapshots in the
+      target. Check VM_NAME and DISCARD_RUN_ID (and the vCenter and target
+      project); a run that was already discarded also ends here.
+  when:
+    - migration_discard_only | default(false) | bool
+    - discard_lookup_complete | default(false) | bool
+    - not (discard_found_anything | bool)
+
+- name: Fail a discard that left artifacts behind
+  ansible.builtin.fail:
+    msg: >-
+      Discard of run {{ migration_run_id }} is incomplete. Not removed:
+      {{ ((discard_unremoved_artifacts | default([]))
+          + (["snapshot '" ~ snapshot_name ~ "' on " ~ vm_name] if (discard_snapshot_left | bool) else []))
+         | join(', ') }}. Removed: {{ (discard_removed_artifacts | default([])) | join(', ') or 'no target artifacts' }}.
+      Rerun with -e discard_run_id={{ migration_run_id }} once the cause is fixed.
+  when:
+    - migration_discard_only | default(false) | bool
+    - discard_lookup_complete | default(false) | bool
+    - discard_found_anything | bool
+    - (discard_unremoved_artifacts | default([]) | length > 0) or (discard_snapshot_left | bool)
+
 - name: Report the discarded run
   vars:
     discard_snapshot_text: >-
-      {{ ("snapshot '" ~ snapshot_name ~ "'") if (snapshot_cleanup_required | default(false) | bool)
+      {{ ("snapshot '" ~ snapshot_name ~ "'") if (discard_snapshot_removed | bool)
          else 'no snapshot (none was left)' }}
-    discard_image_names: >-
-      {{ (openstack_uploaded_image_names | default([]))
-         + (azure_created_image_names | default([])) }}
+    discard_removed: "{{ discard_removed_artifacts | default([]) }}"
   ansible.builtin.debug:
     msg: >-
       Discarded run {{ migration_run_id }}: removed {{ migration_run_dir }},
-      {{ discard_snapshot_text }}, and {{ discard_image_names | length }} image(s){{
-      (': ' ~ (discard_image_names | join(', '))) if (discard_image_names | length > 0) else '' }}.
-  when: migration_discard_only | default(false) | bool
+      {{ discard_snapshot_text }}, and {{ discard_removed | length }} target artifact(s){{
+      (': ' ~ (discard_removed | join(', '))) if (discard_removed | length > 0) else '' }}.
+  when:
+    - migration_discard_only | default(false) | bool
+    - discard_lookup_complete | default(false) | bool
+    - discard_found_anything | bool
+    - discard_unremoved_artifacts | default([]) | length == 0
+    - not (discard_snapshot_left | bool)
 

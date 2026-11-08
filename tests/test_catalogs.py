@@ -6,6 +6,7 @@
 
 import importlib.util
 import io
+import os
 import json
 import tarfile
 import tempfile
@@ -238,6 +239,32 @@ class ReconcileGuardTests(unittest.TestCase):
         connection = SimpleNamespace(current_project_id="project-b", current_project=SimpleNamespace(name="project-b"))
         with self.assertRaisesRegex(ValueError, "does not match"):
             reconcile.validate_scope(connection, self.catalog(), {"migrations": [], "deployments": []}, "project-a", "region-a")
+
+    def test_regionless_catalog_reconciles_in_the_default_region(self):
+        # A single-region cloud's vault may leave region_name empty, so no
+        # row records openstack_region.
+        entry = {"target_platform": "openstack", "status": "completed",
+                 "clone_name": "c1", "openstack_project": "project-a",
+                 "openstack_image_ids": ["img"]}
+        catalogs = ({"migrations": [entry]}, {"deployments": []})
+        connection = SimpleNamespace(
+            current_project_id="project-a",
+            current_project=SimpleNamespace(name="project-a"),
+            get_image=lambda image_id: None)
+        self.assertEqual(reconcile.recorded_regions(*catalogs, {"project-a"}), set())
+        self.assertEqual(
+            reconcile.validate_scope(connection, *catalogs, "project-a", None),
+            {"project-a"})
+        stale, _ = reconcile.find_missing_resources(
+            connection, *catalogs, {"project-a"}, None)
+        self.assertEqual(len(stale), 1)
+        with self.assertRaisesRegex(ValueError, "omit --region-name"):
+            reconcile.validate_scope(connection, *catalogs, "project-a", "RegionOne")
+
+    def test_default_region_is_refused_when_rows_record_a_region(self):
+        connection = SimpleNamespace(current_project_id="project-a", current_project=SimpleNamespace(name="project-a"))
+        with self.assertRaisesRegex(ValueError, "provide --region-name"):
+            reconcile.validate_scope(connection, self.catalog(), {"migrations": [], "deployments": []}, "project-a", None)
 
 class CatalogRemovalTests(unittest.TestCase):
     """Removal must never touch a row the caller did not identify."""
@@ -485,6 +512,28 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(accept({"aws_region": "us-west-2"}))
         self.assertFalse(accept({"aws_region": "us-east-1"}))
 
+    def test_aws_lookup_projects_the_source_guest_id(self):
+        lookup_ami = load_script("lookup-migration-ami.py", "lookup_ami")
+        row = {"ami_id": "ami-1", "import_task_id": "t", "migrated_at": "x",
+               "aws_region": "us-west-2"}
+        self.assertEqual(lookup_ami.project(row)["source_guest_id"], "")
+        row["artifact_manifest"] = {"source_guest_id": "ubuntu64Guest"}
+        self.assertEqual(lookup_ami.project(row)["source_guest_id"], "ubuntu64Guest")
+
+    def test_aws_lookup_scopes_rows_by_project_key(self):
+        lookup_ami = load_script("lookup-migration-ami.py", "lookup_ami")
+        args = SimpleNamespace(project="prod", region="us-west-2")
+        accept = lookup_ami.region_filter(args)
+        fallback = lookup_ami.legacy_region_filter(args)
+        prod = {"aws_region": "us-west-2", "aws_project": "prod"}
+        lab = {"aws_region": "us-west-2", "aws_project": "lab"}
+        unscoped = {"aws_region": "us-west-2"}
+        self.assertTrue(accept(prod))
+        self.assertFalse(accept(lab))
+        # Another project's row must not sneak in through the legacy fallback.
+        self.assertFalse(fallback(lab))
+        self.assertTrue(fallback(unscoped))
+
     def test_boot_disk_follows_controller_and_unit_not_instance_id(self):
         ovf = """<Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1"
  xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData"
@@ -516,6 +565,32 @@ class RegressionTests(unittest.TestCase):
         self.assertTrue(re.search(pattern, "httperror 404: no such object"))
         self.assertTrue(re.search(pattern, "one or more urls matched no objects"))
         self.assertFalse(re.search(pattern, "permission denied, request id 4041-a404b"))
+
+class ReadSnapshotTests(unittest.TestCase):
+    def test_missing_catalog_is_reported_without_creating_a_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "missing" / "migration-catalog.json"
+            with self.assertRaisesRegex(ValueError, "no catalog at"):
+                catalog_common.read_snapshot(path, "migrations")
+            path = Path(directory) / "migration-catalog.json"
+            with self.assertRaisesRegex(ValueError, "no catalog at"):
+                catalog_common.read_snapshot(path, "migrations")
+            self.assertEqual(list(Path(directory).iterdir()), [])
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0,
+                     "root ignores directory permissions")
+    def test_read_only_directory_is_read_without_the_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / "migration-catalog.json"
+            path.write_text(json.dumps({"schema_version": 1, "migrations": []}))
+            root.chmod(0o500)
+            try:
+                catalog = catalog_common.read_snapshot(path, "migrations")
+            finally:
+                root.chmod(0o700)
+            self.assertEqual(catalog["migrations"], [])
+            self.assertFalse((root / "migration-catalog.json.lock").exists())
 
 if __name__ == "__main__":
     unittest.main()

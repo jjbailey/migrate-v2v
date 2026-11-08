@@ -136,6 +136,8 @@ def validate(entry):
             require_nonempty_string(entry, name)
         if entry.get("aws_account_id") is not None:
             require_nonempty_string(entry, "aws_account_id")
+        if entry.get("aws_project") is not None:
+            require_nonempty_string(entry, "aws_project")
 
     if target == "openstack":
         ids = validate_string_list(entry, "openstack_image_ids")

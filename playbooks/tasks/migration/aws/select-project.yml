@@ -2,12 +2,12 @@
 # playbooks/tasks/migration/aws/select-project.yml
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
-# Select one AWS account/project from vaults/aws.yml.
+# Select one AWS account/project from $MIGRATE_V2V_VAULT_DIR/aws.yml.
 # Supports aws_projects plus the legacy flat AWS mapping.
 
 - name: Include the AWS vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/aws.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml"
   no_log: true
 
 - name: Determine whether an AWS target project was explicitly requested
@@ -37,7 +37,7 @@
   ansible.builtin.fail:
     msg: >-
       AWS project '{{ aws_target_project_requested }}' matches no vault key,
-      account ID, or profile in vaults/aws.yml under aws_projects.
+      account ID, or profile in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml under aws_projects.
       Available: {{ aws_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
     - aws_target_project_explicit | bool
@@ -82,17 +82,29 @@
       legacy flat AWS mapping.
   when: aws_target_project_name is not defined or (aws_target_project_name | string | length) == 0
 
+# The entry holds secrets, so only the names of missing keys leave the no_log
+# task; the assert can then show its message (a no_log assert hides it).
+- name: List the required AWS project keys that are missing
+  ansible.builtin.set_fact:
+    aws_project_missing_keys: >-
+      {%- set missing = [] -%}
+      {%- for key in ['aws_region', 's3_bucket', 'vmimport_role_name'] -%}
+      {%- if ((aws_project_config | default({}))[key] | default('') | string | trim) == '' -%}
+      {%- set _ = missing.append(key) -%}
+      {%- endif -%}
+      {%- endfor -%}
+      {{ missing }}
+  no_log: true
+
 - name: Validate the selected AWS project configuration
   ansible.builtin.assert:
     that:
       - aws_project_config is defined
-      - aws_project_config.aws_region is defined and (aws_project_config.aws_region | string | trim | length) > 0
-      - aws_project_config.s3_bucket is defined and (aws_project_config.s3_bucket | string | trim | length) > 0
-      - aws_project_config.vmimport_role_name is defined and (aws_project_config.vmimport_role_name | string | trim | length) > 0
+      - aws_project_missing_keys | length == 0
     fail_msg: >-
-      The selected AWS project must define aws_region, s3_bucket, and
-      vmimport_role_name.
-  no_log: true
+      AWS project '{{ aws_target_project_name | default('?') }}' must define
+      aws_region, s3_bucket, and vmimport_role_name; missing:
+      {{ aws_project_missing_keys | join(', ') }}.
 
 - name: Normalize the selected AWS project values
   ansible.builtin.set_fact:

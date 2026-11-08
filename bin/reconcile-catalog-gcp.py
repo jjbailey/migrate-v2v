@@ -9,8 +9,10 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import read_snapshot, remove_deployment_entries, remove_migration_entries
-from vault_common import environment_source, match_project, vault_projects
+from catalog_common import (default_catalog_path, read_snapshot,
+                            remove_deployment_entries, remove_migration_entries)
+from vault_common import (default_vault_path, environment_source, match_project,
+                          vault_projects)
 
 import google.auth
 import google.auth.exceptions
@@ -143,22 +145,22 @@ def credentials_for(project_id, load_projects, vault, credentials_file=None):
             "Google application default credentials")
 
 def main():
-    repo_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--migration-catalog", type=Path,
-                        default=repo_dir / "catalogs/migration-catalog.json")
+                        default=default_catalog_path("migration-catalog.json"))
     parser.add_argument("--deployment-catalog", type=Path,
-                        default=repo_dir / "catalogs/deployment-catalog.json")
+                        default=default_catalog_path("deployment-catalog.json"))
     parser.add_argument(
         "--project-id",
         help="GCP project; inferred when the catalogs contain one project",
     )
     parser.add_argument("--credentials-file", type=Path,
                         help="service-account JSON, instead of the vault")
-    parser.add_argument("--vault", type=Path, default=repo_dir / "vaults/gcp.yml",
+    parser.add_argument("--vault", type=Path, default=default_vault_path("gcp.yml"),
                         help="GCP vault for the service account when "
                              "GOOGLE_APPLICATION_CREDENTIALS is unset "
-                             "(default: vaults/gcp.yml)")
+                             "(default: $MIGRATE_V2V_VAULT_DIR/gcp.yml, or "
+                             "/work/migrate-v2v/vaults/gcp.yml)")
     parser.add_argument("--dry-run", action="store_true",
                         help="report stale entries without writing either catalog")
     parser.add_argument("--force", action="store_true",

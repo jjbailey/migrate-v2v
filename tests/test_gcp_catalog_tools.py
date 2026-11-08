@@ -286,6 +286,10 @@ class GcpLookupTests(unittest.TestCase):
         self.assertEqual(projected["gcp_data_image_names"], [])
         self.assertEqual(projected["gcp_data_image_selflinks"], [])
         self.assertEqual(projected["migration_id"], "a-clone")
+        # Rows from before source_guest_id was recorded project it as "".
+        self.assertEqual(projected["source_guest_id"], "")
+        entry["artifact_manifest"] = {"source_guest_id": "debian12_64Guest"}
+        self.assertEqual(lookup_gcp.project(entry)["source_guest_id"], "debian12_64Guest")
         with self.assertRaises(KeyError):
             lookup_gcp.project({"vm_name": "a"})
 

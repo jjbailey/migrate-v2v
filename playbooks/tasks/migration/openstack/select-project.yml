@@ -4,7 +4,7 @@
 
 # Resolve one OpenStack project from the multi-project vault.
 #
-# vaults/openstack.yml holds every project at once so no vault swap is needed:
+# $MIGRATE_V2V_VAULT_DIR/openstack.yml holds every project at once so no vault swap is needed:
 #
 #   openstack_projects:
 #     my-project-a:
@@ -36,7 +36,7 @@
 
 - name: Include the OpenStack vault variables
   ansible.builtin.include_vars:
-    file: "{{ playbook_dir }}/../vaults/openstack.yml"
+    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/openstack.yml"
   no_log: true
 
 - name: Determine whether a target project was explicitly requested
@@ -68,7 +68,7 @@
   ansible.builtin.fail:
     msg: >-
       OpenStack project '{{ openstack_target_project_requested }}' matches no
-      vault key, project_name, or project_id in vaults/openstack.yml under
+      vault key, project_name, or project_id in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/openstack.yml under
       openstack_projects.
       Available: {{ openstack_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
@@ -115,7 +115,7 @@
       - openstack_auth.password is defined and (openstack_auth.password | string | trim | length) > 0
       - openstack_auth.project_name is defined and (openstack_auth.project_name | string | trim | length) > 0
     fail_msg: >-
-      vaults/openstack.yml must define openstack_auth with auth_url,
+      {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/openstack.yml must define openstack_auth with auth_url,
       username, password, and project_name, or an openstack_projects entry
       with the same keys.
   no_log: true

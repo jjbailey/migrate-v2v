@@ -7,6 +7,19 @@ set -euo pipefail
 wrapper_source=${BASH_SOURCE[1]:-${BASH_SOURCE[0]}}
 wrapper_script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "$wrapper_source")" > /dev/null && builtin pwd -P)
 
+# run-playbook.sh and stage-v2v.sh change to the repository before Ansible
+# runs, so a relative path in one of these variables would quietly resolve
+# against the repository (or, for VAULT_PASSWORD_FILE, fall back to the
+# default file or a prompt). Anchor them to the caller's directory while it is
+# still the current one.
+for wrapper_path_var in VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR ARTIFACT_ROOT ; do
+    case "${!wrapper_path_var:-}" in
+        "" | /*) ;;
+        *) export "$wrapper_path_var=$PWD/${!wrapper_path_var}" ;;
+    esac
+done
+unset wrapper_path_var
+
 wrapper_error()
 {
     printf '%s: error: %s\n' "${wrapper_name:-wrapper}" "$1" >&2

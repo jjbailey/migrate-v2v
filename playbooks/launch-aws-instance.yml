@@ -3,11 +3,11 @@
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
 # Launches an EC2 instance from an AMI produced by migrate-aws-vm.yml. By default
-# it looks up the most recent completed migration for vm_name in
-# catalogs/migration-catalog.json (via bin/lookup-migration-ami.py); pass an
+# it looks up the most recent completed migration for vm_name in the runtime
+# migration catalog (via bin/lookup-migration-ami.py); pass an
 # explicit ami_id to skip that lookup and launch a specific AMI instead.
 #
-# The AWS region and credentials come from vaults/aws.yml (see README.md
+# The AWS region and credentials come from $MIGRATE_V2V_VAULT_DIR/aws.yml (see README.md
 # "Secrets"); -e/--extra-vars still override any of them.
 
 - name: Launch an EC2 instance from a migrated AMI
@@ -30,14 +30,17 @@
     security_groups: []
     key_name: ""
     assign_public_ip: true
-    # Login user for the printed ssh command. Migrated images set
-    # disable_root: false, so cloud-init puts the key pair on root too.
-    launch_ssh_user: "root"
+    # Login user for the printed ssh command. Empty picks the source guest's
+    # cloud-init default user (debian, ubuntu, ...) from the migration's
+    # recorded guest ID, else root, which migrated images (disable_root:
+    # false) also give the key to; see tasks/show-ssh-command.yml.
+    launch_ssh_user: ""
     instance_name: "{{ vm_name }}"
     extra_tags: {}
 
-    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
-    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+    migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
+    deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 
   tasks:
     # Bare -e key=[...] arrives as a string, and Ansible extra-vars cannot be
@@ -70,10 +73,10 @@
     - name: Warn if AWS credentials are neither in the vault nor in ~/.aws
       ansible.builtin.debug:
         msg: >-
-          No AWS credentials resolved: vaults/aws.yml has an empty
+          No AWS credentials resolved: {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml has an empty
           aws_secret_access_key and ~/.aws/credentials is absent. AWS tasks
           will fail unless an instance profile provides credentials - run
-          ansible-vault edit vaults/aws.yml to add the secret key.
+          bin/aws-vault.sh to add the secret key.
       when:
         - aws_task_env | length == 0
         - aws_module_defaults | length == 0
@@ -103,6 +106,7 @@
             ami_id: "{{ (ami_lookup.stdout | from_json).ami_id }}"
             source_import_task_id: "{{ (ami_lookup.stdout | from_json).import_task_id }}"
             source_aws_region: "{{ (ami_lookup.stdout | from_json).aws_region }}"
+            source_guest_id: "{{ (ami_lookup.stdout | from_json).source_guest_id | default('') }}"
 
     - name: Record that ami_id was supplied explicitly (no catalog lookup)
       when: source_import_task_id is not defined
@@ -203,4 +207,5 @@
           {{ launch_result.instances[0].public_ip_address
              | default(launch_result.instances[0].private_ip_address | default(''), true) }}
         ssh_user: "{{ launch_ssh_user }}"
+        ssh_guest_id: "{{ source_guest_id | default('') }}"
 

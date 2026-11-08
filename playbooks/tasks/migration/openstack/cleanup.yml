@@ -31,12 +31,36 @@
     region_name: "{{ openstack_region_name }}"
   register: cleanup_run_image_info
   no_log: true
-  failed_when: false
+  # ignore_errors rather than failed_when: false, so a failed lookup keeps its
+  # failed flag and the next task can count it against the discard.
+  ignore_errors: true
   when:
     - not (migration_succeeded | default(false) | bool)
     - discard_failed_artifacts | bool
     - migration_resume_mode | default(false) | bool
     - openstack_image_prefix is defined
+
+# Without the image list the discard cannot know which earlier uploads are
+# left, so it must not report the run discarded (common/cleanup-vddk.yml).
+- name: Count a failed image lookup against the discard
+  ansible.builtin.set_fact:
+    discard_unremoved_artifacts: >-
+      {{ discard_unremoved_artifacts | default([])
+         + ['images ' ~ openstack_image_prefix ~ '-disk-* (the Glance image list failed)'] }}
+  when:
+    - cleanup_run_image_info is not skipped
+    - cleanup_run_image_info is failed
+
+- name: Report a failed image lookup
+  ansible.builtin.debug:
+    msg: >-
+      Could not list Glance images in {{ openstack_region_name }}, so images
+      earlier attempts uploaded as {{ openstack_image_prefix }}-disk-* were
+      not looked for. Check the OpenStack credentials and endpoint, then
+      rerun the discard.
+  when:
+    - cleanup_run_image_info is not skipped
+    - cleanup_run_image_info is failed
 
 - name: Queue earlier attempts' images for removal
   ansible.builtin.set_fact:
@@ -62,5 +86,30 @@
     - not (migration_succeeded | default(false) | bool)
     - discard_failed_artifacts | bool
   no_log: true
-  failed_when: false
+  # ignore_errors rather than failed_when: false, so each item keeps its real
+  # failed flag for the report below and common/cleanup-vddk.yml.
+  ignore_errors: true
+  register: openstack_image_remove
+
+- name: Record which images the discard removed
+  ansible.builtin.set_fact:
+    discard_removed_artifacts: >-
+      {{ discard_removed_artifacts | default([])
+         + (openstack_image_remove.results | rejectattr('skipped', 'defined')
+            | rejectattr('failed') | map(attribute='item')
+            | map('regex_replace', '^', 'image ') | list) }}
+    discard_unremoved_artifacts: >-
+      {{ discard_unremoved_artifacts | default([])
+         + (openstack_image_remove.results | selectattr('failed', 'defined')
+            | selectattr('failed') | map(attribute='item')
+            | map('regex_replace', '^', 'image ') | list) }}
+  when: openstack_image_remove.results is defined
+
+- name: Report images the discard could not remove
+  ansible.builtin.debug:
+    msg: >-
+      Could not remove Glance image {{ item }}; remove it manually or rerun
+      the discard.
+  loop: "{{ openstack_image_remove.results | default([]) | selectattr('failed', 'defined')
+            | selectattr('failed') | map(attribute='item') | list }}"
 

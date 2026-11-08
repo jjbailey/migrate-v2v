@@ -9,9 +9,10 @@
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
 # shellcheck source=launch-dialog-common.sh
 source "$script_dir/launch-dialog-common.sh"
-ARTIFACT_ROOT=${ARTIFACT_ROOT:-/var/tmp/migrate-v2v}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
+MIGRATE_VAULT="$MIGRATE_V2V_VAULT_DIR/${MIGRATE_VAULT##*/}"
 
-VSPHERE_TARGET_VCENTER=$(choose_target "Which source vCenter is this VM on?" vaults/vsphere.yml vsphere_projects "${VSPHERE_TARGET_VCENTER:-}") || abort
+VSPHERE_TARGET_VCENTER=$(choose_target "Which source vCenter is this VM on?" "$MIGRATE_V2V_VAULT_DIR/vsphere.yml" vsphere_projects "${VSPHERE_TARGET_VCENTER:-}") || abort
 if [ -z "$VSPHERE_TARGET_VCENTER" ] ; then
     VCENTER_DATACENTER=$(input "Legacy datacenter override (blank for the playbook default):" "${VCENTER_DATACENTER:-}") || abort
 else
@@ -63,6 +64,8 @@ say "$summary" 16
 file=$(mktemp "${TMPDIR:-/tmp}/${DIALOG_NAME}.XXXXXX")
 {
     printf '#!/bin/bash\n'
+    printf 'export MIGRATE_V2V_VAULT_DIR=%s\n' "$(quote "$MIGRATE_V2V_VAULT_DIR")"
+    printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
     printf 'export VSPHERE_TARGET_VCENTER=%s\n' "$(quote "$VSPHERE_TARGET_VCENTER")"
     printf 'export VCENTER_DATACENTER=%s\n' "$(quote "$VCENTER_DATACENTER")"

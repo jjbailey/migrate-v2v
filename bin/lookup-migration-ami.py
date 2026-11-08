@@ -18,19 +18,23 @@ def project(entry):
         "migrated_at": entry["migrated_at"],
         "aws_region": entry["aws_region"],
         "aws_account_id": entry.get("aws_account_id", ""),
+        # Older rows have no guest ID; the launch then prints root@.
+        "source_guest_id": (entry.get("artifact_manifest") or {}).get("source_guest_id", ""),
     }
 
 def account_filter(args, legacy=False):
     """Rows recorded for --project's account, or with legacy, rows with none.
 
-    Rows written before aws_account_id existed could be from any account, so
-    they are only a fallback when no row names the account (see main below).
+    Rows written before aws_account_id and aws_project existed could be from
+    any account, so they are only a fallback when no row names the account
+    (see main below). A row that records another project is never one.
     """
     if not args.project:
         return None
     wanted = str(args.project)
     if legacy:
-        return lambda entry: not entry.get("aws_account_id")
+        return lambda entry: (not entry.get("aws_account_id")
+                              and not entry.get("aws_project"))
     return lambda entry: (str(entry.get("aws_account_id") or "") == wanted
                           or entry.get("aws_project") == wanted)
 

@@ -36,6 +36,61 @@
       azure_ssh_key_lookup.ssh_keys | default([])
       | selectattr('name', 'equalto', azure_ssh_key_name) | list | length == 0
 
+# Disk names derive from the VM name, and azure_rm_manageddisk leaves an
+# existing disk as it is (it does not compare the source), so disks that a
+# deleted VM of the same name left behind would be attached in place of fresh
+# copies of the snapshots, and a leftover OS disk would fail the VM create.
+# Stop before anything is created unless azure_replace_stale_disks allows
+# deleting the unattached ones.
+- name: List the managed disks in the resource group
+  azure.azcollection.azure_rm_manageddisk_info:
+    resource_group: "{{ azure_resource_group }}"
+  register: azure_rg_disks
+
+- name: Find disks an earlier VM of this name left behind
+  vars:
+    azure_launch_disk_names: >-
+      {%- set names = [azure_vm_name ~ '-osdisk'] -%}
+      {%- for lun in range(azure_data_snapshot_ids_effective | length) -%}
+      {%- set _ = names.append(azure_vm_name ~ '-data-' ~ (lun + 1)) -%}
+      {%- endfor -%}
+      {{ names }}
+  ansible.builtin.set_fact:
+    azure_stale_disks: >-
+      {{ azure_rg_disks.ansible_info.azure_managed_disk | default([])
+         | selectattr('name', 'in', azure_launch_disk_names) | list }}
+
+- name: Refuse to attach disks an earlier VM left behind
+  ansible.builtin.fail:
+    msg: >-
+      Managed disk(s) {{ azure_stale_disks | map(attribute='name') | join(', ') }}
+      already exist in {{ azure_resource_group }}, probably left by an earlier
+      VM named {{ azure_vm_name }}. They would be attached as they are rather
+      than copied fresh from the migration's snapshots. Delete them, choose
+      another instance name, or pass -e azure_replace_stale_disks=true to
+      delete the unattached ones and launch with fresh copies.
+  when:
+    - azure_stale_disks | length > 0
+    - not (azure_replace_stale_disks | bool)
+
+- name: Refuse to replace disks that are still attached
+  ansible.builtin.fail:
+    msg: >-
+      Managed disk(s)
+      {{ azure_stale_disks | selectattr('managed_by') | map(attribute='name') | join(', ') }}
+      are attached to another VM; detach or delete them first.
+  when:
+    - azure_replace_stale_disks | bool
+    - azure_stale_disks | selectattr('managed_by') | list | length > 0
+
+- name: Delete the unattached disks an earlier VM left behind
+  azure.azcollection.azure_rm_manageddisk:
+    resource_group: "{{ azure_resource_group }}"
+    name: "{{ item }}"
+    state: absent
+  loop: "{{ azure_stale_disks | map(attribute='name') | list }}"
+  when: azure_replace_stale_disks | bool
+
 - name: Select the SSH public key for the admin user
   ansible.builtin.set_fact:
     azure_ssh_public_key_data: >-

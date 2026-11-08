@@ -5,7 +5,7 @@
 """List the Compute zones, machine types, networks, and subnetworks one
 GCP project can use.
 
-Credentials come from vaults/gcp.yml (gcp_projects, matched by vault key,
+Credentials come from $MIGRATE_V2V_VAULT_DIR/gcp.yml (gcp_projects, matched by vault key,
 gcp_project, or project_id, the same way select-project.yml does). The
 service_account_key JSON in the vault entry authenticates the Compute API.
 
@@ -24,10 +24,9 @@ import re
 import sys
 from pathlib import Path
 
-REPO_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from vault_common import read_vault  # noqa: E402
+from vault_common import default_vault_path, read_vault  # noqa: E402
 
 COMPUTE_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 COMPUTE_API = "https://compute.googleapis.com/compute/v1/projects"
@@ -170,7 +169,7 @@ def main():
     parser.add_argument("project", nargs="?",
                         help="vault key, gcp_project, or project_id "
                              "(omit for a single-entry vault)")
-    parser.add_argument("--vault", default=str(REPO_DIR / "vaults/gcp.yml"))
+    parser.add_argument("--vault", default=str(default_vault_path("gcp.yml")))
     parser.add_argument("--zones", dest="list_zones", action="store_true",
                         help="list up zones")
     parser.add_argument("--machine-types", dest="list_types",
@@ -184,6 +183,8 @@ def main():
                         help="list subnetworks in --region (or --zone)")
     parser.add_argument("--zone", help="zone for --machine-types")
     parser.add_argument("--region", help="region for --subnetworks")
+    parser.add_argument("--network",
+                        help="with --subnetworks, only this network's subnetworks")
     parser.add_argument("--json", dest="as_json", action="store_true",
                         help="machine-readable output for scripting")
     args = parser.parse_args()
@@ -224,6 +225,11 @@ def main():
             if not region:
                 raise SystemExit("--subnetworks needs --region (or --zone)")
             rows = gather_subnetworks(session, project_id, region)
+            # A subnetwork of another VPC cannot be combined with --network
+            # at launch, so the dialog lists only the chosen network's.
+            network = short_name(str(args.network or "").strip())
+            if network:
+                rows = [row for row in rows if row["network"] == network]
     except SystemExit:
         raise
     except Exception as error:

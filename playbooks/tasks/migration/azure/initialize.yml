@@ -66,18 +66,19 @@
     # The catalog and its readers still key every migration on clone_name, so
     # it stays the migration's unique identifier; common/cleanup-vddk.yml
     # never deletes it.
-    azure_snapshot_infix: "{{ 'vddk' if export_format == 'datastore' else 'export' }}"
     azure_clone_infix: "{{ 'vddk' if export_format == 'datastore' else 'export-clone' }}"
   ansible.builtin.set_fact:
-    snapshot_name: "ansible-azure-{{ azure_snapshot_infix }}-snap-{{ migration_run_id }}"
+    # ansible-<target>[-vddk]-snap-<run id>, like the other targets.
+    snapshot_name: "ansible-azure{{ '-vddk' if export_format == 'datastore' else '' }}-snap-{{ migration_run_id }}"
     clone_name: "{{ vm_name }}-azure-{{ azure_clone_infix }}-{{ migration_run_id }}"
     ovf_local_path: "{{ migration_run_dir }}/export.ovf"
     artifact_manifest_path: "{{ migration_run_dir }}/artifact-manifest.json"
     azure_staging_dir: "{{ migration_run_dir }}/disks"
     azure_blob_prefix: "migrate-v2v/{{ migration_run_id }}"
     azure_image_prefix: "{{ azure_vm_slug_trimmed ~ '-migration-' ~ migration_run_id }}"
-    catalog_entry_path: >-
-      /tmp/.{{ vm_name }}-azure-{{ azure_clone_infix }}-{{ migration_run_id }}.catalog-entry.json
+    # Inside the private run directory rather than a predictable /tmp name
+    # built from the raw VM name.
+    catalog_entry_path: "{{ migration_run_dir }}/catalog-entry.json"
 
 - name: Derive the private NBD socket directory for datastore-direct runs
   ansible.builtin.set_fact:

@@ -16,6 +16,9 @@
       artifact_type: ova
       artifact_manifest: "{{ artifact_manifest }}"
       aws_region: "{{ aws_region }}"
+      # The vault key scopes the row even when no account ID is known, so
+      # launches and listings for one project never pick another's AMI.
+      aws_project: "{{ aws_target_project_name }}"
       ami_id: "{{ import_status.import_image[0].image_id }}"
       ami_name: "{{ vm_name }}"
       import_task_id: "{{ import_start.import_image.import_task_id }}"

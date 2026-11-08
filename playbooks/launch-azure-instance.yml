@@ -40,6 +40,9 @@
     # existing NSG keeps its own rules.
     azure_ssh_source_prefix: "*"
     azure_no_public_ip: false
+    # Delete unattached <vm>-osdisk / <vm>-data-N disks a deleted VM of the
+    # same name left behind, instead of refusing the launch.
+    azure_replace_stale_disks: false
     # cloud-init creates this user with the key below; Azure rejects names
     # such as root and admin.
     azure_admin_username: "azureuser"
@@ -51,8 +54,9 @@
     # select-project.yml falls back to this when the vault entry has no
     # storage_container. A launch never stages blobs, so empty is fine.
     azure_storage_container: ""
-    migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
-    deployment_catalog_path: "{{ playbook_dir }}/../catalogs/deployment-catalog.json"
+    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+    migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
+    deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 
   tasks:
     # Bare -e key=[...] arrives as a string, and Ansible extra-vars cannot be

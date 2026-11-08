@@ -11,6 +11,15 @@ from pathlib import Path
 
 import yaml
 
+DEFAULT_VAULT_DIR = Path("/work/migrate-v2v/vaults")
+
+def default_vault_path(filename):
+    """Runtime vault path, overridable for alternate checkouts or tests."""
+    vault_dir = Path(
+        os.environ.get("MIGRATE_V2V_VAULT_DIR") or DEFAULT_VAULT_DIR
+    ).expanduser()
+    return vault_dir / filename
+
 def ansible_vault_bin():
     """Find ansible-vault in the configured virtualenv or on PATH."""
     venv_bin = Path(os.environ.get("DIB7_VENV_BIN", Path.home() / ".dib7/bin"))

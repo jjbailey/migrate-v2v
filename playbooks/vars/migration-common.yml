@@ -20,5 +20,6 @@ stdin_env_bin: "{{ playbook_dir }}/../bin/exec-with-stdin-env.sh"
 govc_insecure: "{{ '1' if not (validate_certs | bool) else GOVC_INSECURE | string }}"
 
 discard_failed_artifacts: false
-migration_catalog_path: "{{ playbook_dir }}/../catalogs/migration-catalog.json"
+catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
+migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
 

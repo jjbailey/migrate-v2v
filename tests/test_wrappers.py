@@ -45,12 +45,12 @@ class WrapperTestCase(unittest.TestCase):
             "WRAPPER_TEST_ARGV": str(self.argv_file),
         }
 
-    def run_wrapper(self, script, env=None, args=(), expect_success=True):
+    def run_wrapper(self, script, env=None, args=(), expect_success=True, cwd=None):
         result = subprocess.run(
             [str(BIN / script), *args],
             env={**self.base_env, **(env or {})},
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            check=False, timeout=60,
+            check=False, timeout=60, cwd=cwd,
         )
         if expect_success:
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -105,16 +105,28 @@ class MigrateWrapperTests(WrapperTestCase):
                 self.assertNotIn("vsphere_target_vcenter", extra)
                 self.assertNotIn("validate_certs", extra)
 
-    def test_artifact_root_defaults_to_var_tmp(self):
+    def test_artifact_root_defaults_to_work_migrate_v2v(self):
         for script in self.SCRIPTS:
             with self.subTest(script=script):
                 self.run_wrapper(script, {"VM_NAME": "vm"})
                 self.assertEqual(
-                    self.extra_vars()["artifact_root"], "/var/tmp/migrate-v2v")
+                    self.extra_vars()["artifact_root"], "/work/migrate-v2v")
                 self.run_wrapper(script, {
                     "VM_NAME": "vm", "ARTIFACT_ROOT": "/srv/my artifacts"})
                 self.assertEqual(
                     self.extra_vars()["artifact_root"], "/srv/my artifacts")
+
+    def test_relative_paths_resolve_from_the_callers_directory(self):
+        # The wrappers cd to the repository before ansible runs.
+        caller = self.tmp / "caller dir"
+        caller.mkdir()
+        (caller / "pw").write_text("secret\n")
+        self.run_wrapper("migrate-openstack-vm.sh", {
+            "VM_NAME": "vm", "ARTIFACT_ROOT": "runs",
+            "VAULT_PASSWORD_FILE": "pw"}, cwd=caller)
+        self.assertEqual(self.extra_vars()["artifact_root"], str(caller / "runs"))
+        argv = self.recorded_argv()
+        self.assertEqual(argv[argv.index("--vault-password-file") + 1], str(caller / "pw"))
 
     def test_vcenter_wins_over_datacenter(self):
         self.run_wrapper("migrate-aws-vm.sh", {
@@ -224,6 +236,12 @@ class LaunchWrapperTests(WrapperTestCase):
         self.assertEqual(extra["key_name"], "cloud")
         self.assertNotIn("instance_type", extra)
 
+    def test_aws_empty_key_name_launches_without_a_key_pair(self):
+        # The launch dialog's "No key pair" choice exports AWS_KEY_NAME=''.
+        self.run_wrapper("launch-aws-instance.sh", {
+            "VM_NAME": "vm", "AWS_KEY_NAME": ""})
+        self.assertNotIn("key_name", self.extra_vars())
+
     def test_gcp(self):
         key = self.tmp / "my key.pub"
         key.write_text("ssh-ed25519 AAAA test\n")
@@ -296,12 +314,6 @@ class StageV2vTests(WrapperTestCase):
             "ssh_username": "admin user",
             "ssh_private_key_file": "/keys/my key",
         })
-
-class DefaultsTests(unittest.TestCase):
-    def test_no_wrapper_defaults_under_work(self):
-        for path in sorted(BIN.glob("*.sh")):
-            with self.subTest(script=path.name):
-                self.assertNotIn("/work/migrate-v2v", path.read_text())
 
 class ExecWithStdinEnvTests(unittest.TestCase):
     """bin/exec-with-stdin-env.sh: secrets arrive on stdin, not in argv."""

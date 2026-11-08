@@ -1,5 +1,9 @@
 # Vaults Required by the Playbooks
 
+Vault files live under `/work/migrate-v2v/vaults/` by default. Set
+`MIGRATE_V2V_VAULT_DIR` to use a different directory. The filenames below are
+relative to that directory.
+
 ## Editing a Vault
 
 `bin/aws-vault.sh`, `bin/azure-vault.sh`, `bin/gcp-vault.sh`,
@@ -14,7 +18,7 @@ bin/aws-vault.sh
 Set `VAULT` to point at a different file (e.g. a per-environment vault):
 
 ```sh
-VAULT=vaults/aws-staging.yml bin/aws-vault.sh
+VAULT=/work/migrate-v2v/vaults/aws-staging.yml bin/aws-vault.sh
 ```
 
 ## Credentials for the bin/ Tools
@@ -58,7 +62,7 @@ same vault entry the launch playbook will use; only
 
 ## AWS Vault
 
-vaults/aws.yml
+aws.yml
 
 ```yaml
 aws_projects:
@@ -75,7 +79,7 @@ Select an account with `-e aws_target_project=<key-or-account-id>`. A
 single-entry map is auto-selected. A legacy flat mapping containing
 `aws_region`, `s3_bucket`, and `vmimport_role_name` remains supported.
 
-`bin/aws-project-facts.py` reads `vaults/aws.yml` and selects an account
+`bin/aws-project-facts.py` reads `aws.yml` and selects an account
 the same way the playbooks do (vault key, account ID, or profile).
 Without exported AWS credentials, `bin/reconcile-catalog-aws.py` uses the
 entry whose key or `aws_account_id` matches the catalog's account (see
@@ -83,7 +87,7 @@ entry whose key or `aws_account_id` matches the catalog's account (see
 
 ## GCP Vault
 
-vaults/gcp.yml
+gcp.yml
 
 ```yaml
 gcp_projects:
@@ -101,15 +105,16 @@ gcp_projects:
 
 Select a project with `-e gcp_target_project=<key-or-project-id>`. A
 single-entry map is auto-selected. A legacy flat mapping containing
-`gcp_project`, `gcs_bucket`, `gcp_import_location`, and `service_account_key`
-remains supported.
+`gcp_project`, `gcs_bucket`, optional `gcp_import_location`, and
+`service_account_key` remains supported.
 
-`bin/gcp-project-facts.py` reads `vaults/gcp.yml` and selects a project
+`bin/gcp-project-facts.py` reads `gcp.yml` and selects a project
 the same way the playbooks do (vault key, `gcp_project`, or `project_id`).
 
 ### `gcp_import_location`
 
-The region the Migrate to Virtual Machines _import job_ runs in - the value
+Optional; `us-central1` when the entry leaves it out. The region the Migrate
+to Virtual Machines _import job_ runs in - the value
 passed to `gcloud compute migration image-imports --location`. It is easy to
 misread this as a storage setting, so, concretely, it does **not** control:
 
@@ -136,7 +141,7 @@ from a bad region.
 
 ## OpenStack Vault
 
-vaults/openstack.yml
+openstack.yml
 
 ```txt
 openstack_projects:
@@ -175,14 +180,14 @@ Without `--cloud` or exported `OS_*` credentials,
 entry (no `clouds.yaml` values are mixed in). See
 [Credentials for the bin/ Tools](#credentials-for-the-bin-tools).
 
-`bin/openstack-project-facts.py` also reads `vaults/openstack.yml` and selects a
+`bin/openstack-project-facts.py` also reads `openstack.yml` and selects a
 project the same way the playbooks do (vault key, `project_name`, or
 `project_id`). See
 [OpenStack Launch Networking](../README.md#openstack-launch-networking).
 
 ## vSphere Vault
 
-`vaults/vsphere.yml`
+`vsphere.yml`
 
 ```yaml
 vsphere_projects:
@@ -222,7 +227,7 @@ Each migration catalog row records the selected vCenter key as
 
 ## Azure Vault
 
-vaults/azure.yml
+azure.yml
 
 ```yaml
 azure_projects:
