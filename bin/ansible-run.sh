@@ -16,23 +16,49 @@
 #   4. --ask-vault-pass (interactive prompt)
 set -euo pipefail
 
-DEFAULT_VAULT_PASSWORD_FILE="$HOME/.ssh/dib-vault-pass"
+script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
 
 usage()
 {
     cat << EOF
 Usage: ansible-run playbook.yml [ansible-playbook args...]
 
-Appends a vault-password option (see header comment) unless one was already
-given, then execs ansible-playbook.
+Appends a vault-password option unless one was already given, then execs
+ansible-playbook.
 EOF
     exit 2
 }
 
-# require at least one arg (the playbook)
-if [ $# -lt 1 ] ; then
-    usage
+if [ "$#" -lt 1 ] ; then
+    usage >&2
 fi
+
+# Standard migrations export through OVF Tool ; the datastore-direct VDDK
+# playbooks, launches, and stage-v2v do not need it.
+playbook_name=${1##*/}
+case "$playbook_name" in
+    migrate-aws-vm.yml | migrate-azure-vm.yml | migrate-gcp-vm.yml | migrate-openstack-vm.yml)
+        OVFTOOL_INSTALL_DIR=${OVFTOOL_INSTALL_DIR:-/work/migrate-v2v/tools/ovftool-5.1.0}
+        case "$OVFTOOL_INSTALL_DIR" in
+            /*) ;;
+            *) OVFTOOL_INSTALL_DIR="$PWD/$OVFTOOL_INSTALL_DIR" ;;
+        esac
+        export OVFTOOL_INSTALL_DIR
+        if ! command -v ovftool > /dev/null 2>&1 ; then
+            if [ ! -x "$OVFTOOL_INSTALL_DIR/ovftool" ] ; then
+                "$script_dir/install-ovftool.py"
+            fi
+            PATH="$OVFTOOL_INSTALL_DIR:$PATH"
+            export PATH
+            if ! command -v ovftool > /dev/null 2>&1 ; then
+                echo "ansible-run: OVF Tool is still unavailable after installation." >&2
+                exit 1
+            fi
+        fi
+        ;;
+esac
+
+DEFAULT_VAULT_PASSWORD_FILE="$HOME/.ssh/dib-vault-pass"
 
 ARGS=("$@")
 has_vault_option=false

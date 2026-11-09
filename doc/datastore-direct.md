@@ -83,8 +83,9 @@ The wrapper takes the same environment variables as `bin/migrate-openstack-vm.sh
 Any Ansible arguments after the wrapper's own are passed through. The
 datastore-direct settings are named `vddk_<name>` and shared by both targets;
 the OpenStack playbook still accepts the older `openstack_vddk_<name>`
-spelling. Other playbook settings: `vddk_libdir` (VixDiskLib directory; empty uses the plugin's
-default), `vddk_transports` (default `nbdssl`), and
+spelling. Other playbook settings: `vddk_libdir` (defaults to
+`/opt/openvddk`; set empty to use the plugin's built-in default),
+`vddk_transports` (default `nbdssl`), and
 `vddk_thumbprint` (empty reads the vCenter certificate in preflight;
 with `validate_certs` true the certificate must verify against this host's CAs
 first, because VixDiskLib trusts whatever thumbprint it is given).
@@ -218,13 +219,23 @@ done
 sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --variable=plugindir nbdkit 2>/dev/null || echo /usr/lib/x86_64-linux-gnu/nbdkit/plugins)/"
 ```
 
-Then lay out the library where the plugin looks by default
-(`nbdkit vddk --dump-plugin` prints `vddk_default_libdir`), for example:
+Install the OpenVDDK kit under `/opt/openvddk`, retaining its license and
+notice files. The kit's library is under `lib/`; nbdkit looks under `lib64/`,
+so add a link there. The playbooks pass this directory as `libdir`, and use the
+same layout on a host or in a container image:
 
 ```bash
-sudo mkdir -p /usr/local/lib/vmware-vix-disklib/lib64
-sudo ln -sfn /usr/local/lib/libvixDiskLib.so.8.0.3 /usr/local/lib/vmware-vix-disklib/lib64/libvixDiskLib.so.8
-nbdkit vddk --dump-plugin | grep vddk_library_version     # proves both load
+sudo install -d /opt/openvddk/lib64
+sudo ln -sfn ../lib/libvixDiskLib.so.8 /opt/openvddk/lib64/libvixDiskLib.so.8
+nbdkit vddk libdir=/opt/openvddk --dump-plugin | grep vddk_library_version
+```
+
+If OpenVDDK is already installed in `/usr/local/lib` on a non-containerized
+control host, point the same link at that installation instead:
+
+```bash
+sudo install -d /opt/openvddk/lib64
+sudo ln -sfn /usr/local/lib/libvixDiskLib.so.8 /opt/openvddk/lib64/libvixDiskLib.so.8
 ```
 
 The library tested is `libvixDiskLib.so.8.0.3` from

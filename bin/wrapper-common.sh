@@ -12,7 +12,7 @@ wrapper_script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "$wrapper_source")" >
 # against the repository (or, for VAULT_PASSWORD_FILE, fall back to the
 # default file or a prompt). Anchor them to the caller's directory while it is
 # still the current one.
-for wrapper_path_var in VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR ARTIFACT_ROOT ; do
+for wrapper_path_var in VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR ARTIFACT_ROOT OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE ; do
     case "${!wrapper_path_var:-}" in
         "" | /*) ;;
         *) export "$wrapper_path_var=$PWD/${!wrapper_path_var}" ;;

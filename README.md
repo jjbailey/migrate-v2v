@@ -26,16 +26,26 @@ needs a one-time move; see [Secrets](#secrets) and
 
 - VMware OVF Tool. This repository is tested with the 5.1.0 Linux ZIP;
   Broadcom currently publishes 9.1.1, but newer releases are not part of the
-  validated toolchain yet. Download the tested **OVF Tool for Linux Zip** from
-  Broadcom's [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
-  after signing in and accepting Broadcom's license terms. VMware/Broadcom's license does not permit
-  redistribution, so the ZIP is **not included in this repo**.
+  validated toolchain yet. Run `./bin/install-ovftool.py` to download the
+  tested package from Broadcom and install it under
+  `/work/migrate-v2v/tools/ovftool-5.1.0`. The script prompts you to accept
+  Broadcom's terms before downloading. Standard migration wrappers invoke the
+  installer automatically when `ovftool` is not on `PATH`; the datastore-direct
+  VDDK workflows do not need it. Set `OVFTOOL_INSTALL_DIR` to change the
+  install location. For non-interactive use, review Broadcom's
+  [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
+  and set `OVFTOOL_ACCEPT_LICENSE=1` to confirm acceptance for that invocation.
+  If the portal requires sign-in or its download endpoint changes, download
+  the Linux ZIP from that page and set `OVFTOOL_ARCHIVE` to its path. The
+  installer verifies Broadcom's published checksum and never stores the ZIP in
+  the repository. Broadcom's license does not permit redistribution, so do not
+  include the downloaded package in a published container image.
 
-  Install the tool on the control host according to Broadcom's instructions
-  and verify that `ovftool` is available on `PATH`:
+  The standard migration wrappers add the install directory to `PATH` for the
+  playbook run. Verify the installed binary directly with:
 
   ```bash
-  ovftool --version
+  "${OVFTOOL_INSTALL_DIR:-/work/migrate-v2v/tools/ovftool-5.1.0}/ovftool" --version
   ```
 
 - Access to vCenter and to each destination cloud you use, with accounts
@@ -92,6 +102,8 @@ needs a one-time move; see [Secrets](#secrets) and
   [OpenVDDK](https://openvddk.com/), an independent, read-only replacement for
   VMware's disk library from the creator of V2K Migrate (see its site for
   availability); VMware's own VDDK works too where you are licensed for it.
+  The playbooks look for OpenVDDK under `/opt/openvddk` by default; the
+  installation instructions support both host and container layouts.
 - `dialog` or `whiptail` is required only for the interactive dialogs
   (`bin/*-dialog.sh`; see [Interactive Dialogs](#interactive-dialogs)) and
   should be available on `PATH`.
@@ -281,6 +293,7 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
+- [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
 - [migrate-v2v presentation video](doc/migrate_v2v_presentation.mp4) - recorded video of the project presentation
@@ -1646,3 +1659,19 @@ Same accumulate-not-supersede reasoning as the migration catalog - the same
 AMI or image can legitimately be launched more than once, so history is kept
 rather than overwritten; only an exact rerun against the same target resource
 identity replaces its own prior entry.
+
+## License
+
+migrate-v2v: Migrate a VMware VM to another cloud provider
+
+Copyright (C) 2026 Jack Bailey
+
+This program is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See the [LICENSE](LICENSE) file for
+details.
