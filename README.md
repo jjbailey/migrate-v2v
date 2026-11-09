@@ -1662,6 +1662,8 @@ identity replaces its own prior entry.
 
 ## License
 
+migrate-v2v: Migrate a VMware VM to another cloud provider
+
 Copyright (C) 2026 Jack Bailey
 
 This program is free software: you can redistribute it and/or modify it
