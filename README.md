@@ -31,9 +31,12 @@ needs a one-time move; see [Secrets](#secrets) and
   tested package from Broadcom and install it under
   `/work/migrate-v2v/tools/ovftool-5.1.0`. The script prompts you to accept
   Broadcom's terms before downloading. Standard migration wrappers invoke the
-  installer automatically when `ovftool` is not on `PATH`; the datastore-direct
-  VDDK workflows do not need it. Set `OVFTOOL_INSTALL_DIR` to change the
-  install location. For non-interactive use, review Broadcom's
+  installer automatically when `ovftool` is not on `PATH`. The standard
+  migration playbooks do the same in preflight, including when run directly
+  with `ansible-playbook`; the datastore-direct VDDK workflows do not need it.
+  Set `OVFTOOL_INSTALL_DIR` to change the install location. A direct
+  `ansible-playbook` run cannot answer the installer's license prompt, so
+  review Broadcom's
   [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
   and set `OVFTOOL_ACCEPT_LICENSE=1` to confirm acceptance for that invocation.
   If the portal requires sign-in or its download endpoint changes, download

@@ -1,0 +1,44 @@
+---
+# playbooks/tasks/migration/common/ensure-ovftool.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Standard migrations export through OVF Tool. Keep this check in the play so
+# direct ansible-playbook runs get the same installation as the shell wrappers.
+
+- name: Check ovftool on PATH
+  ansible.builtin.command: which ovftool
+  register: ovftool_check
+  failed_when: false
+  changed_when: false
+
+- name: Set the OVF Tool installation directory
+  ansible.builtin.set_fact:
+    ovftool_install_dir_effective: >-
+      {{ lookup('ansible.builtin.env', 'OVFTOOL_INSTALL_DIR')
+         | default('/work/migrate-v2v/tools/ovftool-5.1.0', true) | expanduser }}
+  when: ovftool_check.rc != 0
+
+- name: Install OVF Tool when it is not on PATH
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../bin/install-ovftool.py"
+  environment:
+    OVFTOOL_INSTALL_DIR: "{{ ovftool_install_dir_effective }}"
+  register: ovftool_install_result
+  changed_when: "'Installed OVF Tool ' in (ovftool_install_result.stdout | default(''))"
+  when: ovftool_check.rc != 0
+
+- name: Select the OVF Tool executable
+  ansible.builtin.set_fact:
+    ovftool_bin: >-
+      {{ (ovftool_check.stdout | trim) if ovftool_check.rc == 0
+         else ovftool_install_dir_effective ~ '/ovftool' }}
+
+- name: Verify OVF Tool is runnable
+  ansible.builtin.command:
+    argv:
+      - "{{ ovftool_bin }}"
+      - --version
+  changed_when: false
+
