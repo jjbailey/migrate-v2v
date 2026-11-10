@@ -43,7 +43,12 @@
 
 # Install the library only when the plugin itself is present but cannot load a
 # VixDiskLib. Keeping the kit under /work makes the same install usable on the
-# host and inside a container that bind-mounts the normal workspace.
+# host and inside a container that bind-mounts the normal workspace. The probe
+# exits 0 with no vddk_library_version when the libdir lacks the library, but
+# exits non-zero (nbdkit: error: realpath: ...) when the libdir itself does not
+# exist yet, as on a first run with the default install directory; both mean
+# "no library". Only a missing plugin ("cannot open plugin") is left alone,
+# since installing the library cannot fix that.
 - name: Install OpenVDDK when the nbdkit plugin has no loadable library
   ansible.builtin.command:
     argv:
@@ -56,8 +61,9 @@
   changed_when: "'Installed OpenVDDK ' in (vddk_install_result.stdout | default(''))"
   when:
     - vddk_backend in ['auto', 'vddk']
-    - (nbdkit_vddk_check.rc | default(-1)) == 0
-    - "'vddk_library_version=' not in (nbdkit_vddk_check.stdout | default(''))"
+    - "'cannot open plugin' not in (nbdkit_vddk_check.stderr | default(''))"
+    - not ((nbdkit_vddk_check.rc | default(-1)) == 0
+           and 'vddk_library_version=' in (nbdkit_vddk_check.stdout | default('')))
 
 - name: Use the installed library directory after automatic installation
   ansible.builtin.set_fact:
@@ -118,7 +124,6 @@
   when:
     - vddk_install_result is not skipped
     - (vddk_install_result.rc | default(0)) != 0
-    - (nbdkit_vddk_final_check.rc | default(-1)) == 0
 
 - name: Fail when the vddk backend was requested but cannot load
   ansible.builtin.fail:
