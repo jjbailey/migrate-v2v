@@ -658,7 +658,8 @@ for OpenStack (`openstack_import_poll_retries` 240 x
 
 GCP imports run concurrently, so when one disk fails the others may still be
 importing. Without a discard they are left to finish, and a resume reuses
-their images. With `discard_failed_artifacts=true` the run cancels them (a
+their images without re-uploading those disks to GCS. With
+`discard_failed_artifacts=true` the run cancels them (a
 best-effort call to the Migrate to Virtual Machines API), waits up to
 `gcp_cancel_poll_retries` (default 120) x `gcp_import_poll_delay` for them to
 stop, removes the import resources, and then deletes the images this attempt
