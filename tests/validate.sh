@@ -136,7 +136,7 @@ done <<< "$vault_files"
 # the gate still runs on machines without credentials.
 # Same lookup as bin/ansible-run.sh: VAULT_PASSWORD_FILE when it names a
 # non-empty file, else the default file.
-vault_pass="$HOME/.ssh/dib-vault-pass"
+vault_pass="$HOME/.dib-vault-pass"
 if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
     vault_pass=$VAULT_PASSWORD_FILE
 fi

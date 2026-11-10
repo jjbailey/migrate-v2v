@@ -12,7 +12,7 @@
 #      or --vault-id
 #   2. --vault-password-file $VAULT_PASSWORD_FILE, if that env var points at
 #      a non-empty file (the value is a path, not the secret itself)
-#   3. --vault-password-file ~/.ssh/dib-vault-pass, if that file exists
+#   3. --vault-password-file ~/.dib-vault-pass, if that file exists
 #   4. --ask-vault-pass (interactive prompt)
 set -euo pipefail
 
@@ -58,7 +58,7 @@ case "$playbook_name" in
         ;;
 esac
 
-DEFAULT_VAULT_PASSWORD_FILE="$HOME/.ssh/dib-vault-pass"
+DEFAULT_VAULT_PASSWORD_FILE="$HOME/.dib-vault-pass"
 
 ARGS=("$@")
 has_vault_option=false

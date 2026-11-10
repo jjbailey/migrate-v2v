@@ -223,9 +223,9 @@ vault_keys()
 {
     local vault=$1 map_name=$2
     # Same order as edit-vault.sh: VAULT_PASSWORD_FILE if it names a non-empty
-    # file, else ~/.ssh/dib-vault-pass.
+    # file, else ~/.dib-vault-pass.
     local passfile="${VAULT_PASSWORD_FILE:-}"
-    [ -n "$passfile" ] && [ -s "$passfile" ] || passfile="$HOME/.ssh/dib-vault-pass"
+    [ -n "$passfile" ] && [ -s "$passfile" ] || passfile="$HOME/.dib-vault-pass"
     [ -s "$passfile" ] || return 1
     local vault_bin=ansible-vault
     local venv_bin="${DIB7_VENV_BIN:-$HOME/.dib7/bin}"

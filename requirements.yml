@@ -24,10 +24,13 @@ collections:
 # azure.azcollection carries its own Python SDK requirements (azure-identity,
 # azure-mgmt-compute, azure-storage-blob, and friends) in the collection's
 # requirements.txt. Install them into the same Python environment that runs
-# Ansible, next to this file:
+# Ansible, next to this file. requirements-azure-constraints.txt pins the
+# collection's range-only requirements to the versions in use on the current
+# Ubuntu 24.04 controller:
 #
 #   python3 -m pip install -r \
-#     ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt
+#     ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt \
+#     -c requirements-azure-constraints.txt
 #
 # The Azure CLI is not used by any playbook; install it only if you want to
 # inspect what the pipeline created by hand.

@@ -90,7 +90,9 @@ needs a one-time move; see [Secrets](#secrets) and
   dependencies used by the installed collections, including `boto3`,
   `pyVmomi`, `openstacksdk`, `google-auth`, `requests`, `PyYAML`, and - for
   Azure - the `azure.azcollection` SDK requirements listed in its own
-  `requirements.txt` (see the note in [requirements.yml](requirements.yml)).
+  `requirements.txt` (see the note in [requirements.yml](requirements.yml) and
+  the version constraints in
+  [requirements-azure-constraints.txt](requirements-azure-constraints.txt)).
   [requirements.txt](requirements.txt) pins `ansible-core` and the rest to
   the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
@@ -303,6 +305,8 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
+- [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
+  Preparation-only dependency plan for a future Ubuntu 24.04 container
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
@@ -811,7 +815,7 @@ come from the encrypted runtime vaults - see
 `-e aws_region=...`, `-e vcenter_hostname=...` and friends still work.
 
 `bin/run-playbook.sh` runs the playbook locally and automatically supplies the
-Ansible Vault password from `~/.ssh/dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
+Ansible Vault password from `~/.dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
 an interactive prompt:
 
 ```bash
@@ -890,7 +894,7 @@ What each kind asks:
   Choosing **None** for OpenStack security groups passes an empty list.
 
 Target choices are read from the vault with `ansible-vault view`, using
-`VAULT_PASSWORD_FILE` or `~/.ssh/dib-vault-pass`. If the password file or
+`VAULT_PASSWORD_FILE` or `~/.dib-vault-pass`. If the password file or
 `ansible-vault` is unavailable, the dialog falls back to typing the name; leave
 it blank to let the playbook auto-select a single-entry vault.
 
@@ -1042,10 +1046,15 @@ Common failures:
 All credentials live in the Ansible-vault-encrypted files under
 `/work/migrate-v2v/vaults/` by default. Set `MIGRATE_V2V_VAULT_DIR` to use
 another directory. The vault password is expected at
-`~/.ssh/dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
+`~/.dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
 <file>`, `--vault-id`, or `VAULT_PASSWORD_FILE` also works; see
 `bin/ansible-run.sh`). Edit (or create) a vault with its helper, which uses the
-same password lookup and falls back to a prompt:
+same password lookup and falls back to a prompt. Keep the password file outside
+the repository with owner-only permissions:
+
+```bash
+chmod 600 "$HOME/.dib-vault-pass"
+```
 
 ```bash
 ./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
@@ -1072,14 +1081,21 @@ and run the container with the host directory owner's UID and GID. Create the
 workspace and vault directories with mode `700`, as above (the vault helpers
 create theirs that way), and keep vault files at mode `600`, so a different
 non-root container user cannot read or write them. Directories the playbooks
-and catalog tools create below the workspace follow the process umask. The
-container also needs the vault password (`~/.ssh/dib-vault-pass`, or
-`VAULT_PASSWORD_FILE` pointing at a mounted file) and `ansible-vault`, either
-on `PATH` or under `DIB7_VENV_BIN`.
+and catalog tools create below the workspace follow the process umask.
+
+For the vault password, use a separate read-only file mount. Mount the host's
+`$HOME/.dib-vault-pass` at `/run/secrets/migrate-v2v-vault-password` in the
+container and set `VAULT_PASSWORD_FILE` to that container path. This works
+with a direct Docker bind mount or a file-backed Compose secret; Swarm can
+provide a native Docker secret at the same path. The variable contains only
+the path, not the password. Do not pass the password as an environment value
+or build argument, bake it into the image, or put it in the shared workspace.
+For interactive runs, the existing vault prompt also works. The container
+needs `ansible-vault`, either on `PATH` or under `DIB7_VENV_BIN`.
 
 The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 `bin/edit-vault.sh` for any other file. Plain
-`ansible-vault edit "${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/aws.yml" --vault-password-file ~/.ssh/dib-vault-pass`
+`ansible-vault edit "${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/aws.yml" --vault-password-file ~/.dib-vault-pass`
 works too.
 
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.

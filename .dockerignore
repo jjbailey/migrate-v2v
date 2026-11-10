@@ -1,0 +1,26 @@
+# Docker build context is independent of .gitignore. Keep local credentials,
+# runtime data, downloaded tools, and repository history out of the image.
+.git/
+.ansible/
+/vaults/
+/catalogs/
+/artifacts/
+/output/
+/tools/
+/secrets/
+.env
+.env.*
+
+# Local migration outputs and tool archives must not become image layers.
+VMware-ovftool-*.zip
+**/*.ova
+**/*.vmdk
+**/*.qcow2
+**/*.vhd
+**/*.img
+**/*.log
+**/*.retry
+
+# Python caches.
+**/__pycache__/
+**/*.py[cod]

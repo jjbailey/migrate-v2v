@@ -35,7 +35,7 @@ class WrapperTestCase(unittest.TestCase):
         stub.write_text(STUB)
         stub.chmod(0o755)
         self.argv_file = self.tmp / "argv.json"
-        # An empty HOME has no ~/.ssh/dib-vault-pass, so ansible-run.sh
+        # An empty HOME has no ~/.dib-vault-pass, so ansible-run.sh
         # appends --ask-vault-pass, which the stub ignores.
         home = self.tmp / "home"
         home.mkdir()

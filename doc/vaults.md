@@ -47,7 +47,7 @@ decrypted only when steps 1 and 2 did not decide, so a user working from
 exported credentials is never asked for the vault password; one that exists
 but cannot be decrypted stops the run rather than falling through to a cached
 login. The password comes from `VAULT_PASSWORD_FILE`, else
-`~/.ssh/dib-vault-pass`, else an interactive prompt.
+`~/.dib-vault-pass`, else an interactive prompt.
 
 Each reconcile prints the source it used, for example `(credentials: vault
 entry 'lab')` or `(credentials: AZURE_* environment; azure.yml not
