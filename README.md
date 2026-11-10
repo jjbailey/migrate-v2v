@@ -280,7 +280,7 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     `--project-id`/`--account-id`, account verification, and the same `--force`
     safety guard. Exported AWS credentials win; otherwise the AWS vault under
     `/work/migrate-v2v/vaults/` is used (see
-    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools)).
+    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
     entries whose managed images or snapshots are gone. It supports `--dry-run`,
@@ -311,35 +311,38 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
 migrate-v2v/
 ├── ansible.cfg                  # Ansible configuration
 ├── bin/                         # Utility scripts
-│   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── ansible-run.sh           # ansible-playbook wrapper that supplies the vault password
-│   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
-│   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
+│   ├── append-*-catalog.py      # Migration and deployment catalog appenders
+│   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
+│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
+│   ├── enable-cbt.py            # Enables Changed Block Tracking without a power cycle
+│   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
+│   ├── inspect-ova.py           # OVA inspection
+│   ├── inspect-vm.py            # Disk manifest from a source VM (datastore-direct)
+│   ├── install-openvddk.py      # Installs the pinned OpenVDDK user kit on demand
+│   ├── install-ovftool.py       # Downloads and installs VMware OVF Tool 5.1.0
 │   ├── launch-{aws,azure,gcp,openstack}-instance.sh  # Environment-aware launch wrappers
 │   ├── launch-*-dialog.sh       # Interactive front ends for the launch wrappers
-│   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
-│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for it
-│   ├── migrate-azure-vm-vddk.sh          # Datastore-direct Azure migration wrapper
-│   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
-│   ├── inspect-vm.py            # Disk manifest from a source VM (datastore-direct)
-│   ├── enable-cbt.py            # Enables Changed Block Tracking without a power cycle
-│   ├── lookup-migration-*.py    # Migration catalog lookups
 │   ├── list-image-catalog.py    # Browse migrated images across all target platforms
-│   ├── append-*-catalog.py      # Migration and deployment catalog appenders
+│   ├── lookup-migration-*.py    # Migration catalog lookups
+│   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
+│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for Azure migration
+│   ├── migrate-azure-vm-vddk.sh # Datastore-direct Azure migration wrapper
+│   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
+│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for OpenStack migration
+│   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
+│   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
-│   ├── openstack-project-facts.py  # Images, flavors, security groups, networks, keys, quotas for one project
-│   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
-│   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
-│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
-│   ├── inspect-ova.py           # OVA inspection
+│   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
+│   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
 │   └── *-vault.sh               # Vault management scripts
 ├── doc/                         # Documentation, workflow diagram, presentation
 ├── examples/                    # OpenStack launch matrix and sample cloud-init data
 ├── playbooks/                   # Ansible playbooks
+│   ├── bootstrap-aws-import.yml
+│   ├── launch-{aws,azure,gcp,openstack}-instance.yml
 │   ├── migrate-{aws,azure,gcp,openstack}-vm.yml
 │   ├── migrate-{azure,openstack}-vm-vddk.yml  # Datastore-direct: no clone, no OVF
-│   ├── launch-{aws,azure,gcp,openstack}-instance.yml
-│   ├── bootstrap-aws-import.yml
 │   ├── stage-v2v.yml            # Installs the one-time DHCP reconfigure script
 │   ├── tasks/migration/         # Per-target task pipelines (aws, azure, gcp, openstack, common)
 │   ├── templates/               # Files installed on guests
@@ -1400,26 +1403,31 @@ that check.
 `playbooks/launch-aws-instance.yml` reads AWS entries in this catalog through
 `bin/lookup-migration-ami.py`, which picks the most recent `status: completed`
 entry for the given `vm_name`; pass `--project <account-id-or-key>` when
-selecting among multiple AWS accounts and `--region <region>` to restrict the
-match to one region (the launch playbook passes its `aws_region`, since an AMI
-cannot be launched in another region). With `--project`, rows recorded for
-that account win; legacy rows without `aws_account_id` are used only when no
-row for the account matches, since they could come from any account.
-OpenStack entries contain an ordered list of
-Glance image IDs, one per source disk, for use by the OpenStack launch
-workflow; `bin/lookup-migration-openstack.py --project <name-or-id> --region <region>` picks the
-newest `completed` migration for one `vm_name` in one project and region, and the launch
-playbook refuses a migration from another project because Glance images and
-Cinder volumes cannot move across projects. GCP entries are resolved the same
-way: `bin/lookup-migration-gcp.py --project <key-or-project-id>` selects the
-newest `completed` migration for one `vm_name` in one project, and the launch
-playbook uses it to derive the project, boot image, and data-disk image names
-unless explicit image names are supplied. If a VM has been migrated more
-than once, the newest migration wins
-unless you override with an explicit `ami_id`. "Newest" compares `migrated_at`
-as a parsed instant, so timestamps with a non-`Z` UTC offset sort correctly,
-and the catalog files and launch dialogs order rows the same way. New writes are fully
-validated; the readers still tolerate rows written before the current schema.
+selecting among multiple AWS accounts and `--region <region>` to restrict
+the match to one region (the launch playbook passes its `aws_region`,
+since an AMI cannot be launched in another region). With `--project`,
+rows recorded for that account win; legacy rows without `aws_account_id`
+are used only when no row for the account matches, since they could come
+from any account. OpenStack entries contain an ordered list of Glance
+image IDs, one per source disk, for use by the OpenStack launch workflow;
+`bin/lookup-migration-openstack.py --project <name-or-id> --region <region>`
+picks the newest `completed` migration for one `vm_name` in one project and
+region, and the launch playbook refuses a migration from another project
+because Glance images and Cinder volumes cannot move across projects. GCP
+entries are resolved the same way: `bin/lookup-migration-gcp.py --project
+<key-or-project-id>` selects the newest `completed` migration for one
+`vm_name` in one project, and the launch playbook uses it to derive the
+project, boot image, and data-disk image names unless explicit image names
+are supplied. Azure entries contain the boot image, data-snapshot IDs, and the
+subscription/resource group for one `vm_name`; `bin/lookup-migration-azure.py
+--project <subscription-or-vault-key>` picks the newest `completed` migration
+for one VM in one subscription, and the launch playbook uses it to derive the
+image and snapshot names unless explicit names are supplied. If a VM has been
+migrated more than once, the newest migration wins unless you override with
+an explicit `ami_id`. "Newest" compares `migrated_at` as a parsed instant,
+so timestamps with a non-`Z` UTC offset sort correctly, and the catalog files
+and launch dialogs order rows the same way. New writes are fully validated;
+the readers still tolerate rows written before the current schema.
 
 ## Azure Migration
 
