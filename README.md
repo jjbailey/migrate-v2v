@@ -13,8 +13,9 @@ a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
 The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
-Runtime artifacts, catalogs, and encrypted vaults live under
-`/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` for vault files,
+Runtime artifacts, catalogs, encrypted vaults, and tools downloaded on demand
+live under `/work/migrate-v2v/` by default. Set
+`MIGRATE_V2V_VAULT_DIR` for vault files,
 `MIGRATE_V2V_CATALOG_DIR` for the catalogs, or `ARTIFACT_ROOT` (playbooks:
 `-e artifact_root=`) for migration run directories to use another directory;
 see [Artifact Root](#artifact-root).
@@ -93,17 +94,20 @@ needs a one-time move; see [Secrets](#secrets) and
   on `PATH`.
 - For the datastore-direct OpenStack and Azure migrations
   ([doc/datastore-direct.md](doc/datastore-direct.md)): `nbdkit`, whose `curl`
-  plugin is the fallback backend. **Install the `vddk` backend too**: nbdkit's
-  `vddk` plugin and a VixDiskLib. It is several times faster (it skips a thin
-  disk's unallocated space, where curl reads every byte of the flat file), and
-  it is the only backend that can read a powered-on VM on VMFS. Some nbdkit
-  packages, Ubuntu's among them, do not include the `vddk` plugin; the doc shows
-  how to build it. It is tested with `libvixDiskLib.so.8.0.3` from
-  [OpenVDDK](https://openvddk.com/), an independent, read-only replacement for
-  VMware's disk library from the creator of V2K Migrate (see its site for
-  availability); VMware's own VDDK works too where you are licensed for it.
-  The playbooks look for OpenVDDK under `/opt/openvddk` by default; the
-  installation instructions support both host and container layouts.
+  plugin is the fallback backend. The `vddk` plugin is an additional
+  requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
+  shows how to build it. When the plugin is present but no disk library loads,
+  preflight downloads the pinned OpenVDDK 0.7.4 user kit to
+  `/work/migrate-v2v/tools/openvddk` by default. This writable path works on a
+  host or in a container using the `/work/migrate-v2v` bind mount; the kit is
+  not bundled in the repository or container image. VDDK skips a thin disk's
+  unallocated space and can read a powered-on VM on VMFS. OpenVDDK is an
+  independent, read-only replacement for VMware's disk library; VMware's own
+  VDDK also works where you are licensed for it. Run
+  `./bin/install-openvddk.py` to install the pinned kit ahead of time; the
+  same script runs automatically from preflight when needed. See
+  [Installing the vddk backend](doc/datastore-direct.md#installing-the-vddk-backend)
+  for `OPENVDDK_INSTALL_DIR` and `OPENVDDK_ARCHIVE` options.
 - `dialog` or `whiptail` is required only for the interactive dialogs
   (`bin/*-dialog.sh`; see [Interactive Dialogs](#interactive-dialogs)) and
   should be available on `PATH`.
@@ -178,16 +182,19 @@ Install the required host tools, then verify them:
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
-python3 -m pip install -r requirements.txt   # into python3 on PATH and Ansible's Python
+python3 -m pip install -r requirements.txt      # into python3 on PATH and Ansible's Python
 ansible --version
 govc version
+./bin/install-ovftool.py                        # optional; prompts to accept Broadcom's terms
 ovftool --version
-qemu-img --version   # OpenStack migrations
-nbdkit --version     # datastore-direct OpenStack migrations
-nbdkit vddk --dump-plugin | grep vddk_library_version   # its faster VixDiskLib backend (recommended)
-gcloud --version     # GCP migrations
-aws --version        # AWS migrations
-command -v dialog || command -v whiptail   # interactive dialogs only
+qemu-img --version                              # OpenStack migrations
+nbdkit --version                                # datastore-direct OpenStack migrations
+./bin/install-openvddk.py                       # optional; auto-installed by datastore-direct preflight
+nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
+gcloud --version                                # GCP migrations
+aws --version                                   # AWS migrations
+az --version                                    # optional; Azure inspection only
+command -v dialog || command -v whiptail        # interactive dialogs only
 ```
 
 Collections installed outside the default path should be installed into the
@@ -546,8 +553,8 @@ not install. On migrated instances, use ordinary `ssh` with an inherited key.
 AWS, Azure, OpenStack, and GCP migrations write their run directories under
 one artifact root, `/work/migrate-v2v` by default, laid out as
 `<artifact-root>/<target>/<vm-name>/<run-id>/` (for example
-`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The root only holds migration
-run directories; vaults and catalogs have their own settings
+`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The workspace also holds tools
+downloaded on demand; vaults and catalogs have their own settings
 (`MIGRATE_V2V_VAULT_DIR`, `MIGRATE_V2V_CATALOG_DIR`).
 
 Change it in whichever way matches how you start the migration:

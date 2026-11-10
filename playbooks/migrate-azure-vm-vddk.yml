@@ -59,7 +59,9 @@
     vddk_backend: auto
     # VixDiskLib directory holding lib64/libvixDiskLib.so.8; empty uses the
     # vddk plugin's built-in default.
-    vddk_libdir: /opt/openvddk
+    vddk_libdir: >-
+      {{ lookup('ansible.builtin.env', 'OPENVDDK_INSTALL_DIR')
+         | default('/work/migrate-v2v/tools/openvddk', true) }}
     # VixDiskLib transports to try, colon-separated.
     vddk_transports: nbdssl
     # vCenter certificate SHA-1 thumbprint; empty reads it in preflight.
