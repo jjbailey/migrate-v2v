@@ -9,7 +9,6 @@
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
 # shellcheck source=launch-dialog-common.sh
 source "$script_dir/launch-dialog-common.sh"
-ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
 MIGRATE_VAULT="$MIGRATE_V2V_VAULT_DIR/${MIGRATE_VAULT##*/}"
 
 VSPHERE_TARGET_VCENTER=$(choose_target "Which source vCenter is this VM on?" "$MIGRATE_V2V_VAULT_DIR/vsphere.yml" vsphere_projects "${VSPHERE_TARGET_VCENTER:-}") || abort

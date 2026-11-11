@@ -16,11 +16,11 @@ The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
 Runtime artifacts, catalogs, encrypted vaults, and tools downloaded on demand
-live under `/work/migrate-v2v/` by default. Set
-`MIGRATE_V2V_VAULT_DIR` for vault files,
-`MIGRATE_V2V_CATALOG_DIR` for the catalogs, or `ARTIFACT_ROOT` (playbooks:
-`-e artifact_root=`) for migration run directories to use another directory;
-see [Artifact Root](#artifact-root).
+live under `/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` or
+`MIGRATE_V2V_CATALOG_DIR` to move vaults or catalogs independently. Dialogs
+derive those directory defaults from `ARTIFACT_ROOT`; direct playbook runs
+accept `-e artifact_root=` for migration run directories. See
+[Artifact Root](#artifact-root).
 Upgrading from a checkout that kept vaults and catalogs in the repository
 needs a one-time move; see [Secrets](#secrets) and
 [Migration Catalog](#migration-catalog).
@@ -908,9 +908,11 @@ unsaved command is left in `${TMPDIR:-/tmp}`. Saving asks for another path if
 the file already exists. Cancelling at any prompt, or pressing Esc, exits with
 "Nothing was run."
 
-The migrate dialogs write `ARTIFACT_ROOT` into the script, defaulting to
-`/work/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
-artifacts belong on another filesystem (see [Artifact Root](#artifact-root)). The shared widgets and the
+The dialogs write `ARTIFACT_ROOT` and the effective vault and catalog paths
+into the generated script. By default, all three paths follow `ARTIFACT_ROOT`
+(which defaults to `/work/migrate-v2v`); set either `MIGRATE_V2V_VAULT_DIR` or
+`MIGRATE_V2V_CATALOG_DIR` to keep that directory elsewhere. See
+[Artifact Root](#artifact-root). The shared widgets and the
 terminal handling live in `bin/launch-dialog-common.sh`; the migration prompts
 and command generation live in `bin/migrate-dialog-common.sh`. Ready-to-run
 examples are collected in

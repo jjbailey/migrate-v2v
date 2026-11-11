@@ -8,9 +8,11 @@
 
 set -euo pipefail
 
-MIGRATE_V2V_CATALOG_DIR=${MIGRATE_V2V_CATALOG_DIR:-/work/migrate-v2v/catalogs}
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
+export ARTIFACT_ROOT
+MIGRATE_V2V_CATALOG_DIR=${MIGRATE_V2V_CATALOG_DIR:-$ARTIFACT_ROOT/catalogs}
 export MIGRATE_V2V_CATALOG_DIR
-MIGRATE_V2V_VAULT_DIR=${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}
+MIGRATE_V2V_VAULT_DIR=${MIGRATE_V2V_VAULT_DIR:-$ARTIFACT_ROOT/vaults}
 export MIGRATE_V2V_VAULT_DIR
 
 # dialog and whiptail both draw on stdout and write the answer on stderr, so
