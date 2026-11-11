@@ -1,5 +1,7 @@
 # migrate-v2v
 
+![migrate-v2v — Snapshot safely. Export or stream. Land natively.](doc/migrate-v2v-splash.svg)
+
 <!-- markdownlint-disable MD013 -->
 
 Migrate a vSphere VM to AWS, Azure, OpenStack, or GCP. The standard migration
