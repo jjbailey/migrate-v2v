@@ -1,4 +1,4 @@
-# migrate-v2v
+![migrate-v2v — Snapshot safely. Export or stream. Land natively.](doc/migrate-v2v-splash.svg)
 
 <!-- markdownlint-disable MD013 -->
 
@@ -13,11 +13,12 @@ a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
 The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
-Runtime artifacts, catalogs, and encrypted vaults live under
-`/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` for vault files,
-`MIGRATE_V2V_CATALOG_DIR` for the catalogs, or `ARTIFACT_ROOT` (playbooks:
-`-e artifact_root=`) for migration run directories to use another directory;
-see [Artifact Root](#artifact-root).
+Runtime artifacts, catalogs, encrypted vaults, and tools downloaded on demand
+live under `/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` or
+`MIGRATE_V2V_CATALOG_DIR` to move vaults or catalogs independently. Dialogs
+derive those directory defaults from `ARTIFACT_ROOT`; direct playbook runs
+accept `-e artifact_root=` for migration run directories. See
+[Artifact Root](#artifact-root).
 Upgrading from a checkout that kept vaults and catalogs in the repository
 needs a one-time move; see [Secrets](#secrets) and
 [Migration Catalog](#migration-catalog).
@@ -30,9 +31,12 @@ needs a one-time move; see [Secrets](#secrets) and
   tested package from Broadcom and install it under
   `/work/migrate-v2v/tools/ovftool-5.1.0`. The script prompts you to accept
   Broadcom's terms before downloading. Standard migration wrappers invoke the
-  installer automatically when `ovftool` is not on `PATH`; the datastore-direct
-  VDDK workflows do not need it. Set `OVFTOOL_INSTALL_DIR` to change the
-  install location. For non-interactive use, review Broadcom's
+  installer automatically when `ovftool` is not on `PATH`. The standard
+  migration playbooks do the same in preflight, including when run directly
+  with `ansible-playbook`; the datastore-direct VDDK workflows do not need it.
+  Set `OVFTOOL_INSTALL_DIR` to change the install location. A direct
+  `ansible-playbook` run cannot answer the installer's license prompt, so
+  review Broadcom's
   [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
   and set `OVFTOOL_ACCEPT_LICENSE=1` to confirm acceptance for that invocation.
   If the portal requires sign-in or its download endpoint changes, download
@@ -86,24 +90,29 @@ needs a one-time move; see [Secrets](#secrets) and
   dependencies used by the installed collections, including `boto3`,
   `pyVmomi`, `openstacksdk`, `google-auth`, `requests`, `PyYAML`, and - for
   Azure - the `azure.azcollection` SDK requirements listed in its own
-  `requirements.txt` (see the note in [requirements.yml](requirements.yml)).
+  `requirements.txt` (see the note in [requirements.yml](requirements.yml) and
+  the version constraints in
+  [requirements-azure-constraints.txt](requirements-azure-constraints.txt)).
   [requirements.txt](requirements.txt) pins `ansible-core` and the rest to
   the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
 - For the datastore-direct OpenStack and Azure migrations
   ([doc/datastore-direct.md](doc/datastore-direct.md)): `nbdkit`, whose `curl`
-  plugin is the fallback backend. **Install the `vddk` backend too**: nbdkit's
-  `vddk` plugin and a VixDiskLib. It is several times faster (it skips a thin
-  disk's unallocated space, where curl reads every byte of the flat file), and
-  it is the only backend that can read a powered-on VM on VMFS. Some nbdkit
-  packages, Ubuntu's among them, do not include the `vddk` plugin; the doc shows
-  how to build it. It is tested with `libvixDiskLib.so.8.0.3` from
-  [OpenVDDK](https://openvddk.com/), an independent, read-only replacement for
-  VMware's disk library from the creator of V2K Migrate (see its site for
-  availability); VMware's own VDDK works too where you are licensed for it.
-  The playbooks look for OpenVDDK under `/opt/openvddk` by default; the
-  installation instructions support both host and container layouts.
+  plugin is the fallback backend. The `vddk` plugin is an additional
+  requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
+  shows how to build it. When the plugin is present but no disk library loads,
+  preflight downloads the pinned OpenVDDK 0.7.4 user kit to
+  `/work/migrate-v2v/tools/openvddk` by default. This writable path works on a
+  host or in a container using the `/work/migrate-v2v` bind mount; the kit is
+  not bundled in the repository or container image. VDDK skips a thin disk's
+  unallocated space and can read a powered-on VM on VMFS. OpenVDDK is an
+  independent, read-only replacement for VMware's disk library; VMware's own
+  VDDK also works where you are licensed for it. Run
+  `./bin/install-openvddk.py` to install the pinned kit ahead of time; the
+  same script runs automatically from preflight when needed. See
+  [Installing the vddk backend](doc/datastore-direct.md#installing-the-vddk-backend)
+  for `OPENVDDK_INSTALL_DIR` and `OPENVDDK_ARCHIVE` options.
 - `dialog` or `whiptail` is required only for the interactive dialogs
   (`bin/*-dialog.sh`; see [Interactive Dialogs](#interactive-dialogs)) and
   should be available on `PATH`.
@@ -178,16 +187,19 @@ Install the required host tools, then verify them:
 
 ```bash
 ansible-galaxy collection install -r requirements.yml
-python3 -m pip install -r requirements.txt   # into python3 on PATH and Ansible's Python
+python3 -m pip install -r requirements.txt      # into python3 on PATH and Ansible's Python
 ansible --version
 govc version
+./bin/install-ovftool.py                        # optional; prompts to accept Broadcom's terms
 ovftool --version
-qemu-img --version   # OpenStack migrations
-nbdkit --version     # datastore-direct OpenStack migrations
-nbdkit vddk --dump-plugin | grep vddk_library_version   # its faster VixDiskLib backend (recommended)
-gcloud --version     # GCP migrations
-aws --version        # AWS migrations
-command -v dialog || command -v whiptail   # interactive dialogs only
+qemu-img --version                              # OpenStack migrations
+nbdkit --version                                # datastore-direct OpenStack migrations
+./bin/install-openvddk.py                       # optional; auto-installed by datastore-direct preflight
+nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
+gcloud --version                                # GCP migrations
+aws --version                                   # AWS migrations
+az --version                                    # optional; Azure inspection only
+command -v dialog || command -v whiptail        # interactive dialogs only
 ```
 
 Collections installed outside the default path should be installed into the
@@ -273,7 +285,7 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     `--project-id`/`--account-id`, account verification, and the same `--force`
     safety guard. Exported AWS credentials win; otherwise the AWS vault under
     `/work/migrate-v2v/vaults/` is used (see
-    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools)).
+    [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
     entries whose managed images or snapshots are gone. It supports `--dry-run`,
@@ -293,6 +305,8 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
+- [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
+  Preparation-only dependency plan for a future Ubuntu 24.04 container
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
@@ -304,35 +318,38 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
 migrate-v2v/
 ├── ansible.cfg                  # Ansible configuration
 ├── bin/                         # Utility scripts
-│   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── ansible-run.sh           # ansible-playbook wrapper that supplies the vault password
-│   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
-│   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
+│   ├── append-*-catalog.py      # Migration and deployment catalog appenders
+│   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
+│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
+│   ├── enable-cbt.py            # Enables Changed Block Tracking without a power cycle
+│   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
+│   ├── inspect-ova.py           # OVA inspection
+│   ├── inspect-vm.py            # Disk manifest from a source VM (datastore-direct)
+│   ├── install-openvddk.py      # Installs the pinned OpenVDDK user kit on demand
+│   ├── install-ovftool.py       # Downloads and installs VMware OVF Tool 5.1.0
 │   ├── launch-{aws,azure,gcp,openstack}-instance.sh  # Environment-aware launch wrappers
 │   ├── launch-*-dialog.sh       # Interactive front ends for the launch wrappers
-│   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
-│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for it
-│   ├── migrate-azure-vm-vddk.sh          # Datastore-direct Azure migration wrapper
-│   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
-│   ├── inspect-vm.py            # Disk manifest from a source VM (datastore-direct)
-│   ├── enable-cbt.py            # Enables Changed Block Tracking without a power cycle
-│   ├── lookup-migration-*.py    # Migration catalog lookups
 │   ├── list-image-catalog.py    # Browse migrated images across all target platforms
-│   ├── append-*-catalog.py      # Migration and deployment catalog appenders
+│   ├── lookup-migration-*.py    # Migration catalog lookups
+│   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
+│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for Azure migration
+│   ├── migrate-azure-vm-vddk.sh # Datastore-direct Azure migration wrapper
+│   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
+│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for OpenStack migration
+│   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
+│   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
-│   ├── openstack-project-facts.py  # Images, flavors, security groups, networks, keys, quotas for one project
-│   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
-│   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
-│   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
-│   ├── inspect-ova.py           # OVA inspection
+│   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
+│   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
 │   └── *-vault.sh               # Vault management scripts
 ├── doc/                         # Documentation, workflow diagram, presentation
 ├── examples/                    # OpenStack launch matrix and sample cloud-init data
 ├── playbooks/                   # Ansible playbooks
+│   ├── bootstrap-aws-import.yml
+│   ├── launch-{aws,azure,gcp,openstack}-instance.yml
 │   ├── migrate-{aws,azure,gcp,openstack}-vm.yml
 │   ├── migrate-{azure,openstack}-vm-vddk.yml  # Datastore-direct: no clone, no OVF
-│   ├── launch-{aws,azure,gcp,openstack}-instance.yml
-│   ├── bootstrap-aws-import.yml
 │   ├── stage-v2v.yml            # Installs the one-time DHCP reconfigure script
 │   ├── tasks/migration/         # Per-target task pipelines (aws, azure, gcp, openstack, common)
 │   ├── templates/               # Files installed on guests
@@ -546,8 +563,8 @@ not install. On migrated instances, use ordinary `ssh` with an inherited key.
 AWS, Azure, OpenStack, and GCP migrations write their run directories under
 one artifact root, `/work/migrate-v2v` by default, laid out as
 `<artifact-root>/<target>/<vm-name>/<run-id>/` (for example
-`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The root only holds migration
-run directories; vaults and catalogs have their own settings
+`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The workspace also holds tools
+downloaded on demand; vaults and catalogs have their own settings
 (`MIGRATE_V2V_VAULT_DIR`, `MIGRATE_V2V_CATALOG_DIR`).
 
 Change it in whichever way matches how you start the migration:
@@ -645,7 +662,8 @@ for OpenStack (`openstack_import_poll_retries` 240 x
 
 GCP imports run concurrently, so when one disk fails the others may still be
 importing. Without a discard they are left to finish, and a resume reuses
-their images. With `discard_failed_artifacts=true` the run cancels them (a
+their images without re-uploading those disks to GCS. With
+`discard_failed_artifacts=true` the run cancels them (a
 best-effort call to the Migrate to Virtual Machines API), waits up to
 `gcp_cancel_poll_retries` (default 120) x `gcp_import_poll_delay` for them to
 stop, removes the import resources, and then deletes the images this attempt
@@ -797,7 +815,7 @@ come from the encrypted runtime vaults - see
 `-e aws_region=...`, `-e vcenter_hostname=...` and friends still work.
 
 `bin/run-playbook.sh` runs the playbook locally and automatically supplies the
-Ansible Vault password from `~/.ssh/dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
+Ansible Vault password from `~/.dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
 an interactive prompt:
 
 ```bash
@@ -876,7 +894,7 @@ What each kind asks:
   Choosing **None** for OpenStack security groups passes an empty list.
 
 Target choices are read from the vault with `ansible-vault view`, using
-`VAULT_PASSWORD_FILE` or `~/.ssh/dib-vault-pass`. If the password file or
+`VAULT_PASSWORD_FILE` or `~/.dib-vault-pass`. If the password file or
 `ansible-vault` is unavailable, the dialog falls back to typing the name; leave
 it blank to let the playbook auto-select a single-entry vault.
 
@@ -888,9 +906,11 @@ unsaved command is left in `${TMPDIR:-/tmp}`. Saving asks for another path if
 the file already exists. Cancelling at any prompt, or pressing Esc, exits with
 "Nothing was run."
 
-The migrate dialogs write `ARTIFACT_ROOT` into the script, defaulting to
-`/work/migrate-v2v`; set `ARTIFACT_ROOT` before starting a dialog when the
-artifacts belong on another filesystem (see [Artifact Root](#artifact-root)). The shared widgets and the
+The dialogs write `ARTIFACT_ROOT` and the effective vault and catalog paths
+into the generated script. By default, all three paths follow `ARTIFACT_ROOT`
+(which defaults to `/work/migrate-v2v`); set either `MIGRATE_V2V_VAULT_DIR` or
+`MIGRATE_V2V_CATALOG_DIR` to keep that directory elsewhere. See
+[Artifact Root](#artifact-root). The shared widgets and the
 terminal handling live in `bin/launch-dialog-common.sh`; the migration prompts
 and command generation live in `bin/migrate-dialog-common.sh`. Ready-to-run
 examples are collected in
@@ -1028,10 +1048,23 @@ Common failures:
 All credentials live in the Ansible-vault-encrypted files under
 `/work/migrate-v2v/vaults/` by default. Set `MIGRATE_V2V_VAULT_DIR` to use
 another directory. The vault password is expected at
-`~/.ssh/dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
+`~/.dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
 <file>`, `--vault-id`, or `VAULT_PASSWORD_FILE` also works; see
-`bin/ansible-run.sh`). Edit (or create) a vault with its helper, which uses the
-same password lookup and falls back to a prompt:
+`bin/ansible-run.sh`). The old default, `~/.ssh/dib-vault-pass`, is still
+read when `~/.dib-vault-pass` is absent, and `bin/ansible-run.sh` warns until
+it is moved:
+
+```bash
+mv "$HOME/.ssh/dib-vault-pass" "$HOME/.dib-vault-pass"
+```
+
+Edit (or create) a vault with its helper, which uses the
+same password lookup and falls back to a prompt. Keep the password file outside
+the repository with owner-only permissions:
+
+```bash
+chmod 600 "$HOME/.dib-vault-pass"
+```
 
 ```bash
 ./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
@@ -1058,14 +1091,21 @@ and run the container with the host directory owner's UID and GID. Create the
 workspace and vault directories with mode `700`, as above (the vault helpers
 create theirs that way), and keep vault files at mode `600`, so a different
 non-root container user cannot read or write them. Directories the playbooks
-and catalog tools create below the workspace follow the process umask. The
-container also needs the vault password (`~/.ssh/dib-vault-pass`, or
-`VAULT_PASSWORD_FILE` pointing at a mounted file) and `ansible-vault`, either
-on `PATH` or under `DIB7_VENV_BIN`.
+and catalog tools create below the workspace follow the process umask.
+
+For the vault password, use a separate read-only file mount. Mount the host's
+`$HOME/.dib-vault-pass` at `/run/secrets/migrate-v2v-vault-password` in the
+container and set `VAULT_PASSWORD_FILE` to that container path. This works
+with a direct Docker bind mount or a file-backed Compose secret; Swarm can
+provide a native Docker secret at the same path. The variable contains only
+the path, not the password. Do not pass the password as an environment value
+or build argument, bake it into the image, or put it in the shared workspace.
+For interactive runs, the existing vault prompt also works. The container
+needs `ansible-vault`, either on `PATH` or under `DIB7_VENV_BIN`.
 
 The helpers are symlinks to `bin/edit-vault.sh`; set `VAULT=<path>` and run
 `bin/edit-vault.sh` for any other file. Plain
-`ansible-vault edit "${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/aws.yml" --vault-password-file ~/.ssh/dib-vault-pass`
+`ansible-vault edit "${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/aws.yml" --vault-password-file ~/.dib-vault-pass`
 works too.
 
 See [doc/vaults.md](doc/vaults.md) for the vault file layouts in one place.
@@ -1393,26 +1433,31 @@ that check.
 `playbooks/launch-aws-instance.yml` reads AWS entries in this catalog through
 `bin/lookup-migration-ami.py`, which picks the most recent `status: completed`
 entry for the given `vm_name`; pass `--project <account-id-or-key>` when
-selecting among multiple AWS accounts and `--region <region>` to restrict the
-match to one region (the launch playbook passes its `aws_region`, since an AMI
-cannot be launched in another region). With `--project`, rows recorded for
-that account win; legacy rows without `aws_account_id` are used only when no
-row for the account matches, since they could come from any account.
-OpenStack entries contain an ordered list of
-Glance image IDs, one per source disk, for use by the OpenStack launch
-workflow; `bin/lookup-migration-openstack.py --project <name-or-id> --region <region>` picks the
-newest `completed` migration for one `vm_name` in one project and region, and the launch
-playbook refuses a migration from another project because Glance images and
-Cinder volumes cannot move across projects. GCP entries are resolved the same
-way: `bin/lookup-migration-gcp.py --project <key-or-project-id>` selects the
-newest `completed` migration for one `vm_name` in one project, and the launch
-playbook uses it to derive the project, boot image, and data-disk image names
-unless explicit image names are supplied. If a VM has been migrated more
-than once, the newest migration wins
-unless you override with an explicit `ami_id`. "Newest" compares `migrated_at`
-as a parsed instant, so timestamps with a non-`Z` UTC offset sort correctly,
-and the catalog files and launch dialogs order rows the same way. New writes are fully
-validated; the readers still tolerate rows written before the current schema.
+selecting among multiple AWS accounts and `--region <region>` to restrict
+the match to one region (the launch playbook passes its `aws_region`,
+since an AMI cannot be launched in another region). With `--project`,
+rows recorded for that account win; legacy rows without `aws_account_id`
+are used only when no row for the account matches, since they could come
+from any account. OpenStack entries contain an ordered list of Glance
+image IDs, one per source disk, for use by the OpenStack launch workflow;
+`bin/lookup-migration-openstack.py --project <name-or-id> --region <region>`
+picks the newest `completed` migration for one `vm_name` in one project and
+region, and the launch playbook refuses a migration from another project
+because Glance images and Cinder volumes cannot move across projects. GCP
+entries are resolved the same way: `bin/lookup-migration-gcp.py --project
+<key-or-project-id>` selects the newest `completed` migration for one
+`vm_name` in one project, and the launch playbook uses it to derive the
+project, boot image, and data-disk image names unless explicit image names
+are supplied. Azure entries contain the boot image, data-snapshot IDs, and the
+subscription/resource group for one `vm_name`; `bin/lookup-migration-azure.py
+--project <subscription-or-vault-key>` picks the newest `completed` migration
+for one VM in one subscription, and the launch playbook uses it to derive the
+image and snapshot names unless explicit names are supplied. If a VM has been
+migrated more than once, the newest migration wins unless you override with
+an explicit `ami_id`. "Newest" compares `migrated_at` as a parsed instant,
+so timestamps with a non-`Z` UTC offset sort correctly, and the catalog files
+and launch dialogs order rows the same way. New writes are fully validated;
+the readers still tolerate rows written before the current schema.
 
 ## Azure Migration
 

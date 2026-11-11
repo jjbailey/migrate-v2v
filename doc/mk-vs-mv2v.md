@@ -67,7 +67,7 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 - **migrate-v2v:** The README describes running on the Ansible control host,
   and the repository root currently has no Dockerfile. It documents
   `/work/migrate-v2v` as the shared bind mount location for artifacts,
-  catalogs, and vaults if containerized. ([README][mv-readme], [repository
+  catalogs, vaults, and on-demand tools if containerized. ([README][mv-readme], [repository
   root][mv-tree])
 
 ## VMware disk library and other external tools
@@ -76,7 +76,9 @@ summarizes documented scope and behavior; it is not a performance benchmark.
   Broadcom and accepted under its EULA. ([README: installing VDDK][mk-vddk])
 - **migrate-v2v:** The standard export path requires OVF Tool 5.1.0, which is
   not redistributed. Datastore-direct supports OpenVDDK 8.0.3, an independent
-  read-only replacement; a properly licensed VMware VDDK can also be used.
+  read-only replacement. `bin/install-openvddk.py` installs the pinned kit on
+  demand; it is not bundled in the repository or container image. A properly
+  licensed VMware VDDK can also be used.
   ([README: prerequisites][mv-prereq], [datastore-direct: installing
   VDDK][mv-dd-vddk])
 

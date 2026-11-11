@@ -5,7 +5,7 @@
 # Run an Ansible playbook from the repository using the local host tooling.
 # Usage: ./bin/run-playbook.sh playbooks/<playbook.yml> [ansible-playbook args]
 #
-# bin/ansible-run.sh supplies the vault password from ~/.ssh/dib-vault-pass,
+# bin/ansible-run.sh supplies the vault password from ~/.dib-vault-pass,
 # VAULT_PASSWORD_FILE, or an interactive prompt.
 
 set -euo pipefail

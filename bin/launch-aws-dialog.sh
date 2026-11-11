@@ -318,6 +318,7 @@ say "Launch summary for $VM_NAME
 file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
 {
     printf '#!/bin/bash\n'
+    printf 'export ARTIFACT_ROOT=%s\n' "$(quote "$ARTIFACT_ROOT")"
     printf 'export MIGRATE_V2V_VAULT_DIR=%s\n' "$(quote "$MIGRATE_V2V_VAULT_DIR")"
     printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export AWS_TARGET_PROJECT=%s\n' "$(quote "$AWS_TARGET_PROJECT")"

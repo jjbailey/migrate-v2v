@@ -52,7 +52,8 @@
     vddk_relative: "{{ openstack_convert_disk.path | regex_replace('^\\[[^\\]]+\\]\\s*(.*)\\.vmdk$', '\\1') }}-flat.vmdk"
     vddk_password_arg: "password=+{{ vddk_socket_dir }}/password-{{ openstack_convert_disk.index }}"
     vddk_args_vddk: >-
-      {{ (['libdir=' ~ vddk_libdir] if (vddk_libdir | length > 0) else [])
+      {{ (['libdir=' ~ (vddk_libdir_effective | default(vddk_libdir))]
+          if ((vddk_libdir_effective | default(vddk_libdir)) | length > 0) else [])
          + ['config=' ~ vddk_socket_dir ~ '/config-' ~ openstack_convert_disk.index,
             'server=' ~ vcenter_hostname,
             'user=' ~ vcenter_username,

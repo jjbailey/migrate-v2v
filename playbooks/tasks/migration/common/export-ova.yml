@@ -159,10 +159,12 @@
     - not (migration_resume_mode | default(false) | bool)
 
 - name: Export the clone to the target artifact format
-  ansible.builtin.command: >-
-    ovftool --acceptAllEulas {{ '--noSSLVerify' if not (validate_certs | bool) else '' }}
-    "{{ vcenter_export_url }}"
-    "{{ ovf_local_path if (export_format | default('ova')) == 'ovf' else ova_local_path }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ [ovftool_bin, '--acceptAllEulas']
+         + (['--noSSLVerify'] if not (validate_certs | bool) else [])
+         + [vcenter_export_url,
+            ovf_local_path if (export_format | default('ova')) == 'ovf' else ova_local_path] }}
   no_log: true
 
 - name: Inspect the exported artifact

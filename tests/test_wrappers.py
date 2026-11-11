@@ -35,7 +35,7 @@ class WrapperTestCase(unittest.TestCase):
         stub.write_text(STUB)
         stub.chmod(0o755)
         self.argv_file = self.tmp / "argv.json"
-        # An empty HOME has no ~/.ssh/dib-vault-pass, so ansible-run.sh
+        # An empty HOME has no ~/.dib-vault-pass, so ansible-run.sh
         # appends --ask-vault-pass, which the stub ignores.
         home = self.tmp / "home"
         home.mkdir()
@@ -338,6 +338,46 @@ class ExecWithStdinEnvTests(unittest.TestCase):
         self.assertEqual(self.run_helper("", "1BAD", "--", "true").returncode, 2)
         self.assertEqual(self.run_helper("", "A", "--").returncode, 2)
         self.assertEqual(self.run_helper("", "--", "true").returncode, 2)
+
+class VaultPasswordFileTests(WrapperTestCase):
+    """Which vault password ansible-run.sh hands to ansible-playbook."""
+
+    def write_password(self, relative):
+        path = Path(self.base_env["HOME"]) / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("secret\n")
+        return str(path)
+
+    def vault_args(self, env=None):
+        result = self.run_wrapper("ansible-run.sh", env, args=["playbooks/x.yml"])
+        return self.recorded_argv()[1:], result.stderr
+
+    def test_no_password_file_prompts(self):
+        self.assertEqual(self.vault_args()[0], ["--ask-vault-pass"])
+
+    def test_default_file(self):
+        path = self.write_password(".dib-vault-pass")
+        self.assertEqual(self.vault_args()[0], ["--vault-password-file", path])
+
+    def test_default_file_wins_over_the_old_location(self):
+        path = self.write_password(".dib-vault-pass")
+        self.write_password(".ssh/dib-vault-pass")
+        args, stderr = self.vault_args()
+        self.assertEqual(args, ["--vault-password-file", path])
+        self.assertNotIn("old vault password location", stderr)
+
+    def test_old_location_is_still_read_with_a_warning(self):
+        path = self.write_password(".ssh/dib-vault-pass")
+        args, stderr = self.vault_args()
+        self.assertEqual(args, ["--vault-password-file", path])
+        self.assertIn("old vault password location", stderr)
+
+    def test_environment_wins_over_both(self):
+        self.write_password(".dib-vault-pass")
+        self.write_password(".ssh/dib-vault-pass")
+        path = self.write_password("elsewhere/pass")
+        args = self.vault_args({"VAULT_PASSWORD_FILE": path})[0]
+        self.assertEqual(args, ["--vault-password-file", path])
 
 if __name__ == "__main__":
     unittest.main()

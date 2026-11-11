@@ -43,7 +43,8 @@
     azure_vddk_relative: "{{ azure_convert_disk.path | regex_replace('^\\[[^\\]]+\\]\\s*(.*)\\.vmdk$', '\\1') }}-flat.vmdk"
     azure_vddk_password_arg: "password=+{{ vddk_socket_dir }}/password-{{ azure_convert_disk.index }}"
     azure_vddk_args_vddk: >-
-      {{ (['libdir=' ~ vddk_libdir] if (vddk_libdir | length > 0) else [])
+      {{ (['libdir=' ~ (vddk_libdir_effective | default(vddk_libdir))]
+          if ((vddk_libdir_effective | default(vddk_libdir)) | length > 0) else [])
          + ['config=' ~ vddk_socket_dir ~ '/config-' ~ azure_convert_disk.index,
             'server=' ~ vcenter_hostname,
             'user=' ~ vcenter_username,

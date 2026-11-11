@@ -21,11 +21,8 @@
       {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/vsphere.yml must define the vCenter and GOVC credentials.
   no_log: true
 
-- name: Check ovftool
-  ansible.builtin.command: which ovftool
-  register: ovftool_check
-  failed_when: ovftool_check.rc != 0
-  changed_when: false
+- name: Ensure OVF Tool is available
+  ansible.builtin.import_tasks: ensure-ovftool.yml
 
 - name: Check govc
   ansible.builtin.command: which "{{ govc_bin }}"

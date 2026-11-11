@@ -61,12 +61,21 @@
           Service-side detail: {{ gcp_import_job_diagnostics.stdout | default('none reported') }}
           To retry, re-run the playbook; stale jobs will be cleaned up automatically.
       when: gcp_import_job_state.stdout.strip() != 'SUCCEEDED'
+
+    # The import resource is deleted below, taking its job state with it. The
+    # marker lets a resume after a later failure still tell this image apart
+    # from one a failed import left behind (see stage-disk.yml).
+    - name: Mark this disk's import as succeeded for a resume
+      ansible.builtin.copy:
+        content: "{{ gcp_import_job_state.stdout.strip() }}\n"
+        dest: "{{ migration_run_dir }}/{{ gcp_disk.image }}.imported"
+        mode: "0644"
   when: gcp_disk.image not in gcp_reused_image_names
 
 # A reused image's import resource may be left over from the attempt that
-# created it, if that attempt failed while the import was still running; its
-# image existing means the job is done, so it is removed here as well. Absent
-# resources are ignored.
+# created it, if that attempt failed while the import was still running;
+# stage-disk.yml reuses it only after that job reached SUCCEEDED, so it is
+# removed here as well. Absent resources are ignored.
 - name: Remove the completed M2VM image-import resource
   ansible.builtin.command:
     argv:

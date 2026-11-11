@@ -84,7 +84,7 @@ Any Ansible arguments after the wrapper's own are passed through. The
 datastore-direct settings are named `vddk_<name>` and shared by both targets;
 the OpenStack playbook still accepts the older `openstack_vddk_<name>`
 spelling. Other playbook settings: `vddk_libdir` (defaults to
-`/opt/openvddk`; set empty to use the plugin's built-in default),
+`/work/migrate-v2v/tools/openvddk`; set empty to use the plugin's built-in default),
 `vddk_transports` (default `nbdssl`), and
 `vddk_thumbprint` (empty reads the vCenter certificate in preflight;
 with `validate_certs` true the certificate must verify against this host's CAs
@@ -219,39 +219,45 @@ done
 sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --variable=plugindir nbdkit 2>/dev/null || echo /usr/lib/x86_64-linux-gnu/nbdkit/plugins)/"
 ```
 
-Install the OpenVDDK kit under `/opt/openvddk`, retaining its license and
-notice files. The kit's library is under `lib/`; nbdkit looks under `lib64/`,
-so add a link there. The playbooks pass this directory as `libdir`, and use the
-same layout on a host or in a container image:
+The migration preflight installs OpenVDDK automatically when nbdkit's VDDK
+plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.4
+user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.4),
+checks its SHA-256, retains the kit's license and notice files, and installs it
+under `/work/migrate-v2v/tools/openvddk` by default. A host and a container can
+share that install through the existing `/work/migrate-v2v` bind mount. The kit
+is not stored in this repository or included in a container image. Set
+`OPENVDDK_INSTALL_DIR` to choose a different writable location, or
+`OPENVDDK_ARCHIVE` to install from a previously downloaded kit.
+The pinned kit supports Linux x86-64 with glibc 2.28 or newer.
+`vddk_backend=auto` and `vddk_backend=vddk` may install it; explicitly selecting
+`vddk_backend=curl` skips the VDDK probe and download.
+
+To install it before the first migration, run:
 
 ```bash
-sudo install -d /opt/openvddk/lib64
-sudo ln -sfn ../lib/libvixDiskLib.so.8 /opt/openvddk/lib64/libvixDiskLib.so.8
-nbdkit vddk libdir=/opt/openvddk --dump-plugin | grep vddk_library_version
+./bin/install-openvddk.py
+nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
 ```
 
-If OpenVDDK is already installed in `/usr/local/lib` on a non-containerized
-control host, point the same link at that installation instead:
+The OpenVDDK kit's library is under `lib/`; nbdkit looks under `lib64/`, so
+the installer adds the required relative link there. Existing installations in
+other locations are still usable by setting `OPENVDDK_INSTALL_DIR` to that
+`libdir`. In a container, keep the nbdkit VDDK plugin in the image; the
+installer supplies only the library and its kit files.
 
-```bash
-sudo install -d /opt/openvddk/lib64
-sudo ln -sfn /usr/local/lib/libvixDiskLib.so.8 /opt/openvddk/lib64/libvixDiskLib.so.8
-```
-
-The library tested is `libvixDiskLib.so.8.0.3` from
-[OpenVDDK](https://openvddk.com/), an independent, read-only replacement for
-VMware's disk library (HotAdd, NBDSSL, and NBD transports; see its site for
-availability). VMware's own VDDK, where you are licensed for it, works the same
+The library tested is `libvixDiskLib.so.8.0.3` from OpenVDDK, an independent,
+read-only replacement for VMware's disk library (HotAdd, NBDSSL, and NBD
+transports). VMware's own VDDK, where you are licensed for it, works the same
 way through `libdir`.
 
 With the OpenVDDK build that supports `OpenVDDK.nbd.sessions`, each disk uses
 **two parallel NFC sessions** over NBD/NBDSSL rather than the library's default
 of one. The conversion task writes `OpenVDDK.nbd.sessions = "2"` to a private
 per-disk configuration file and passes it to nbdkit's VDDK plugin with `config=`.
-This requires the new OpenVDDK library to be installed in the selected `libdir`;
-the playbook does not download or replace it. VMware's library does not implement
-this OpenVDDK-specific setting. The curl fallback and local-file tests are
-unchanged.
+This requires the OpenVDDK library to be installed in the selected `libdir`;
+the migration preflight installs it when it is missing. VMware's library does
+not implement this OpenVDDK-specific setting. The curl fallback and local-file
+tests are unchanged.
 
 ## CBT (Changed Block Tracking)
 
