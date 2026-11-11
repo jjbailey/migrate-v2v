@@ -95,6 +95,34 @@ class VaultCommonTests(unittest.TestCase):
         self.assertEqual(vault_common.match_project(None, "lab", ()), (None, None))
         self.assertEqual(vault_common.match_project(projects, None, ()), (None, None))
 
+    def password_file_used(self, home, env=None):
+        run = mock.Mock(return_value=SimpleNamespace(returncode=0, stdout="{}"))
+        with mock.patch.dict(os.environ, env or {}, clear=True), \
+                mock.patch.object(vault_common.Path, "home", return_value=Path(home)), \
+                mock.patch.object(vault_common, "ansible_vault_bin", return_value="ansible-vault"), \
+                mock.patch.object(vault_common.subprocess, "run", run):
+            vault_common.read_vault("v.yml")
+        command = run.call_args.args[0]
+        if "--vault-password-file" not in command:
+            return None
+        return command[command.index("--vault-password-file") + 1]
+
+    def test_read_vault_password_file_order(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.assertIsNone(self.password_file_used(home))
+            legacy = Path(home, ".ssh/dib-vault-pass")
+            legacy.parent.mkdir()
+            legacy.write_text("x")
+            self.assertEqual(self.password_file_used(home), str(legacy))
+            default = Path(home, ".dib-vault-pass")
+            default.write_text("x")
+            self.assertEqual(self.password_file_used(home), str(default))
+            explicit = Path(home, "explicit")
+            explicit.write_text("x")
+            self.assertEqual(
+                self.password_file_used(home, {"VAULT_PASSWORD_FILE": str(explicit)}),
+                str(explicit))
+
 @unittest.skipIf(reconcile_aws is None, "needs boto3")
 class AwsReconcileCredentialTests(CleanEnvironment):
     PROJECTS = {"lab": {"aws_account_id": "111", "aws_access_key_id": "AK",

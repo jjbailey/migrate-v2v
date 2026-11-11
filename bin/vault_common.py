@@ -35,8 +35,10 @@ def ansible_vault_bin():
 def read_vault(vault):
     """Decrypt a vault, using the configured or default password file."""
     command = [ansible_vault_bin(), "view", str(vault)]
+    # ~/.ssh/dib-vault-pass is the old default location, kept as a fallback.
     for passfile in (os.environ.get("VAULT_PASSWORD_FILE"),
-                     str(Path.home() / ".dib-vault-pass")):
+                     str(Path.home() / ".dib-vault-pass"),
+                     str(Path.home() / ".ssh/dib-vault-pass")):
         if passfile and Path(passfile).is_file() and Path(passfile).stat().st_size:
             command += ["--vault-password-file", passfile]
             break

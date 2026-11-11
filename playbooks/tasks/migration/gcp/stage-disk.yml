@@ -14,7 +14,7 @@
       - describe
       - "{{ gcp_disk.image }}"
       - "--project={{ gcp_project }}"
-      - "--format=value(selfLink)"
+      - "--format=value(status)"
   environment: "{{ gcp_gcloud_env }}"
   register: gcp_existing_image_check
   changed_when: false
@@ -22,12 +22,137 @@
     gcp_existing_image_check.rc != 0 and
     (gcp_existing_image_check.stderr | lower) is not search(gcp_absent_resource_pattern)
 
-- name: Record an existing completed image as reusable during resume
-  ansible.builtin.set_fact:
-    gcp_reused_image_names: "{{ gcp_reused_image_names + [gcp_disk.image] }}"
+# On resume, an image that exists is not proof of a completed import: a failed
+# import can leave an image behind, and cleanup.yml leaves running imports to
+# finish. An image is reused only when it is READY and its import is known to
+# have succeeded, either from the import resource itself or from the marker
+# finish-import.yml writes once the resource is gone. Anything else is this
+# run's own unusable leftover (the name carries the run id) and is replaced.
+- name: Decide whether an earlier attempt's image can be reused
   when:
     - migration_resume_mode | bool
     - gcp_existing_image_check.rc == 0
+  block:
+    - name: Check for this disk's import success marker
+      ansible.builtin.stat:
+        path: "{{ migration_run_dir }}/{{ gcp_disk.image }}.imported"
+      register: gcp_import_marker
+
+    - name: Wait for an earlier attempt's import of this disk to finish
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - migration
+          - image-imports
+          - describe
+          - "{{ gcp_disk.image }}"
+          - "--location={{ gcp_import_location }}"
+          - "--project={{ gcp_project }}"
+          - "--format=value(recentImageImportJobs[0].state)"
+      environment: "{{ gcp_gcloud_env }}"
+      register: gcp_prior_import_state
+      until: >-
+        (gcp_prior_import_state.rc == 0 and
+         gcp_prior_import_state.stdout.strip() in ['SUCCEEDED', 'FAILED', 'CANCELLED'])
+        or (gcp_prior_import_state.rc != 0 and
+            (gcp_prior_import_state.stderr | lower) is search(gcp_absent_resource_pattern))
+      retries: "{{ gcp_import_poll_retries | int }}"
+      delay: "{{ gcp_import_poll_delay | int }}"
+      changed_when: false
+      failed_when: >-
+        gcp_prior_import_state.rc != 0 and
+        (gcp_prior_import_state.stderr | lower) is not search(gcp_absent_resource_pattern)
+
+    # failed_when overrides an exhausted until, so a timeout lands here.
+    # Replacing the image now could race the import still writing it.
+    - name: Stop if the earlier import is still running
+      ansible.builtin.fail:
+        msg: >-
+          The earlier M2VM import of {{ gcp_disk.image }} is still
+          '{{ gcp_prior_import_state.stdout | trim }}' after the poll window.
+          Resume again once it finishes.
+      when:
+        - gcp_prior_import_state.rc == 0
+        - gcp_prior_import_state.stdout.strip() not in ['SUCCEEDED', 'FAILED', 'CANCELLED']
+
+    - name: Note whether the earlier import is known to have succeeded
+      ansible.builtin.set_fact:
+        gcp_prior_import_succeeded: >-
+          {{ (gcp_prior_import_state.rc == 0 and
+              gcp_prior_import_state.stdout.strip() == 'SUCCEEDED')
+             or (gcp_prior_import_state.rc != 0 and gcp_import_marker.stat.exists) }}
+
+    - name: Wait for the existing image to leave PENDING
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - images
+          - describe
+          - "{{ gcp_disk.image }}"
+          - "--project={{ gcp_project }}"
+          - "--format=value(status)"
+      environment: "{{ gcp_gcloud_env }}"
+      register: gcp_existing_image_status
+      until: >-
+        (gcp_existing_image_status.rc == 0 and
+         gcp_existing_image_status.stdout.strip() != 'PENDING')
+        or (gcp_existing_image_status.rc != 0 and
+            (gcp_existing_image_status.stderr | lower) is search(gcp_absent_resource_pattern))
+      retries: "{{ gcp_image_lookup_retries | int }}"
+      delay: "{{ gcp_image_lookup_delay | int }}"
+      changed_when: false
+      failed_when: >-
+        gcp_existing_image_status.rc != 0 and
+        (gcp_existing_image_status.stderr | lower) is not search(gcp_absent_resource_pattern)
+      when: gcp_prior_import_succeeded | bool
+
+    - name: Record an existing completed image as reusable during resume
+      ansible.builtin.set_fact:
+        gcp_reused_image_names: "{{ gcp_reused_image_names + [gcp_disk.image] }}"
+      when:
+        - gcp_prior_import_succeeded | bool
+        - gcp_existing_image_status.rc == 0
+        - gcp_existing_image_status.stdout.strip() == 'READY'
+
+    - name: Report an earlier attempt's image that cannot be reused
+      ansible.builtin.debug:
+        msg: >-
+          GCP image {{ gcp_disk.image }} from an earlier attempt is not a
+          completed import (image status
+          '{{ (gcp_existing_image_status.stdout | default(gcp_existing_image_check.stdout)) | trim }}',
+          import state
+          '{{ gcp_prior_import_state.stdout | trim if gcp_prior_import_state.rc == 0 else 'none' }}',
+          success marker {{ 'present' if gcp_import_marker.stat.exists else 'absent' }});
+          replacing it with a fresh import.
+      when: gcp_disk.image not in gcp_reused_image_names
+
+    - name: Recheck whether the unusable image still exists
+      # The wait above may have run while the image was being removed.
+      ansible.builtin.command:
+        argv:
+          - gcloud
+          - compute
+          - images
+          - describe
+          - "{{ gcp_disk.image }}"
+          - "--project={{ gcp_project }}"
+          - "--format=value(status)"
+      environment: "{{ gcp_gcloud_env }}"
+      register: gcp_existing_image_recheck
+      changed_when: false
+      failed_when: >-
+        gcp_existing_image_recheck.rc != 0 and
+        (gcp_existing_image_recheck.stderr | lower) is not search(gcp_absent_resource_pattern)
+      when: gcp_disk.image not in gcp_reused_image_names
+
+    - name: Use the recheck for the replacement steps below
+      # A separate register keeps a skipped recheck from clobbering the
+      # first check, which the replacement steps read.
+      ansible.builtin.set_fact:
+        gcp_existing_image_check: "{{ gcp_existing_image_recheck }}"
+      when: gcp_disk.image not in gcp_reused_image_names
 
 - name: Report reuse of an existing completed image
   ansible.builtin.debug:
@@ -87,6 +212,7 @@
   when:
     - gcp_existing_image_check.rc == 0
     - gcp_disk.image not in gcp_reused_image_names
+    - not (migration_resume_mode | bool)
     - not (gcp_replace_existing_image | bool)
 
 - name: Delete the existing image when replacement is enabled
@@ -104,7 +230,7 @@
   when:
     - gcp_existing_image_check.rc == 0
     - gcp_disk.image not in gcp_reused_image_names
-    - gcp_replace_existing_image | bool
+    - (gcp_replace_existing_image | bool) or (migration_resume_mode | bool)
 
 - name: Wait for the existing image deletion to complete
   ansible.builtin.command:
@@ -130,5 +256,5 @@
   when:
     - gcp_existing_image_check.rc == 0
     - gcp_disk.image not in gcp_reused_image_names
-    - gcp_replace_existing_image | bool
+    - (gcp_replace_existing_image | bool) or (migration_resume_mode | bool)
 

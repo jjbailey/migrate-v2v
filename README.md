@@ -1048,7 +1048,15 @@ All credentials live in the Ansible-vault-encrypted files under
 another directory. The vault password is expected at
 `~/.dib-vault-pass` (any of `--ask-vault-pass`, `--vault-password-file
 <file>`, `--vault-id`, or `VAULT_PASSWORD_FILE` also works; see
-`bin/ansible-run.sh`). Edit (or create) a vault with its helper, which uses the
+`bin/ansible-run.sh`). The old default, `~/.ssh/dib-vault-pass`, is still
+read when `~/.dib-vault-pass` is absent, and `bin/ansible-run.sh` warns until
+it is moved:
+
+```bash
+mv "$HOME/.ssh/dib-vault-pass" "$HOME/.dib-vault-pass"
+```
+
+Edit (or create) a vault with its helper, which uses the
 same password lookup and falls back to a prompt. Keep the password file outside
 the repository with owner-only permissions:
 

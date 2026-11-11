@@ -13,7 +13,9 @@
 #   2. --vault-password-file $VAULT_PASSWORD_FILE, if that env var points at
 #      a non-empty file (the value is a path, not the secret itself)
 #   3. --vault-password-file ~/.dib-vault-pass, if that file exists
-#   4. --ask-vault-pass (interactive prompt)
+#   4. --vault-password-file ~/.ssh/dib-vault-pass, the old default location,
+#      with a warning to move it
+#   5. --ask-vault-pass (interactive prompt)
 set -euo pipefail
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
@@ -59,6 +61,7 @@ case "$playbook_name" in
 esac
 
 DEFAULT_VAULT_PASSWORD_FILE="$HOME/.dib-vault-pass"
+LEGACY_VAULT_PASSWORD_FILE="$HOME/.ssh/dib-vault-pass"
 
 ARGS=("$@")
 has_vault_option=false
@@ -80,6 +83,10 @@ elif [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "${VAULT_PASSWORD_FILE}" ] ; then
     ARGS+=("--vault-password-file" "${VAULT_PASSWORD_FILE}")
 elif [ -s "${DEFAULT_VAULT_PASSWORD_FILE}" ] ; then
     ARGS+=("--vault-password-file" "${DEFAULT_VAULT_PASSWORD_FILE}")
+elif [ -s "${LEGACY_VAULT_PASSWORD_FILE}" ] ; then
+    echo "ansible-run: using the old vault password location ${LEGACY_VAULT_PASSWORD_FILE};" \
+        "move it to ${DEFAULT_VAULT_PASSWORD_FILE}" >&2
+    ARGS+=("--vault-password-file" "${LEGACY_VAULT_PASSWORD_FILE}")
 else
     ARGS+=("--ask-vault-pass")
 fi
