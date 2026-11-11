@@ -63,14 +63,14 @@ say "$summary" 16
 file=$(mktemp "${TMPDIR:-/tmp}/${DIALOG_NAME}.XXXXXX")
 {
     printf '#!/bin/bash\n'
+    printf 'export ARTIFACT_ROOT=%s\n' "$(quote "$ARTIFACT_ROOT")"
     printf 'export MIGRATE_V2V_VAULT_DIR=%s\n' "$(quote "$MIGRATE_V2V_VAULT_DIR")"
     printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
-    printf 'export VSPHERE_TARGET_VCENTER=%s\n' "$(quote "$VSPHERE_TARGET_VCENTER")"
     printf 'export VCENTER_DATACENTER=%s\n' "$(quote "$VCENTER_DATACENTER")"
+    printf 'export VSPHERE_TARGET_VCENTER=%s\n' "$(quote "$VSPHERE_TARGET_VCENTER")"
     printf 'export %s=%s\n' "$MIGRATE_TARGET_VAR" "$(quote "$target_value")"
     printf 'export VALIDATE_CERTS=%s\n' "$(quote "$VALIDATE_CERTS")"
-    printf 'export ARTIFACT_ROOT=%s\n' "$(quote "$ARTIFACT_ROOT")"
     printf 'export QUIESCE_SNAPSHOT=%s\n' "$(quote "$QUIESCE_SNAPSHOT")"
     [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || printf 'export COMPRESS=%s\n' "$(quote "$COMPRESS")"
     printf '%s\n' "$(quote "$script_dir/$MIGRATE_WRAPPER")"
