@@ -40,6 +40,7 @@ if '--inputbox' in args:
         'SSH key pair name': 'cloud',
         'OpenStack network name': 'Ext-Net',
         'Network UUID': '',
+        'Custom NIC definitions': os.environ.get('TEST_NICS', ''),
     }
     value = next((value for name, value in values.items() if name in prompt), None)
     if value is None and 'Which ' in prompt:
@@ -171,6 +172,11 @@ class LaunchDialogTests(unittest.TestCase):
         self.assertEqual(extra["openstack_security_groups"], [])
         self.assertEqual(extra["openstack_network"], "Ext-Net")
         self.assertNotIn("openstack_nics", extra)
+
+    def test_openstack_custom_nics_reach_the_command(self):
+        nics = '[{"net-id":"abc"}]'
+        files = self.run_dialog("openstack", TEST_NICS=nics)
+        self.assertIn(f"export OS_NICS_JSON='{nics}'", files[0].read_text())
 
     def test_openstack_preserved_macs_require_a_security_group(self):
         # Preserved MACs use pre-created ports, which the playbook builds only

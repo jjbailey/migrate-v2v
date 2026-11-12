@@ -99,6 +99,23 @@ else
     AZURE_SSH_KEY_NAME=$picked_key
 fi
 
+# Optional local SSH public key file that overrides the registered key resource.
+AZURE_SSH_KEY_FILE=${AZURE_SSH_KEY_FILE:-}
+key_file_default=no
+[ -n "$AZURE_SSH_KEY_FILE" ] && key_file_default=yes
+if yesno "Inject an additional SSH public key from a local file?\\n\\nThis overrides the registered Azure key resource $AZURE_SSH_KEY_NAME for the admin user $AZURE_ADMIN_USERNAME." "$key_file_default" ; then
+    while : ; do
+        AZURE_SSH_KEY_FILE=$(input "SSH public key file:" "$AZURE_SSH_KEY_FILE") || abort
+        [ -r "$AZURE_SSH_KEY_FILE" ] && {
+            AZURE_SSH_KEY_FILE=$(realpath -- "$AZURE_SSH_KEY_FILE")
+            break
+        }
+        bad "That file is not readable: $AZURE_SSH_KEY_FILE" || true
+    done
+else
+    AZURE_SSH_KEY_FILE=""
+fi
+
 say "Launch summary for $VM_NAME
 
   Subscription.: ${AZURE_TARGET_PROJECT:-auto-select}
@@ -118,7 +135,7 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \
         "AZURE_NO_PUBLIC_IP=$AZURE_NO_PUBLIC_IP" "AZURE_ADMIN_USERNAME=$AZURE_ADMIN_USERNAME" \
-        "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=" \
+        "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=$AZURE_SSH_KEY_FILE" \
         "INSTANCE_NAME=$INSTANCE_NAME" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
