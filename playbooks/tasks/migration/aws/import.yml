@@ -39,6 +39,20 @@
             '--region=' ~ aws_region, '--only-show-errors'] }}
   register: ova_upload
   changed_when: true
+  # The AWS keys travel in stdin, so no_log keeps them out of Ansible output.
+  # no_log also hides a failure's detail, so failure is judged by the assert
+  # below (cleanup.yml checks ova_upload.rc, not "succeeded", for the same
+  # reason).
+  no_log: true
+  failed_when: false
+
+- name: Fail if the OVA upload did not succeed
+  ansible.builtin.assert:
+    that:
+      - ova_upload.rc == 0
+    fail_msg: >-
+      Uploading {{ ova_local_path }} to s3://{{ s3_bucket }}/{{ s3_key }}
+      failed (aws exit {{ ova_upload.rc }}). {{ ova_upload.stderr | default('') | trim }}
 
 - name: Mark the AWS import for best-effort cleanup
   ansible.builtin.set_fact:

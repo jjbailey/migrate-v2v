@@ -77,6 +77,11 @@
           ansible.builtin.import_tasks: tasks/migration/common/append-catalog.yml
 
       always:
+        # Before the target cleanup waits for background conversions: the clone and
+        # snapshot do not depend on them, and the wait can be interrupted.
+        - name: Remove the vSphere clone and snapshot
+          ansible.builtin.import_tasks: tasks/migration/common/cleanup-vsphere.yml
+
         - name: Clean up Azure resources
           ansible.builtin.import_tasks: tasks/migration/azure/cleanup.yml
 

@@ -621,7 +621,10 @@ directory with `migration_run_dir`:
 
 The OVF descriptor, checksum file, and large VMDKs stay in the run-directory
 root; `disks/` contains only transient QCOW2 conversion files. Resume and
-cleanup use the complete run directory. Per-disk QCOW2 files are removed after
+cleanup use the complete run directory. A run directory you supply with
+`migration_run_dir` is never deleted by the playbook, even after success or
+`discard_failed_artifacts=true`; only the default `<root>/<target>/<vm>/<run-id>`
+directory is removed, so delete an override directory yourself when finished. Per-disk QCOW2 files are removed after
 each upload or failed per-disk attempt; the OVF package and manifest remain
 available for resume unless `discard_failed_artifacts=true` is set. The playbook prints the run ID; resume
 it later with:

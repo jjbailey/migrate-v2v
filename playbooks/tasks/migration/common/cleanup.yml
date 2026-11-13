@@ -40,55 +40,14 @@
   # ignore_errors, not failed_when: false, so the warning below sees a failure.
   ignore_errors: true
 
-- name: Delete the temporary clone VM
-  community.vmware.vmware_guest:
-    hostname: "{{ vcenter_hostname }}"
-    username: "{{ vcenter_username }}"
-    password: "{{ vcenter_password }}"
-    validate_certs: "{{ validate_certs | bool }}"
-    datacenter: "{{ datacenter }}"
-    folder: "{{ source_vm_folder }}"
-    name: "{{ clone_name }}"
-    state: absent
-  when:
-    - clone_cleanup_required | default(false) | bool
-    - source_vm_folder is defined
-  no_log: true
-  register: cleanup_clone
-  # ignore_errors, not failed_when: false, so the warning below sees a failure.
-  ignore_errors: true
+- name: Remove the vSphere clone and snapshot unless this run already did
+  ansible.builtin.import_tasks: cleanup-vsphere.yml
+  when: not (vsphere_cleanup_done | default(false) | bool)
 
-- name: Remove the snapshot from the source VM
-  environment:
-    GOVC_URL: "{{ govc_url }}"
-    GOVC_USERNAME: "{{ govc_username }}"
-    GOVC_INSECURE: "{{ govc_insecure }}"
-  ansible.builtin.command:
-    stdin: "{{ govc_password }}"
-    argv:
-      - "{{ stdin_env_bin }}"
-      - GOVC_PASSWORD
-      - "--"
-      - "{{ govc_bin }}"
-      - snapshot.remove
-      - "-vm={{ source_vm_path }}"
-      - "{{ snapshot_name }}"
-  when:
-    - snapshot_cleanup_required | default(false) | bool
-    - source_vm_path is defined
-  no_log: true
-  changed_when: true
-  register: cleanup_snapshot
-  # ignore_errors, not failed_when: false, so the warning below sees a failure.
-  ignore_errors: true
-
-- name: Warn about best-effort cleanup failures
+- name: Warn about a temporary catalog entry that was not removed
   ansible.builtin.debug:
     msg: >-
-      Best-effort cleanup did not remove every vSphere/catalog artifact. Check
-      the run output and remove any remaining clone, snapshot, or temp file.
-  when: >-
-    (cleanup_catalog_entry.failed | default(false) | bool) or
-    (cleanup_clone.failed | default(false) | bool) or
-    (cleanup_snapshot.failed | default(false) | bool)
+      Best-effort cleanup did not remove the temporary catalog entry
+      {{ catalog_entry_path }}. Remove it manually.
+  when: cleanup_catalog_entry.failed | default(false) | bool
 

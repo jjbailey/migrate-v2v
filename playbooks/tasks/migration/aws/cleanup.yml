@@ -47,7 +47,7 @@
     mode: delobj
     region: "{{ aws_region }}"
   when:
-    - ova_upload is defined and ova_upload is succeeded
+    - ova_upload is defined and (ova_upload.rc | default(1)) == 0
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
   failed_when: false
 
@@ -58,7 +58,7 @@
       s3://{{ s3_bucket }}/{{ s3_key }} for a manual or follow-up import.
       Set -e discard_failed_artifacts=true to delete it on failure.
   when:
-    - ova_upload is defined and ova_upload is succeeded
+    - ova_upload is defined and (ova_upload.rc | default(1)) == 0
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
 
