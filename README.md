@@ -869,10 +869,11 @@ What each kind asks:
   (`VALIDATE_CERTS`), and whether to quiesce the snapshot
   (`QUIESCE_SNAPSHOT`). Without a selected vCenter they also ask for the legacy
   `VCENTER_DATACENTER` override. The datastore-direct dialogs
-  (`migrate-openstack-vddk-dialog.sh`, `migrate-azure-vddk-dialog.sh`) leave
-  `BACKEND` at auto; add `BACKEND` to a saved script to change it. The
-  OpenStack one also asks whether to compress the QCOW2 images (`COMPRESS`,
-  default no; yes if `COMPRESS=true` is already set).
+  (`migrate-openstack-vddk-dialog.sh`, `migrate-azure-vddk-dialog.sh`) also ask
+  for the transfer backend (`BACKEND`, default auto), whether to discard a
+  failed run (`DISCARD_RUN_ID`), and an optional vCenter CA bundle
+  (`VCENTER_CA_BUNDLE`). The OpenStack one also asks whether to compress the
+  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set).
 - **Launch dialogs** pick the target project the same way and offer the
   migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
