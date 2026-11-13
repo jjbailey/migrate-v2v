@@ -6,7 +6,7 @@
 
 validate_certs: true
 datacenter: "Datacenter"
-vm_name: "my-vm"
+# vm_name has no default: common/preflight*.yml asserts it was supplied.
 quiesce_snapshot: true
 
 govc_url: "{{ GOVC_URL }}"

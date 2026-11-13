@@ -8,6 +8,7 @@ import importlib.util
 import io
 import os
 import json
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -591,6 +592,83 @@ class ReadSnapshotTests(unittest.TestCase):
                 root.chmod(0o700)
             self.assertEqual(catalog["migrations"], [])
             self.assertFalse((root / "migration-catalog.json.lock").exists())
+
+class ReviewFixTests(unittest.TestCase):
+    """P1 (AWS account-less rows), P11 (non-dict catalogs), P5/P6, P10."""
+
+    def test_aws_accountless_rows_are_never_in_scope(self):
+        legacy = {"target_platform": "aws", "vm_name": "old", "aws_region": "us-west-2"}
+        scoped = {"target_platform": "aws", "vm_name": "new",
+                  "aws_account_id": "111", "aws_region": "us-west-2"}
+        self.assertFalse(reconcile_aws.account_matches(legacy, "111"))
+        self.assertTrue(reconcile_aws.account_matches(scoped, "111"))
+        self.assertFalse(reconcile_aws.account_matches(scoped, "222"))
+        self.assertEqual(
+            reconcile_aws.accountless_rows({"migrations": [legacy, scoped]},
+                                           {"deployments": []}), [legacy])
+        # No region on a legacy row must not abort scoping either.
+        regions, accounts = reconcile_aws.catalog_scope(
+            {"migrations": [{"target_platform": "aws", "vm_name": "old"}, scoped]},
+            {"deployments": []})
+        self.assertEqual((regions, accounts), ({"us-west-2"}, {"111"}))
+
+    def test_aws_find_missing_skips_accountless_rows(self):
+        class Session:
+            def client(self, *args, **kwargs):
+                raise AssertionError("account-less row was looked up")
+        legacy = {"target_platform": "aws", "vm_name": "old",
+                  "status": "completed", "aws_region": "us-west-2",
+                  "ami_id": "ami-1"}
+        self.assertEqual(
+            reconcile_aws.find_missing_resources(
+                Session(), {"migrations": [legacy]}, {"deployments": []}, "111"),
+            ([], []))
+        self.assertEqual(
+            reconcile_aws.candidate_count(
+                {"migrations": [legacy]}, {"deployments": []}, "111"), 0)
+
+    def test_non_dict_catalog_is_a_clean_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "c.json"
+            path.write_text("[]")
+            with self.assertRaisesRegex(ValueError, "JSON object"):
+                catalog_common.load_catalog(path, "migrations")
+
+    def test_non_dict_entry_is_a_clean_error(self):
+        with tempfile.TemporaryDirectory() as directory:
+            entry = Path(directory) / "entry.json"
+            entry.write_text("[1]")
+            for script in ("append-migration-catalog.py", "append-deployment-catalog.py"):
+                result = subprocess.run(
+                    [sys.executable, "-I", str(ROOT / "bin" / script),
+                     "--catalog", str(Path(directory) / "c.json"),
+                     "--entry", str(entry)],
+                    capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("JSON object", result.stderr)
+                self.assertNotIn("Traceback", result.stderr)
+
+    def test_atomic_write_keeps_mode_and_lock_is_group_writable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "c.json"
+            path.write_text("{}")
+            path.chmod(0o660)
+            catalog_common.atomic_write_json(path, {"a": 1})
+            self.assertEqual(path.stat().st_mode & 0o777, 0o660)
+            self.assertEqual(json.loads(path.read_text()), {"a": 1})
+            old_umask = os.umask(0)
+            try:
+                with catalog_common.exclusive_lock(path):
+                    pass
+            finally:
+                os.umask(old_umask)
+            lock = path.with_name(path.name + ".lock")
+            self.assertEqual(lock.stat().st_mode & 0o777, 0o666)
+
+    def test_infinite_ovf_capacity_is_rejected(self):
+        for value in ("Infinity", "-Infinity", "NaN"):
+            with self.assertRaises(ValueError):
+                inspect_ova.capacity_bytes(value, "byte")
 
 if __name__ == "__main__":
     unittest.main()

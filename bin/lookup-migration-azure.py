@@ -11,11 +11,23 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 from lookup_migration_common import main  # noqa: E402
 
+def normalize_location(value):
+    return str(value or "").lower().replace(" ", "")
+
 def project_filter(args):
-    if args.project is None:
+    wanted_project = None if args.project is None else str(args.project).strip().lower()
+    wanted_region = normalize_location(args.region) if args.region else None
+    if wanted_project is None and wanted_region is None:
         return None
-    wanted = str(args.project).strip().lower()
-    return lambda entry: str(entry.get("azure_subscription_id", "")).lower() == wanted
+
+    def matches(entry):
+        if (wanted_project is not None
+                and str(entry.get("azure_subscription_id", "")).lower() != wanted_project):
+            return False
+        # "West US 2" and "westus2" name the same location.
+        return (wanted_region is None
+                or normalize_location(entry.get("azure_location")) == wanted_region)
+    return matches
 
 def project(entry):
     # Azure cannot create a managed disk from a managed image, so a row from
@@ -44,6 +56,6 @@ if __name__ == "__main__":
         "lookup-migration-azure",
         "azure",
         project,
-        parser_options={"with_project": True},
+        parser_options={"with_project": True, "with_region": True},
         entry_filter=project_filter,
     )

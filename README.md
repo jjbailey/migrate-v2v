@@ -621,7 +621,10 @@ directory with `migration_run_dir`:
 
 The OVF descriptor, checksum file, and large VMDKs stay in the run-directory
 root; `disks/` contains only transient QCOW2 conversion files. Resume and
-cleanup use the complete run directory. Per-disk QCOW2 files are removed after
+cleanup use the complete run directory. A run directory you supply with
+`migration_run_dir` is never deleted by the playbook, even after success or
+`discard_failed_artifacts=true`; only the default `<root>/<target>/<vm>/<run-id>`
+directory is removed, so delete an override directory yourself when finished. Per-disk QCOW2 files are removed after
 each upload or failed per-disk attempt; the OVF package and manifest remain
 available for resume unless `discard_failed_artifacts=true` is set. The playbook prints the run ID; resume
 it later with:
@@ -706,9 +709,13 @@ OpenStack also supports `openstack_boot_mode` (use `bios` for BIOS guests),
 `openstack_nics`, `openstack_preserve_mac`, `openstack_mac_addresses`,
 `openstack_fixed_ips`, and `openstack_auto_ip`, plus the playbook-only
 `openstack_volume_type` and `openstack_availability_zone` (no wrapper
-environment variable; pass them with `-e`). GCP launch accepts `instance_name`,
-`gcp_disk_type` and the network/tag options. AWS launch accepts
-`assign_public_ip` and `extra_tags`. When manually supplying multiple
+environment variable; pass them with `-e`). GCP launch accepts `gcp_disk_type`
+and the network/tag options. AWS launch accepts
+`assign_public_ip` and `extra_tags`. Every launch (AWS, Azure, GCP, OpenStack)
+names the new instance after the source VM by default. To give it a different
+name, set `INSTANCE_NAME` for the wrapper (the launch dialogs ask for it; leave
+it blank to keep the default) or pass `-e instance_name=...` to the playbook.
+Catalog lookups still use the source `VM_NAME`. When manually supplying multiple
 OpenStack image IDs, also supply `source_artifact_manifest` with a
 `capacity_bytes` entry for every disk.
 On a GCP launch retry, an existing instance is reused only when its metadata
@@ -869,10 +876,11 @@ What each kind asks:
   (`VALIDATE_CERTS`), and whether to quiesce the snapshot
   (`QUIESCE_SNAPSHOT`). Without a selected vCenter they also ask for the legacy
   `VCENTER_DATACENTER` override. The datastore-direct dialogs
-  (`migrate-openstack-vddk-dialog.sh`, `migrate-azure-vddk-dialog.sh`) leave
-  `BACKEND` at auto; add `BACKEND` to a saved script to change it. The
-  OpenStack one also asks whether to compress the QCOW2 images (`COMPRESS`,
-  default no; yes if `COMPRESS=true` is already set).
+  (`migrate-openstack-vddk-dialog.sh`, `migrate-azure-vddk-dialog.sh`) also ask
+  for the transfer backend (`BACKEND`, default auto), whether to discard a
+  failed run (`DISCARD_RUN_ID`), and an optional vCenter CA bundle
+  (`VCENTER_CA_BUNDLE`). The OpenStack one also asks whether to compress the
+  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set).
 - **Launch dialogs** pick the target project the same way and offer the
   migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
@@ -1559,7 +1567,10 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
   `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`, default
   any) are created only when missing and otherwise used as they are
-  (`AZURE_VNET_NAME`, `AZURE_SUBNET_NAME`, `AZURE_NSG_NAME`). Each VM gets its
+  (`AZURE_VNET_NAME`, `AZURE_SUBNET_NAME`, `AZURE_NSG_NAME`). Set
+  `AZURE_SSH_SOURCE_PREFIX` (the dialog asks when the VM gets a public IP) to
+  restrict the SSH rule of an NSG created by the launch; the default `*` admits
+  SSH from anywhere, and an existing NSG keeps its own rules. Each VM gets its
   own NIC and, unless `AZURE_NO_PUBLIC_IP=true`, a static Standard public IP.
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.

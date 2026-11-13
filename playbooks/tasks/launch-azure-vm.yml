@@ -152,91 +152,149 @@
       managed_by: migrate-v2v
   when: azure_nsg_info.securitygroups | default([]) | length == 0
 
-- name: Create the VM's public IP address
-  azure.azcollection.azure_rm_publicipaddress:
-    resource_group: "{{ azure_resource_group }}"
-    name: "{{ azure_vm_name }}-pip"
-    location: "{{ azure_location }}"
-    sku: Standard
-    allocation_method: Static
-    tags:
-      MigratedFrom: "{{ vm_name }}"
-  when: not (azure_no_public_ip | bool)
+# Everything from here on is created by this run: the stale-disk checks above
+# stop the launch (or delete the old disks) first, so any <vm>-osdisk and
+# <vm>-data-N disk, and the VM itself, can only be this run's. The public IP and
+# NIC are removed only when this run created or failed creating them. A failed
+# create would otherwise strand billed static IPs, disks and a NIC, and the
+# retry would stop at "Refuse to attach disks an earlier VM left behind".
+# The shared VNet, subnet and NSG are left alone.
+- name: Create the VM's network interface, disks and the VM, cleaning up on failure
+  block:
+    - name: Create the VM's public IP address
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}-pip"
+        location: "{{ azure_location }}"
+        sku: Standard
+        allocation_method: Static
+        tags:
+          MigratedFrom: "{{ vm_name }}"
+      register: azure_pip_created
+      when: not (azure_no_public_ip | bool)
 
-- name: Create the VM's network interface
-  azure.azcollection.azure_rm_networkinterface:
-    resource_group: "{{ azure_resource_group }}"
-    name: "{{ azure_vm_name }}-nic"
-    location: "{{ azure_location }}"
-    virtual_network: "{{ azure_vnet_name }}"
-    subnet_name: "{{ azure_subnet_name }}"
-    security_group: "{{ azure_nsg_name }}"
-    ip_configurations:
-      - name: ipconfig1
-        primary: true
-        public_ip_address_name: "{{ (azure_vm_name ~ '-pip') if not (azure_no_public_ip | bool) else omit }}"
-    tags:
-      MigratedFrom: "{{ vm_name }}"
+    - name: Create the VM's network interface
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}-nic"
+        location: "{{ azure_location }}"
+        virtual_network: "{{ azure_vnet_name }}"
+        subnet_name: "{{ azure_subnet_name }}"
+        security_group: "{{ azure_nsg_name }}"
+        ip_configurations:
+          - name: ipconfig1
+            primary: true
+            public_ip_address_name: "{{ (azure_vm_name ~ '-pip') if not (azure_no_public_ip | bool) else omit }}"
+        tags:
+          MigratedFrom: "{{ vm_name }}"
+      register: azure_nic_created
 
-# Each data disk is a fresh copy of its migrated snapshot, so several launches
-# of one migration never share a disk.
-- name: Create the VM's data disks from the migrated snapshots
-  azure.azcollection.azure_rm_manageddisk:
-    resource_group: "{{ azure_resource_group }}"
-    name: "{{ azure_vm_name }}-data-{{ azure_lun + 1 }}"
-    location: "{{ azure_location }}"
-    create_option: copy
-    # Not source_uri: azcollection 4.x requires the snapshot's ARM ID here,
-    # whatever the module's create_option text still says.
-    source_resource_id: "{{ azure_snapshot_id }}"
-    storage_account_type: "{{ azure_data_disk_type }}"
-    tags:
-      MigratedFrom: "{{ vm_name }}"
-      SourceSnapshot: "{{ azure_snapshot_id | regex_replace('^.*/', '') }}"
-  loop: "{{ azure_data_snapshot_ids_effective }}"
-  loop_control:
-    loop_var: azure_snapshot_id
-    index_var: azure_lun
-    label: "LUN {{ azure_lun }} from {{ azure_snapshot_id | regex_replace('^.*/', '') }}"
-  register: azure_data_disks_created
+    # Each data disk is a fresh copy of its migrated snapshot, so several launches
+    # of one migration never share a disk.
+    - name: Create the VM's data disks from the migrated snapshots
+      azure.azcollection.azure_rm_manageddisk:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}-data-{{ azure_lun + 1 }}"
+        location: "{{ azure_location }}"
+        create_option: copy
+        # Not source_uri: azcollection 4.x requires the snapshot's ARM ID here,
+        # whatever the module's create_option text still says.
+        source_resource_id: "{{ azure_snapshot_id }}"
+        storage_account_type: "{{ azure_data_disk_type }}"
+        tags:
+          MigratedFrom: "{{ vm_name }}"
+          SourceSnapshot: "{{ azure_snapshot_id | regex_replace('^.*/', '') }}"
+      loop: "{{ azure_data_snapshot_ids_effective }}"
+      loop_control:
+        loop_var: azure_snapshot_id
+        index_var: azure_lun
+        label: "LUN {{ azure_lun }} from {{ azure_snapshot_id | regex_replace('^.*/', '') }}"
+      register: azure_data_disks_created
 
-- name: Attach the data disks at LUN 0, 1, ... in manifest order
-  ansible.builtin.set_fact:
-    azure_data_disk_attachments: >-
-      {{ azure_data_disk_attachments | default([])
-         + [{'lun': azure_lun, 'managed_disk_id': azure_data_disk.state.id}] }}
-  loop: "{{ azure_data_disks_created.results | default([]) }}"
-  loop_control:
-    loop_var: azure_data_disk
-    index_var: azure_lun
-    label: "LUN {{ azure_lun }}"
+    - name: Attach the data disks at LUN 0, 1, ... in manifest order
+      ansible.builtin.set_fact:
+        azure_data_disk_attachments: >-
+          {{ azure_data_disk_attachments | default([])
+             + [{'lun': azure_lun, 'managed_disk_id': azure_data_disk.state.id}] }}
+      loop: "{{ azure_data_disks_created.results | default([]) }}"
+      loop_control:
+        loop_var: azure_data_disk
+        index_var: azure_lun
+        label: "LUN {{ azure_lun }}"
 
-- name: Create the Azure VM from the migrated boot image
-  azure.azcollection.azure_rm_virtualmachine:
-    resource_group: "{{ azure_resource_group }}"
-    name: "{{ azure_vm_name }}"
-    location: "{{ azure_location }}"
-    vm_size: "{{ azure_vm_size }}"
-    image:
-      id: "{{ azure_boot_image_id_effective }}"
-    os_type: Linux
-    os_disk_name: "{{ azure_vm_name }}-osdisk"
-    managed_disk_type: "{{ azure_os_disk_type }}"
-    admin_username: "{{ azure_admin_username }}"
-    ssh_password_enabled: false
-    ssh_public_keys:
-      - path: "/home/{{ azure_admin_username }}/.ssh/authorized_keys"
-        key_data: "{{ azure_ssh_public_key_data }}"
-    network_interface_names:
-      - "{{ azure_vm_name }}-nic"
-    data_disks: "{{ azure_data_disk_attachments | default([]) }}"
-    # Managed boot diagnostics storage. Without type: managed the module
-    # creates a randomly named <vm name>NNNN storage account per VM, with
-    # none of the settings this project requires.
-    boot_diagnostics:
-      enabled: true
-      type: managed
-    tags:
-      MigratedFrom: "{{ vm_name }}"
-      SourceMigrationId: "{{ azure_migration_id_effective | default('manual', true) }}"
+    - name: Create the Azure VM from the migrated boot image
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}"
+        location: "{{ azure_location }}"
+        vm_size: "{{ azure_vm_size }}"
+        image:
+          id: "{{ azure_boot_image_id_effective }}"
+        os_type: Linux
+        os_disk_name: "{{ azure_vm_name }}-osdisk"
+        managed_disk_type: "{{ azure_os_disk_type }}"
+        admin_username: "{{ azure_admin_username }}"
+        ssh_password_enabled: false
+        ssh_public_keys:
+          - path: "/home/{{ azure_admin_username }}/.ssh/authorized_keys"
+            key_data: "{{ azure_ssh_public_key_data }}"
+        network_interface_names:
+          - "{{ azure_vm_name }}-nic"
+        data_disks: "{{ azure_data_disk_attachments | default([]) }}"
+        # Managed boot diagnostics storage. Without type: managed the module
+        # creates a randomly named <vm name>NNNN storage account per VM, with
+        # none of the settings this project requires.
+        boot_diagnostics:
+          enabled: true
+          type: managed
+        tags:
+          MigratedFrom: "{{ vm_name }}"
+          SourceMigrationId: "{{ azure_migration_id_effective | default('manual', true) }}"
+      register: azure_vm_created
+
+  rescue:
+    - name: Remove the VM this run failed to create
+      azure.azcollection.azure_rm_virtualmachine:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}"
+        state: absent
+        remove_on_absent: []
+      when: azure_vm_created is defined
+      failed_when: false
+
+    - name: Remove the network interface this run created
+      azure.azcollection.azure_rm_networkinterface:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}-nic"
+        state: absent
+      when: azure_nic_created is defined and (azure_nic_created.changed or azure_nic_created.failed | default(false))
+      failed_when: false
+
+    - name: Remove the public IP this run created
+      azure.azcollection.azure_rm_publicipaddress:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_vm_name }}-pip"
+        state: absent
+      when: azure_pip_created is defined and (azure_pip_created.changed or azure_pip_created.failed | default(false))
+      failed_when: false
+
+    - name: Remove the managed disks this run created
+      azure.azcollection.azure_rm_manageddisk:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ item }}"
+        state: absent
+      loop: >-
+        {%- set names = [azure_vm_name ~ '-osdisk'] -%}
+        {%- for lun in range(azure_data_snapshot_ids_effective | length) -%}
+        {%- set _ = names.append(azure_vm_name ~ '-data-' ~ (lun + 1)) -%}
+        {%- endfor -%}
+        {{ names }}
+      failed_when: false
+
+    - name: Fail the launch after cleaning up
+      ansible.builtin.fail:
+        msg: >-
+          Creating Azure VM {{ azure_vm_name }} failed. The public IP, network
+          interface, VM and disks this run created were removed; retry after fixing the cause:
+          {{ ansible_failed_result.msg | default('see the error above') }}
 

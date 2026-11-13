@@ -4,6 +4,13 @@
 
 # Shared vSphere credentials and tools required by every migration target.
 
+- name: Require the source VM name
+  ansible.builtin.assert:
+    that: vm_name is defined and vm_name | string | length > 0
+    fail_msg: >-
+      vm_name is required: pass -e vm_name=<source VM name> (the wrappers take
+      VM_NAME). There is deliberately no default.
+
 - name: Resolve the vCenter credentials from the vault
   ansible.builtin.import_tasks: select-vcenter.yml
 

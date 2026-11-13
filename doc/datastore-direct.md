@@ -72,8 +72,11 @@ cost is controller CPU, so leave it off on a fast link.
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
 BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backend
-./bin/migrate-openstack-vddk-dialog.sh                           # guided front end (asks about compression)
+./bin/migrate-openstack-vddk-dialog.sh                           # guided front end
 ```
+
+The guided front end asks for the backend, whether to discard a failed run,
+an optional vCenter CA bundle, and QCOW2 compression.
 
 The wrapper takes the same environment variables as `bin/migrate-openstack-vm.sh`
 (`VM_NAME`, `VSPHERE_TARGET_VCENTER`, `VCENTER_DATACENTER`, `OS_PROJECT_NAME`,

@@ -6,6 +6,8 @@
 # the final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-openstack-dialog
@@ -153,6 +155,7 @@ print("\n".join(out))' "$facts" 2> /dev/null
 # Project first: it decides where the instance and its volumes land.
 PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/openstack.yml" openstack_projects "${OS_PROJECT_NAME:-}") || abort
 VM_NAME=$(choose_vm_required openstack OpenStack) || abort
+INSTANCE_NAME=$(input "OpenStack server name (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 FIXED_IPS_JSON=""
 addr_mode=$(radio "How should the new instance get its IP addresses?" \
@@ -164,8 +167,8 @@ if [ "$addr_mode" = static ] ; then
         ok=1
         IFS=',' read -r -a ip_list <<< "$ips"
         for ip in "${ip_list[@]}" ; do
-            ip="${ip# }"
-            ip="${ip% }"
+            ip="${ip#"${ip%%[![:space:]]*}"}"
+            ip="${ip%"${ip##*[![:space:]]}"}"
             looks_like_ip "$ip" || {
                 ok=0
                 break
@@ -194,8 +197,8 @@ case "$mac_mode" in
             ok=1
             IFS=',' read -r -a mac_list <<< "$macs"
             for mac in "${mac_list[@]}" ; do
-                mac="${mac# }"
-                mac="${mac% }"
+                mac="${mac#"${mac%%[![:space:]]*}"}"
+                mac="${mac%"${mac##*[![:space:]]}"}"
                 looks_like_mac "$mac" || {
                     ok=0
                     break
@@ -222,7 +225,9 @@ fi
 # Fixed IPs and preserved or manual MACs need pre-created ports, and the
 # playbook creates those only with explicit security groups.
 needs_ports=false
-if [ "$PRESERVE_MAC" = true ] || { [ -n "$FIXED_IPS_JSON" ] && [ "$FIXED_IPS_JSON" != '[]' ] ; } ; then
+if [ "$PRESERVE_MAC" = true ] || {
+    [ -n "$FIXED_IPS_JSON" ] && [ "$FIXED_IPS_JSON" != '[]' ]
+} ; then
     needs_ports=true
 fi
 while : ; do
@@ -269,8 +274,8 @@ while : ; do
         names)
             while : ; do
                 sgs=$(input "Security group names, comma-separated:" "default") || abort
-                    SGS_JSON=$(json_list "$sgs")
-                    [ "$SGS_JSON" != '[]' ] && {
+                SGS_JSON=$(json_list "$sgs")
+                [ "$SGS_JSON" != '[]' ] && {
                     break
                 }
                 bad "Enter at least one security group name." || true
@@ -290,7 +295,11 @@ while : ; do
             SGS_JSON='[]'
             ;;
     esac
-    if [ "$needs_ports" = true ] && { [ -z "$SGS_JSON" ] || [ "$SGS_JSON" = '[]' ] ; } && { [ -z "$SG_IDS_JSON" ] || [ "$SG_IDS_JSON" = '[]' ] ; } ; then
+    if [ "$needs_ports" = true ] && {
+        [ -z "$SGS_JSON" ] || [ "$SGS_JSON" = '[]' ]
+    } && {
+        [ -z "$SG_IDS_JSON" ] || [ "$SG_IDS_JSON" = '[]' ]
+    } ; then
         bad "Fixed IPs and preserved or manual MACs use pre-created ports, which need at least one security group. Choose one, or go back and use DHCP with auto-assigned MACs." || true
         continue
     fi
@@ -305,21 +314,38 @@ fi
 
 USER_DATA_FILE=""
 DHCP_USER_DATA=false
-ud_mode=$(radio "Should cloud-init user-data be applied on first boot?" \
-    none "None - the guest image defaults apply" ON \
-    dhcp "Use the bundled DHCP-only example user-data" OFF \
-    file "Use a cloud-config file from this machine" OFF) || abort
+OS_USER_DATA=""
+ud_options=(
+    none "None - the guest image defaults apply" ON
+    dhcp "Use the bundled DHCP-only example user-data" OFF
+    file "Use a cloud-config file from this machine" OFF
+)
+# Multi-line user-data needs dialog's editor ; whiptail has none.
+[ "${DIALOG[0]}" != dialog ] || ud_options+=(text "Type cloud-init user-data in an editor" OFF)
+ud_mode=$(radio "Should cloud-init user-data be applied on first boot?" "${ud_options[@]}") || abort
 case "$ud_mode" in
     dhcp) DHCP_USER_DATA=true ;;
     file)
         while : ; do
             USER_DATA_FILE=$(input "Path to the cloud-config file:" "") || abort
-            [ -s "$USER_DATA_FILE" ] && {
-                USER_DATA_FILE=$(realpath -- "$USER_DATA_FILE")
+            [ -s "$(anchor_path "$USER_DATA_FILE")" ] && {
+                USER_DATA_FILE=$(realpath -- "$(anchor_path "$USER_DATA_FILE")")
                 break
             }
             bad "File not found or empty: $USER_DATA_FILE" || true
         done
+        ;;
+    text)
+        ud_tmp=$(mktemp "${TMPDIR:-/tmp}/launch-openstack-userdata.XXXXXX")
+        dialog_tmp_files+=("$ud_tmp")
+        printf '#cloud-config\n' > "$ud_tmp"
+        while : ; do
+            OS_USER_DATA=$(dlg --editbox "$ud_tmp" "$(height 20)" "$COLS") || abort
+            printf '%s\n' "$OS_USER_DATA" > "$ud_tmp"
+            [ -n "${OS_USER_DATA//[[:space:]]/}" ] && [ "$OS_USER_DATA" != '#cloud-config' ] && break
+            bad "The user-data cannot be empty." || true
+        done
+        rm -f "$ud_tmp"
         ;;
 esac
 
@@ -331,31 +357,41 @@ while : ; do
     bad "Flavor, SSH key, and network cannot be empty." || true
 done
 NETWORK_ID=$(input "Network UUID (optional ; leave blank to use the name):" "") || abort
+while : ; do
+    OS_NICS_JSON=$(input "Custom NIC definitions as JSON array (optional ; overrides network selection):" "${OS_NICS_JSON:-}") || abort
+    [ -z "$OS_NICS_JSON" ] && break
+    if python3 -c 'import json,sys ; sys.exit(0 if isinstance(json.loads(sys.argv[1]), list) else 1)' "$OS_NICS_JSON" 2> /dev/null; then
+        break
+    fi
+    bad "That is not a valid JSON array." || true
+done
 
 say "Launch summary for ${VM_NAME}
 
+  Server name: ${INSTANCE_NAME:-same as $VM_NAME}
   Project....: ${PROJECT:-auto-select}
   Addressing.: ${addr_mode}${FIXED_IPS_JSON:+ ($FIXED_IPS_JSON)}
   MACs.......: ${mac_mode}${MAC_JSON:+ ($MAC_JSON)}
   Floating IP: ${AUTO_IP}
   Security...: ${sg_mode}${SGS_JSON:+ ($SGS_JSON)}${SG_IDS_JSON:+ ($SG_IDS_JSON)}
   ConfigDrive: ${CONFIG_DRIVE}
-  User data..: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}
+  User data..: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
   Flavor.....: ${FLAVOR}
   SSH key....: ${KEY_NAME}
-  Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 18
+  Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 {
     printf '#!/bin/bash\n'
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
-        "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=" \
+        "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=$OS_NICS_JSON" \
         "OS_SECURITY_GROUPS_JSON=$SGS_JSON" "OS_SECURITY_GROUP_IDS_JSON=$SG_IDS_JSON" \
         "OS_PRESERVE_MAC=$PRESERVE_MAC" "OS_MAC_ADDRESSES_JSON=$MAC_JSON" \
         "OS_FIXED_IPS_JSON=$FIXED_IPS_JSON" "OS_AUTO_IP=$AUTO_IP" \
         "OS_CONFIG_DRIVE=$CONFIG_DRIVE" "OS_DHCP_USER_DATA=$DHCP_USER_DATA" \
-        "OS_USER_DATA=" "OS_USER_DATA_FILE=$USER_DATA_FILE" "OS_PROJECT_NAME=$PROJECT" ; do
+        "OS_USER_DATA=$OS_USER_DATA" "OS_USER_DATA_FILE=$USER_DATA_FILE" "OS_PROJECT_NAME=$PROJECT" \
+        "INSTANCE_NAME=$INSTANCE_NAME" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-openstack-instance.sh")"

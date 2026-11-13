@@ -187,7 +187,11 @@ class LaunchWrapperTests(WrapperTestCase):
         })
         extra = self.extra_vars()
         self.assertEqual(extra["vm_name"], "Web Server 01")
-        self.assertEqual(extra["openstack_user_data"], user_data)
+        # Inline user-data travels in a private temp file, never in argv.
+        self.assertNotIn("openstack_user_data", extra)
+        self.assertNotIn("runcmd", self.argv_file.read_text())
+        self.assertIn("openstack_user_data_file", extra)
+        self.assertFalse(Path(extra["openstack_user_data_file"]).exists())
         self.assertEqual(extra["openstack_mac_addresses"],
                          ["aa:bb:cc:11:22:33", "aa:bb:cc:11:22:34"])
         self.assertEqual(extra["openstack_fixed_ips"], ["10.0.0.5", "10.0.0.6"])
@@ -197,7 +201,12 @@ class LaunchWrapperTests(WrapperTestCase):
         self.assertEqual(extra["openstack_key_name"], "cloud")
         self.assertNotIn("openstack_security_group_ids", extra)
         self.assertNotIn("openstack_nics", extra)
-        self.assertNotIn("openstack_user_data_file", extra)
+
+    def test_openstack_user_data_exclusive(self):
+        result = self.run_wrapper("launch-openstack-instance.sh", {
+            "VM_NAME": "vm", "OS_USER_DATA": "#cloud-config",
+            "OS_USER_DATA_FILE": "/etc/hostname"}, expect_success=False)
+        self.assertEqual(result.returncode, 2)
 
     def test_openstack_security_group_ids_clear_names(self):
         self.run_wrapper("launch-openstack-instance.sh", {
@@ -314,6 +323,29 @@ class StageV2vTests(WrapperTestCase):
             "ssh_username": "admin user",
             "ssh_private_key_file": "/keys/my key",
         })
+
+    def test_stage_usage_without_vault_dir(self):
+        env = {k: v for k, v in self.base_env.items() if k != "MIGRATE_V2V_VAULT_DIR"}
+        for args, code, stream in ((["-h"], 0, "stdout"), ([], 2, "stderr")):
+            result = subprocess.run(
+                [str(BIN / "stage-v2v.sh"), *args], env=env,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                check=False, timeout=60)
+            self.assertEqual(result.returncode, code, result.stderr)
+            self.assertIn("Usage:", getattr(result, stream))
+
+    def test_stage_rejects_inventory_metacharacters(self):
+        for args in (["-H", "web[01:03]"], ["-H", "a=b"], ["-H", "a#b"],
+                     ["-H", "vm", "-a", "10.0.0.1 x"], ["-H", "vm", "-a", "a=b"]):
+            result = self.run_wrapper(
+                "stage-v2v.sh", args=["-c", "vc", *args], expect_success=False)
+            self.assertEqual(result.returncode, 2, args)
+
+    def test_stage_anchors_relative_key_file(self):
+        self.run_wrapper("stage-v2v.sh", args=["-c", "vc", "-H", "vm", "-k", "key"],
+                         cwd=self.tmp)
+        self.assertEqual(self.extra_vars()["ssh_private_key_file"],
+                         str(self.tmp / "key"))
 
 class ExecWithStdinEnvTests(unittest.TestCase):
     """bin/exec-with-stdin-env.sh: secrets arrive on stdin, not in argv."""

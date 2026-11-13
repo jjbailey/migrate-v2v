@@ -26,9 +26,12 @@
   ansible.builtin.async_status:
     jid: "{{ azure_convert_jobs[azure_disk.index | string] }}"
   register: azure_convert_result
-  until: azure_convert_result.finished | bool
+  until: (azure_convert_result.finished | default(1)) | bool
   retries: "{{ azure_convert_poll_retries | int }}"
   delay: "{{ azure_convert_poll_delay | int }}"
+  # async_status itself fails when the job failed, which would skip the next
+  # task and its qemu-img stderr; let that task report it.
+  failed_when: false
 
 - name: Fail if this disk's conversion failed
   ansible.builtin.fail:

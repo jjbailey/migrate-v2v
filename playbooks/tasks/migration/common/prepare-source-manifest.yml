@@ -21,11 +21,33 @@
     GOVC_INSECURE: "{{ govc_insecure }}"
   ansible.builtin.command:
     stdin: "{{ govc_password }}"
-    cmd: >-
-      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} find /{{ datacenter }}/vm -type m -name "{{ vm_name }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - find
+      - "/{{ datacenter }}/vm"
+      - -type
+      - m
+      - -name
+      - "{{ vm_name }}"
+  no_log: true
   register: source_vm_find
   changed_when: false
-  failed_when: source_vm_find.rc != 0 or (source_vm_find.stdout_lines | length != 1)
+  # no_log hides the whole result, so failure is judged by the assert below,
+  # which can show the (password-free) detail.
+  failed_when: false
+
+- name: Fail unless the source VM resolves to exactly one inventory path
+  ansible.builtin.assert:
+    that:
+      - source_vm_find.rc == 0
+      - source_vm_find.stdout_lines | length == 1
+    fail_msg: >-
+      Could not resolve '{{ vm_name }}' in datacenter '{{ datacenter }}' (govc
+      exit {{ source_vm_find.rc }}, {{ source_vm_find.stdout_lines | length }}
+      match(es)). {{ source_vm_find.stderr | default('') | trim }}
 
 - name: Record the source inventory path
   ansible.builtin.set_fact:
@@ -39,8 +61,14 @@
     GOVC_INSECURE: "{{ govc_insecure }}"
   ansible.builtin.command:
     stdin: "{{ govc_password }}"
-    cmd: >-
-      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} vm.info -json "{{ source_vm_path }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - vm.info
+      - -json
+      - "{{ source_vm_path }}"
   register: source_vm_info
   changed_when: false
   failed_when: source_vm_info.rc != 0

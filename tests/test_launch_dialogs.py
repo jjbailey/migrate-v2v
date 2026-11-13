@@ -22,7 +22,11 @@ args = sys.argv[1:]
 if '--inputbox' in args:
     prompt = args[args.index('--inputbox') + 1]
     values = {
-        'Azure VM name': '',
+        'Allow SSH from': os.environ.get('TEST_SSH_SOURCE', '*'),
+        'Azure VM name': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'EC2 instance Name tag': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'GCP instance name': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'OpenStack server name': os.environ.get('TEST_INSTANCE_NAME', ''),
         'VM name': "Web Server's 01",
         'AWS subnet': 'subnet-123',
         'Security group names': 'default,web',
@@ -40,6 +44,7 @@ if '--inputbox' in args:
         'SSH key pair name': 'cloud',
         'OpenStack network name': 'Ext-Net',
         'Network UUID': '',
+        'Custom NIC definitions': os.environ.get('TEST_NICS', ''),
     }
     value = next((value for name, value in values.items() if name in prompt), None)
     if value is None and 'Which ' in prompt:
@@ -142,12 +147,13 @@ class LaunchDialogTests(unittest.TestCase):
                 command = files[0].read_text()
                 self.assertIn("export VM_NAME='Web Server'\\''s 01'", command)
                 self.assertIn(f"'{BIN / wrapper}'", command)
+                self.assertIn("export INSTANCE_NAME=''", command)
                 if platform == "aws":
                     self.assertIn("export AWS_INSTANCE_TYPE=''", command)
                 elif platform == "azure":
-                    self.assertIn("export INSTANCE_NAME=''", command)
                     self.assertIn("export AZURE_SSH_KEY_NAME='cloud'", command)
                     self.assertIn("export AZURE_SSH_KEY_FILE=''", command)
+                    self.assertIn("export AZURE_SSH_SOURCE_PREFIX='*'", command)
                 elif platform == "gcp":
                     self.assertIn("export GCP_SSH_KEY_FILE=''", command)
                 subprocess.run(["bash", "-n", files[0]], check=True)
@@ -172,6 +178,11 @@ class LaunchDialogTests(unittest.TestCase):
         self.assertEqual(extra["openstack_network"], "Ext-Net")
         self.assertNotIn("openstack_nics", extra)
 
+    def test_openstack_custom_nics_reach_the_command(self):
+        nics = '[{"net-id":"abc"}]'
+        files = self.run_dialog("openstack", TEST_NICS=nics)
+        self.assertIn(f"export OS_NICS_JSON='{nics}'", files[0].read_text())
+
     def test_openstack_preserved_macs_require_a_security_group(self):
         # Preserved MACs use pre-created ports, which the playbook builds only
         # with explicit security groups, so "None" is asked again.
@@ -182,6 +193,35 @@ class LaunchDialogTests(unittest.TestCase):
         command = files[0].read_text()
         self.assertIn("export OS_SECURITY_GROUPS_JSON='[\"default\",\"web\"]'", command)
         self.assertIn("export OS_PRESERVE_MAC='true'", command)
+
+    def test_custom_instance_name_reaches_every_playbook(self):
+        # The destination name can differ from the source VM's name.
+        for platform in self.SCRIPTS:
+            with self.subTest(platform=platform):
+                files = self.run_dialog(platform, TEST_INSTANCE_NAME="new-name")
+                self.assertIn("export INSTANCE_NAME='new-name'", files[0].read_text())
+                subprocess.run(["bash", files[0]], env=self.env, check=True,
+                               capture_output=True, text=True, timeout=30)
+                argv = json.loads((self.tmp / "argv.json").read_text())
+                extra = {}
+                for position, arg in enumerate(argv):
+                    if arg == "-e":
+                        extra.update(json.loads(argv[position + 1]))
+                self.assertEqual(extra["instance_name"], "new-name")
+                self.assertEqual(extra["vm_name"], "Web Server's 01")
+                files[0].unlink()
+
+    def test_azure_ssh_source_prefix_reaches_the_playbook(self):
+        files = self.run_dialog("azure", TEST_SSH_SOURCE="203.0.113.0/24")
+        self.assertIn("export AZURE_SSH_SOURCE_PREFIX='203.0.113.0/24'", files[0].read_text())
+        subprocess.run(["bash", files[0]], env=self.env, check=True,
+                       capture_output=True, text=True, timeout=30)
+        argv = json.loads((self.tmp / "argv.json").read_text())
+        extra = {}
+        for position, arg in enumerate(argv):
+            if arg == "-e":
+                extra.update(json.loads(argv[position + 1]))
+        self.assertEqual(extra["azure_ssh_source_prefix"], "203.0.113.0/24")
 
     def test_cancel_stops_before_command_generation(self):
         self.assertEqual(self.run_dialog("gcp", TEST_CANCEL="1"), [])

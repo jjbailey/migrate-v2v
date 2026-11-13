@@ -47,7 +47,7 @@ from vault_common import default_vault_path, read_vault  # noqa: E402
 
 def select_vault_auth(vault, requested):
     data = read_vault(vault)
-    projects = {str(key): value for key, value in (
+    projects = {str(key): value or {} for key, value in (
         data.get("openstack_projects") or {}).items()}
     if requested:
         for key, auth in projects.items():

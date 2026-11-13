@@ -7,11 +7,13 @@
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
 
 DEFAULT_VAULT_DIR = Path("/work/migrate-v2v/vaults")
+VAULT_TIMEOUT_SECONDS = 300
 
 def default_vault_path(filename):
     """Runtime vault path, overridable for alternate checkouts or tests."""
@@ -36,14 +38,24 @@ def read_vault(vault):
     """Decrypt a vault, using the configured or default password file."""
     command = [ansible_vault_bin(), "view", str(vault)]
     # ~/.ssh/dib-vault-pass is the old default location, kept as a fallback.
-    for passfile in (os.environ.get("VAULT_PASSWORD_FILE"),
+    explicit = os.environ.get("VAULT_PASSWORD_FILE")
+    if explicit and not (Path(explicit).is_file() and Path(explicit).stat().st_size):
+        print(f"warning: VAULT_PASSWORD_FILE={explicit} is missing or empty; "
+              "trying the default password files", file=sys.stderr)
+    for passfile in (explicit,
                      str(Path.home() / ".dib-vault-pass"),
                      str(Path.home() / ".ssh/dib-vault-pass")):
         if passfile and Path(passfile).is_file() and Path(passfile).stat().st_size:
             command += ["--vault-password-file", passfile]
             break
-    result = subprocess.run(
-        command, stdout=subprocess.PIPE, text=True, check=False)
+    # Without a password file ansible-vault prompts on the terminal. stdin is
+    # closed and the wait bounded so a non-interactive caller cannot hang.
+    try:
+        result = subprocess.run(
+            command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            text=True, check=False, timeout=VAULT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        raise SystemExit(f"timed out decrypting {vault}")
     if result.returncode != 0:
         raise SystemExit(f"could not decrypt {vault}")
     return yaml.safe_load(result.stdout) or {}

@@ -1,0 +1,69 @@
+---
+# playbooks/tasks/migration/common/cleanup-vsphere.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Best-effort removal of the vSphere artifacts of a run: the temporary clone VM
+# and the snapshot taken on the source VM. Neither is needed once the OVA is
+# exported, so they do not depend on any conversion still running locally.
+#
+# common/cleanup.yml imports this file for every target. The non-datastore-direct
+# Azure and OpenStack playbooks import it first, before the target cleanup waits
+# for background disk conversions (which can take hours), so an interrupted wait
+# cannot leave the clone and snapshot behind. vsphere_cleanup_done keeps the
+# later import from repeating it.
+
+- name: Delete the temporary clone VM
+  community.vmware.vmware_guest:
+    hostname: "{{ vcenter_hostname }}"
+    username: "{{ vcenter_username }}"
+    password: "{{ vcenter_password }}"
+    validate_certs: "{{ validate_certs | bool }}"
+    datacenter: "{{ datacenter }}"
+    folder: "{{ source_vm_folder }}"
+    name: "{{ clone_name }}"
+    state: absent
+  when:
+    - clone_cleanup_required | default(false) | bool
+    - source_vm_folder is defined
+  no_log: true
+  register: cleanup_clone
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
+
+- name: Remove the snapshot from the source VM
+  environment:
+    GOVC_URL: "{{ govc_url }}"
+    GOVC_USERNAME: "{{ govc_username }}"
+    GOVC_INSECURE: "{{ govc_insecure }}"
+  ansible.builtin.command:
+    stdin: "{{ govc_password }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - snapshot.remove
+      - "-vm={{ source_vm_path }}"
+      - "{{ snapshot_name }}"
+  when:
+    - snapshot_cleanup_required | default(false) | bool
+    - source_vm_path is defined
+  no_log: true
+  changed_when: true
+  register: cleanup_snapshot
+  # ignore_errors, not failed_when: false, so the warning below sees a failure.
+  ignore_errors: true
+
+- name: Warn about best-effort vSphere cleanup failures
+  ansible.builtin.debug:
+    msg: >-
+      Best-effort cleanup did not remove every vSphere artifact. Check the run
+      output and remove any remaining clone or snapshot.
+  when: >-
+    (cleanup_clone.failed | default(false) | bool) or
+    (cleanup_snapshot.failed | default(false) | bool)
+
+- name: Record that the vSphere cleanup ran
+  ansible.builtin.set_fact:
+    vsphere_cleanup_done: true
+

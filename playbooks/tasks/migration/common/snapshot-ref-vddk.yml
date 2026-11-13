@@ -22,6 +22,7 @@
       - snapshot.tree
       - "-vm={{ source_vm_path }}"
       - -i
+  no_log: true
   register: snapshot_ref_tree
   changed_when: false
 

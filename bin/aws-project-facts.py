@@ -34,6 +34,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from vault_common import default_vault_path, read_vault  # noqa: E402
 
+# Exported variables that select AWS credentials on purpose; boto3 reads them.
+AWS_ENVIRONMENT = ("AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_WEB_IDENTITY_TOKEN_FILE")
+
 def select_vault_entry(vault, requested):
     data = read_vault(vault)
     projects = {str(key): value for key, value in (
@@ -235,7 +238,14 @@ def main():
                         help="machine-readable output for scripting")
     args = parser.parse_args()
 
-    key, entry = select_vault_entry(args.vault, args.project)
+    # --profile or exported AWS_* credentials decide on their own unless a
+    # PROJECT was named, so the vault (and its password) is not touched.
+    exported = [name for name in AWS_ENVIRONMENT
+                if os.environ.get(name, "").strip()]
+    if not args.project and (args.profile or exported):
+        key, entry = "<environment>", {}
+    else:
+        key, entry = select_vault_entry(args.vault, args.project)
     entry = entry or {}
     region = (args.region
               or str(entry.get("aws_region", "") or "").strip()

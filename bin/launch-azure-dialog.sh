@@ -6,6 +6,8 @@
 # final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-azure-dialog
@@ -76,6 +78,14 @@ public_ip_default=no
 [ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=yes
 if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE_NO_PUBLIC_IP=true; else AZURE_NO_PUBLIC_IP=false; fi
 
+# The NSG's SSH rule is only created when the NSG is missing, and only matters
+# when the VM is reachable from outside, so ask only for a public IP.
+if [ "$AZURE_NO_PUBLIC_IP" = true ] ; then
+    AZURE_SSH_SOURCE_PREFIX=""
+else
+    AZURE_SSH_SOURCE_PREFIX=$(input_required "Allow SSH from (CIDR, IP, service tag, or * for anywhere).\nOnly used if the NSG is created now; an existing NSG keeps its own rules:" "${AZURE_SSH_SOURCE_PREFIX:-*}" "The SSH source cannot be empty.") || abort
+fi
+
 AZURE_ADMIN_USERNAME=$(input_required "Admin user cloud-init creates:" "${AZURE_ADMIN_USERNAME:-azureuser}" "The admin user cannot be empty.") || abort
 
 # Like the AWS and OpenStack key pairs, the key is an SSH public key resource
@@ -99,6 +109,23 @@ else
     AZURE_SSH_KEY_NAME=$picked_key
 fi
 
+# Optional local SSH public key file that overrides the registered key resource.
+AZURE_SSH_KEY_FILE=${AZURE_SSH_KEY_FILE:-}
+key_file_default=no
+[ -n "$AZURE_SSH_KEY_FILE" ] && key_file_default=yes
+if yesno "Inject an additional SSH public key from a local file?\\n\\nThis overrides the registered Azure key resource $AZURE_SSH_KEY_NAME for the admin user $AZURE_ADMIN_USERNAME." "$key_file_default" ; then
+    while : ; do
+        AZURE_SSH_KEY_FILE=$(input "SSH public key file:" "$AZURE_SSH_KEY_FILE") || abort
+        [ -r "$(anchor_path "$AZURE_SSH_KEY_FILE")" ] && {
+            AZURE_SSH_KEY_FILE=$(realpath -- "$(anchor_path "$AZURE_SSH_KEY_FILE")")
+            break
+        }
+        bad "That file is not readable: $AZURE_SSH_KEY_FILE" || true
+    done
+else
+    AZURE_SSH_KEY_FILE=""
+fi
+
 say "Launch summary for $VM_NAME
 
   Subscription.: ${AZURE_TARGET_PROJECT:-auto-select}
@@ -107,6 +134,7 @@ say "Launch summary for $VM_NAME
   VNet / subnet: $AZURE_VNET_NAME / $AZURE_SUBNET_NAME
   NSG..........: $AZURE_NSG_NAME
   No public IP.: $AZURE_NO_PUBLIC_IP
+  SSH source...: ${AZURE_SSH_SOURCE_PREFIX:-n/a (no public IP)}
   Admin user...: $AZURE_ADMIN_USERNAME
   SSH key......: $AZURE_SSH_KEY_NAME" 17
 
@@ -118,8 +146,8 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \
         "AZURE_NO_PUBLIC_IP=$AZURE_NO_PUBLIC_IP" "AZURE_ADMIN_USERNAME=$AZURE_ADMIN_USERNAME" \
-        "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=" \
-        "INSTANCE_NAME=$INSTANCE_NAME" ; do
+        "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=$AZURE_SSH_KEY_FILE" \
+        "INSTANCE_NAME=$INSTANCE_NAME" "AZURE_SSH_SOURCE_PREFIX=$AZURE_SSH_SOURCE_PREFIX" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-azure-instance.sh")"

@@ -8,6 +8,25 @@
 
 set -euo pipefail
 
+# The dialogs cd into the repository. orig_pwd is where the operator started,
+# so a relative path they gave (or typed) is anchored there, not in the repo.
+orig_pwd=${orig_pwd:-$PWD}
+
+anchor_path()
+{
+    case "$1" in
+        "" | /*) printf %s "$1" ;;
+        *) printf %s "$orig_pwd/$1" ;;
+    esac
+}
+
+for path_var in ARTIFACT_ROOT MIGRATE_V2V_CATALOG_DIR MIGRATE_V2V_VAULT_DIR ; do
+    if [ -n "${!path_var:-}" ] ; then
+        printf -v "$path_var" '%s' "$(anchor_path "${!path_var}")"
+    fi
+done
+unset path_var
+
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
 export ARTIFACT_ROOT
 MIGRATE_V2V_CATALOG_DIR=${MIGRATE_V2V_CATALOG_DIR:-$ARTIFACT_ROOT/catalogs}
@@ -35,18 +54,30 @@ fi
 # Match the erase character to the Backspace key the terminal advertises, then
 # put the operator's settings back however this script exits.
 tty_state=""
+# Temporary files (the generated command, an editor buffer) to remove on exit,
+# including after SIGINT or SIGTERM.
+dialog_tmp_files=()
 restore_tty()
 {
     if [ -n "$tty_state" ] ; then
         stty "$tty_state" < /dev/tty 2> /dev/null || true
     fi
 }
+dialog_cleanup()
+{
+    restore_tty
+    if [ "${#dialog_tmp_files[@]}" -gt 0 ] ; then
+        rm -f -- "${dialog_tmp_files[@]}"
+    fi
+}
+trap dialog_cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if tty_state=$(stty -g < /dev/tty 2> /dev/null) ; then
     backspace_key=$(tput kbs 2> /dev/null || true)
     if [ "${#backspace_key}" -eq 1 ] ; then
         stty erase "$backspace_key" < /dev/tty 2> /dev/null || true
     fi
-    trap restore_tty EXIT
 fi
 
 dlg()
@@ -282,24 +313,27 @@ choose_target()
 finish()
 {
     local file=$1 vm=$2 verb=${3:-launch} saved=""
+    dialog_tmp_files+=("$file")
     if yesno "Review the generated command?\n\nNothing runs yet." yes ; then
         dlg --textbox "$file" "$(height 22)" "$COLS" || true
     fi
     if yesno "Save the command to a file?" no ; then
         while : ; do
-            saved=$(input "Save where:" "./${verb}-${vm}.sh") || abort
+            saved=$(input "Save where:" "$orig_pwd/${verb}-${vm//\//_}.sh") || abort
             if [ -z "$saved" ] ; then
                 bad "Choose a file path." || true
                 continue
             fi
+            saved=$(anchor_path "$saved")
             if [ -e "$saved" ] || [ -L "$saved" ] ; then
                 bad "The file already exists: $saved" || true
                 continue
             fi
-            if (set -C; cat -- "$file" > "$saved") ; then
+            if (set -C; umask 077; cat -- "$file" > "$saved") ; then
                 saved=$(realpath -- "$saved")
                 chmod +x "$saved"
                 rm -f -- "$file"
+                dialog_tmp_files=()
                 file=$saved
                 say "Saved to $saved." 8
                 break
@@ -310,6 +344,8 @@ finish()
     if yesno "Run the ${verb} now?" no ; then
         bash "$file"
     else
+        # Declined: the operator was told where the command is, so keep it.
+        dialog_tmp_files=()
         say "The command is in $file.\n\nRun it with:\n  bash $file" 10
     fi
 }

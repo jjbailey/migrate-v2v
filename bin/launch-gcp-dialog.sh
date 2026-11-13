@@ -6,6 +6,8 @@
 # final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-gcp-dialog
@@ -14,6 +16,7 @@ source "$script_dir/launch-dialog-common.sh"
 
 GCP_TARGET_PROJECT=$(choose_target "Which GCP project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/gcp.yml" gcp_projects "${GCP_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required gcp GCP) || abort
+INSTANCE_NAME=$(input "GCP instance name (blank to derive it from $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 # Query one gcp-project-facts.py section and format tag\item\status lines
 # for radio(). KIND selects the formatter
@@ -145,8 +148,8 @@ key_default=no
 if yesno "Inject an additional SSH public key?\n\nThe project-level key is normally sufficient." "$key_default" ; then
     while : ; do
         GCP_SSH_KEY_FILE=$(input "SSH public key file:" "$GCP_SSH_KEY_FILE") || abort
-        [ -r "$GCP_SSH_KEY_FILE" ] && {
-            GCP_SSH_KEY_FILE=$(realpath -- "$GCP_SSH_KEY_FILE")
+        [ -r "$(anchor_path "$GCP_SSH_KEY_FILE")" ] && {
+            GCP_SSH_KEY_FILE=$(realpath -- "$(anchor_path "$GCP_SSH_KEY_FILE")")
             break
         }
         bad "That file is not readable: $GCP_SSH_KEY_FILE" || true
@@ -158,6 +161,7 @@ fi
 
 say "Launch summary for $VM_NAME
 
+  Instance name: ${INSTANCE_NAME:-derived from $VM_NAME}
   Project......: ${GCP_TARGET_PROJECT:-auto-select}
   Zone.........: $GCP_ZONE
   Machine type.: $GCP_MACHINE_TYPE
@@ -165,7 +169,7 @@ say "Launch summary for $VM_NAME
   Subnetwork...: ${GCP_SUBNETWORK:-default}
   Tags.........: $GCP_TAGS_JSON
   No address...: $GCP_NO_ADDRESS
-  Extra SSH key: ${GCP_SSH_KEY_FILE:-none}" 16
+  Extra SSH key: ${GCP_SSH_KEY_FILE:-none}" 17
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-gcp.XXXXXX")
 {
@@ -174,7 +178,8 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-gcp.XXXXXX")
         "VM_NAME=$VM_NAME" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
         "GCP_NETWORK=$GCP_NETWORK" "GCP_SUBNETWORK=$GCP_SUBNETWORK" "GCP_TAGS_JSON=$GCP_TAGS_JSON" \
         "GCP_NO_ADDRESS=$GCP_NO_ADDRESS" "GCP_TARGET_PROJECT=$GCP_TARGET_PROJECT" \
-        "GCP_SSH_USER=$GCP_SSH_USER" "GCP_SSH_KEY_FILE=$GCP_SSH_KEY_FILE" ; do
+        "GCP_SSH_USER=$GCP_SSH_USER" "GCP_SSH_KEY_FILE=$GCP_SSH_KEY_FILE" \
+        "INSTANCE_NAME=$INSTANCE_NAME" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-gcp-instance.sh")"

@@ -15,7 +15,8 @@ wrapper_script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "$wrapper_source")" >
 for wrapper_path_var in \
     VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR \
     ARTIFACT_ROOT OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE \
-    OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE ; do
+    OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE \
+    AZURE_SSH_KEY_FILE GCP_SSH_KEY_FILE OS_USER_DATA_FILE VCENTER_CA_BUNDLE ; do
     case "${!wrapper_path_var:-}" in
         "" | /*) ;;
         *) export "$wrapper_path_var=$PWD/${!wrapper_path_var}" ;;

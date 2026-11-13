@@ -37,6 +37,11 @@ wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
 wrapper_require_bool REQUIRE_CBT "$REQUIRE_CBT"
 wrapper_require_bool COMPRESS "$COMPRESS"
+case "$DISCARD_RUN_ID" in
+    "" | *[!0-9]*)
+        [ -z "$DISCARD_RUN_ID" ] || wrapper_error "DISCARD_RUN_ID must be the digits-only ID of a failed run, not a flag (got '$DISCARD_RUN_ID')"
+        ;;
+esac
 case "$BACKEND" in
     "" | auto | vddk | curl) ;;
     *)

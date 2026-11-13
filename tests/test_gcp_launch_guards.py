@@ -14,7 +14,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-DISK_TASKS = yaml.safe_load((ROOT / "playbooks/tasks/launch-gcp-data-disk.yml").read_text())
+DISK_TASKS = yaml.safe_load((ROOT / "playbooks/tasks/launch-gcp-data-disk-create.yml").read_text())
+ATTACH_TASKS = yaml.safe_load((ROOT / "playbooks/tasks/launch-gcp-data-disk-attach.yml").read_text())
 LAUNCH_TASKS = yaml.safe_load((ROOT / "playbooks/launch-gcp-instance.yml").read_text())[0]["tasks"]
 
 def task_named(tasks, name):
@@ -121,7 +122,7 @@ class GcpLaunchGuardTests(unittest.TestCase):
                 self.assertEqual(result.returncode == 0, should_pass, result.stdout + result.stderr)
 
     def test_existing_device_must_hold_the_expected_disk(self):
-        guard = task_named(DISK_TASKS, "Refuse a different disk at the expected device name")
+        guard = task_named(ATTACH_TASKS, "Refuse a different disk at the expected device name")
         for disk_name, should_pass in (("target-data-1", True), ("other-disk", False)):
             with self.subTest(disk_name=disk_name):
                 result = self.run_tasks([{
@@ -136,6 +137,37 @@ class GcpLaunchGuardTests(unittest.TestCase):
                     },
                 }, guard])
                 self.assertEqual(result.returncode == 0, should_pass, result.stdout + result.stderr)
+
+    def test_created_disks_are_passed_to_instance_create(self):
+        record = task_named(DISK_TASKS, "Record the GCP data disk to attach")
+        build = task_named(LAUNCH_TASKS, "Build the GCP instance creation arguments")
+        use_spec = task_named(ATTACH_TASKS, "Use the GCP data disk from the spec")
+        result = self.run_tasks([
+            {"ansible.builtin.set_fact": {
+                "gcp_data_disk_specs": [], "gcp_data_disk_args": [],
+                "gcp_data_disk_name": "vm-data-1", "gcp_data_device_name": "data-disk-1",
+                "gcp_instance_name": "vm", "gcp_project": "p", "gcp_zone": "z",
+                "gcp_machine_type": "m", "gcp_boot_image_name": "boot", "gcp_disk_type": "pd-ssd",
+                "gcp_network": "default", "gcp_subnetwork": "", "gcp": {"tags": []},
+                "gcp_no_address": False, "gcp_ssh_public_key_file": "", "gcp_migration_id": "",
+                "vm_name": "vm",
+            }},
+            record,
+            {"ansible.builtin.set_fact": {
+                "gcp_data_disk_name": "vm-data-2", "gcp_data_device_name": "data-disk-2"}},
+            record,
+            build,
+            {"ansible.builtin.assert": {"that": [
+                "'--disk=name=vm-data-1,device-name=data-disk-1,mode=rw,boot=no,auto-delete=no' in gcp_instance_create_args",
+                "'--disk=name=vm-data-2,device-name=data-disk-2,mode=rw,boot=no,auto-delete=no' in gcp_instance_create_args",
+                "gcp_data_disk_specs | length == 2",
+            ]}},
+            {"ansible.builtin.set_fact": {"gcp_data_disk_spec": {"name": "vm-data-2", "device": "data-disk-2"}}},
+            use_spec,
+            {"ansible.builtin.assert": {"that": [
+                "gcp_data_disk_name == 'vm-data-2'", "gcp_data_device_name == 'data-disk-2'"]}},
+        ])
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 if __name__ == "__main__":
     unittest.main()

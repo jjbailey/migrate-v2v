@@ -191,7 +191,8 @@ def main():
 
     key, entry = select_vault_entry(args.vault, args.project)
     entry = entry or {}
-    project_id = str(entry.get("gcp_project", "") or "").strip()
+    project_id = str(entry.get("gcp_project", "")
+                     or entry.get("project_id", "") or "").strip()
     if not project_id:
         raise SystemExit(f"vault entry '{key}' has no gcp_project")
 
