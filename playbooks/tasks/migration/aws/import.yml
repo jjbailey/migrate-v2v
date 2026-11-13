@@ -75,7 +75,10 @@
       - "{{ import_start.import_image.import_task_id }}"
     region: "{{ aws_region }}"
   register: import_status
-  until: import_status.import_image[0].status in ['completed', 'deleted', 'cancelled']
+  # An empty list (the task not visible yet) is a retry, not a hard failure.
+  until: >-
+    import_status.import_image | default([]) | length > 0 and
+    import_status.import_image[0].status in ['completed', 'deleted', 'cancelled']
   retries: "{{ import_poll_retries }}"
   delay: "{{ import_poll_delay }}"
 

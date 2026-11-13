@@ -54,6 +54,8 @@ def load_catalog(path, list_key):
     if not path.exists():
         raise ValueError(f"no catalog at {path}")
     catalog = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(catalog, dict):
+        raise ValueError(f"{path}: catalog top level must be a JSON object")
     if catalog.get("schema_version") != 1 or not isinstance(catalog.get(list_key), list):
         raise ValueError(
             f"{path}: expected schema_version 1 and a {list_key} list")
@@ -75,11 +77,30 @@ def atomic_write_json(path, payload):
             output.flush()
             os.fsync(output.fileno())
         try:
-            mode = stat.S_IMODE(os.stat(path).st_mode)
+            original = os.stat(path)
+            mode = stat.S_IMODE(original.st_mode)
         except FileNotFoundError:
-            mode = 0o644
+            original, mode = None, 0o644
         os.chmod(temporary, mode)
+        if original is not None:
+            # Keep owner and group so another uid's later write still works
+            # on the shared catalog directory. Only root may change owner.
+            try:
+                os.chown(temporary, original.st_uid, original.st_gid)
+            except PermissionError:
+                pass
         os.replace(temporary, path)
+        # Make the rename itself durable, not just the file contents.
+        # Some filesystems refuse fsync on a directory; the data is already
+        # written and renamed, so that is not a failure.
+        try:
+            directory = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            pass
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
@@ -95,6 +116,9 @@ def write_catalog(path, catalog, list_key):
 def exclusive_lock(path):
     """Hold the catalog's sidecar lock for the duration of the block."""
     lock_path = path.with_name(path.name + ".lock")
+    # 0666 before umask, so writers under another uid can open the lock.
+    # O_CREAT leaves an existing lock file's mode alone.
+    os.close(os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666))
     with lock_path.open("a+", encoding="utf-8") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:

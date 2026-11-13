@@ -32,6 +32,12 @@
     openstack_pending_disks: []
     openstack_convert_jobs: {}
 
+# An operator -e migration_run_dir wins over the set_fact below (extra vars
+# have the highest precedence) and is theirs: cleanup removes only a derived one.
+- name: Note whether the run directory is derived or operator-supplied
+  ansible.builtin.set_fact:
+    migration_run_dir_derived: "{{ migration_run_dir is not defined }}"
+
 - name: Derive the persistent OpenStack run directory
   ansible.builtin.set_fact:
     migration_run_dir: >-

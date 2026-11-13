@@ -18,6 +18,7 @@
   when:
     - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
+    - migration_run_dir_derived | default(false) | bool
   failed_when: false
 
 - name: Report retained artifacts for a resumable failed run

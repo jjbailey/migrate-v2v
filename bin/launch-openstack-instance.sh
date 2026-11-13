@@ -62,7 +62,18 @@ fi
 [ -n "$OS_FIXED_IPS_JSON" ] && args+=(-e "$(wrapper_json_var openstack_fixed_ips "$OS_FIXED_IPS_JSON")")
 [ -n "$OS_NICS_JSON" ] && args+=(-e "$(wrapper_json_var openstack_nics "$OS_NICS_JSON")")
 [ -n "$OS_PROJECT_NAME" ] && args+=(-e "$(wrapper_var openstack_target_project "$OS_PROJECT_NAME")")
-[ -n "$OS_USER_DATA" ] && args+=(-e "$(wrapper_var openstack_user_data "$OS_USER_DATA")")
+[ -n "$OS_USER_DATA" ] && [ -n "$OS_USER_DATA_FILE" ] && wrapper_error "OS_USER_DATA and OS_USER_DATA_FILE are mutually exclusive"
+if [ -n "$OS_USER_DATA" ] ; then
+    # Inline user-data goes through a private file, not ansible's argv, where
+    # any local user could read it from ps.
+    user_data_tmp=$(mktemp "${TMPDIR:-/tmp}/launch-openstack-userdata.XXXXXX")
+    trap 'rm -f "$user_data_tmp"' EXIT
+    chmod 600 "$user_data_tmp"
+    printf '%s\n' "$OS_USER_DATA" > "$user_data_tmp"
+    OS_USER_DATA_FILE=$user_data_tmp
+fi
 [ -n "$OS_USER_DATA_FILE" ] && args+=(-e "$(wrapper_var openstack_user_data_file "$OS_USER_DATA_FILE")")
 
-wrapper_run_playbook playbooks/launch-openstack-instance.yml "${args[@]}" "${wrapper_extra_args[@]}" -v
+# No exec: the EXIT trap has to remove the temporary user-data file.
+# shellcheck disable=SC2154 # set by wrapper-common.sh
+"$wrapper_script_dir/run-playbook.sh" playbooks/launch-openstack-instance.yml "${args[@]}" "${wrapper_extra_args[@]}" -v

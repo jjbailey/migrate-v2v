@@ -152,6 +152,8 @@ def main():
     args = parser.parse_args()
 
     entry = json.loads(args.entry.read_text(encoding="utf-8"))
+    if not isinstance(entry, dict):
+        raise ValueError("--entry must contain a JSON object")
     validate(entry)
     path = pathlib.Path(args.catalog)
     path.parent.mkdir(parents=True, exist_ok=True)

@@ -18,9 +18,12 @@
   ansible.builtin.async_status:
     jid: "{{ openstack_convert_jobs[openstack_disk.index | string] }}"
   register: openstack_convert_result
-  until: openstack_convert_result.finished | bool
+  until: (openstack_convert_result.finished | default(1)) | bool
   retries: "{{ openstack_convert_poll_retries | int }}"
   delay: "{{ openstack_convert_poll_delay | int }}"
+  # async_status itself fails when the job failed, which would skip the next
+  # task and its qemu-img stderr; let that task report it.
+  failed_when: false
 
 - name: Fail if this disk's conversion failed
   ansible.builtin.fail:

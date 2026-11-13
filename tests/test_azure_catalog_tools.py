@@ -166,6 +166,19 @@ class AzureLookupTests(unittest.TestCase):
         self.assertEqual(found.returncode, 0, found.stderr)
         self.assertEqual(json.loads(found.stdout)["migration_id"], "new")
 
+    def test_region_filter_skips_newer_rows_in_other_regions(self):
+        rows = [
+            dict(azure_migration("vm-a"), migrated_at="2026-09-01T00:00:00Z",
+                 clone_name="here", azure_location="westus2"),
+            dict(azure_migration("vm-a"), migrated_at="2026-09-02T00:00:00Z",
+                 clone_name="elsewhere", azure_location="eastus"),
+        ]
+        found = self.lookup(rows, "--region", "West US 2")
+        self.assertEqual(found.returncode, 0, found.stderr)
+        self.assertEqual(json.loads(found.stdout)["migration_id"], "here")
+        self.assertEqual(json.loads(self.lookup(rows).stdout)["migration_id"], "elsewhere")
+        self.assertNotEqual(self.lookup(rows, "--region", "northeurope").returncode, 0)
+
     def test_legacy_rows_with_data_images_are_refused(self):
         rows = [azure_migration("vm-a", data=["vm-a-migration-1-disk-1"],
                                 legacy_data_images=True)]
@@ -193,14 +206,20 @@ class FakeImages:
             raise load_resource_not_found()
         return {"name": name, "provisioning_state": "Succeeded"}
 
-def load_resource_not_found():
+    def list(self):
+        return iter([])
+
+def load_resource_not_found(code="ResourceNotFound"):
     from azure.core.exceptions import ResourceNotFoundError
-    return ResourceNotFoundError("not found")
+    error = ResourceNotFoundError("not found")
+    error.error = mock.Mock(code=code)
+    return error
 
 class FakeClient:
-    def __init__(self, missing=()):
+    def __init__(self, missing=(), vms_missing=()):
         self.images = FakeImages(missing)
         self.snapshots = FakeImages(missing)
+        self.virtual_machines = FakeImages(vms_missing)
 
 @unittest.skipIf(reconcile_azure is None, "needs the Azure SDK")
 class AzureReconcileLogicTests(unittest.TestCase):
@@ -323,6 +342,7 @@ class AzureReconcileMainTests(unittest.TestCase):
         self.addCleanup(directory.cleanup)
         self.tmp = Path(directory.name)
         self.migrations = self.tmp / "migration-catalog.json"
+        self.deployments = self.tmp / "deployment-catalog.json"
 
     def write(self, migrations):
         self.migrations.write_text(
@@ -340,7 +360,8 @@ class AzureReconcileMainTests(unittest.TestCase):
              mock.patch.object(reconcile_azure, "ComputeManagementClient",
                                return_value=client or FakeClient()):
             return reconcile_azure.main(
-                ["--migration-catalog", str(self.migrations), *args])
+                ["--migration-catalog", str(self.migrations),
+                 "--deployment-catalog", str(self.deployments), *args])
 
     def test_removes_stale_rows_and_keeps_the_rest(self):
         self.write([azure_migration("a"), azure_migration("b"),
@@ -397,6 +418,79 @@ class AzureReconcileMainTests(unittest.TestCase):
         self.write([azure_migration("a")])
         with self.assertRaisesRegex(ValueError, "no Azure entries for subscription sub-x"):
             self.run_main("--subscription", "sub-x")
+
+    def azure_deployment(self, vm, status="running", subscription="sub-a"):
+        return {"vm_name": vm, "target_platform": "azure", "status": status,
+                "azure_vm_name": vm + "-az", "azure_subscription_id": subscription,
+                "azure_resource_group": "rg-a"}
+
+    def write_deployments(self, rows):
+        self.deployments.write_text(
+            json.dumps({"schema_version": 1, "deployments": rows}))
+
+    def deployment_names(self):
+        return [entry["vm_name"]
+                for entry in json.loads(self.deployments.read_text())["deployments"]]
+
+    def test_removes_deployments_whose_vm_is_gone(self):
+        self.write([azure_migration("m1")])
+        self.write_deployments([self.azure_deployment("a"), self.azure_deployment("b"),
+                                self.azure_deployment("c"),
+                                self.azure_deployment("old", status="retired")])
+        status = self.run_main(client=FakeClient(vms_missing={"a-az"}))
+        self.assertEqual(status, 0)
+        self.assertEqual(self.deployment_names(), ["b", "c"])
+        self.assertEqual(self.names(), ["m1"])
+
+    def test_deployment_in_another_subscription_is_not_checked(self):
+        self.write([azure_migration("m1")])
+        self.write_deployments([self.azure_deployment("a", subscription="sub-b"),
+                                self.azure_deployment("b")])
+        client = FakeClient(vms_missing={"a-az", "b-az"})
+        self.assertEqual(self.run_main("--subscription", "sub-a", client=client), 0)
+        self.assertEqual(client.virtual_machines.calls, [("rg-a", "b-az")])
+        self.assertEqual(self.deployment_names(), ["a"])
+
+    def test_deployment_stale_count_trips_the_guard(self):
+        self.write([])
+        self.write_deployments([self.azure_deployment("a"), self.azure_deployment("b")])
+        client = FakeClient(vms_missing={"a-az", "b-az"})
+        with self.assertRaisesRegex(ValueError, "refusing to remove 2 of 2"):
+            self.run_main(client=client)
+        self.assertEqual(self.run_main("--force", client=client), 0)
+        self.assertEqual(self.deployment_names(), [])
+
+    def test_retired_rows_do_not_inflate_the_guard_denominator(self):
+        # 1 completed row, stale, plus 3 retired: 1 of 1 completed, so refuse.
+        self.write([azure_migration("a")]
+                   + [azure_migration(name, status="retired") for name in "xyz"])
+        before = self.migrations.read_text()
+        with self.assertRaisesRegex(ValueError, "refusing to remove 1 of 1"):
+            self.run_main(client=FakeClient(missing={"a-migration-1-disk-0"}))
+        self.assertEqual(self.migrations.read_text(), before)
+
+    def test_foreign_subscription_error_is_not_deletion(self):
+        client = FakeClient()
+        client.images.get = mock.Mock(
+            side_effect=load_resource_not_found("SubscriptionNotFound"))
+        client.snapshots = client.images
+        migrations = {"migrations": [azure_migration("a")]}
+        from azure.core.exceptions import ResourceNotFoundError
+        with self.assertRaises(ResourceNotFoundError):
+            reconcile_azure.find_missing_resources(client, "sub-a", migrations)
+        client.virtual_machines.get = client.images.get
+        deployments = {"deployments": [self.azure_deployment("a")]}
+        with self.assertRaises(ResourceNotFoundError):
+            reconcile_azure.find_missing_deployments(client, "sub-a", deployments)
+
+    def test_subscription_access_is_verified_before_the_scan(self):
+        from azure.core.exceptions import ClientAuthenticationError
+        self.write([azure_migration("a")])
+        client = FakeClient()
+        client.images.list = mock.Mock(side_effect=ClientAuthenticationError("denied"))
+        with self.assertRaisesRegex(ValueError, "cannot access Azure subscription sub-a"):
+            self.run_main(client=client)
+        self.assertEqual(client.images.calls, [])
 
 if __name__ == "__main__":
     unittest.main()

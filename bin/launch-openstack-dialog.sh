@@ -6,6 +6,8 @@
 # the final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-openstack-dialog
@@ -164,8 +166,8 @@ if [ "$addr_mode" = static ] ; then
         ok=1
         IFS=',' read -r -a ip_list <<< "$ips"
         for ip in "${ip_list[@]}" ; do
-            ip="${ip# }"
-            ip="${ip% }"
+            ip="${ip#"${ip%%[![:space:]]*}"}"
+            ip="${ip%"${ip##*[![:space:]]}"}"
             looks_like_ip "$ip" || {
                 ok=0
                 break
@@ -194,8 +196,8 @@ case "$mac_mode" in
             ok=1
             IFS=',' read -r -a mac_list <<< "$macs"
             for mac in "${mac_list[@]}" ; do
-                mac="${mac# }"
-                mac="${mac% }"
+                mac="${mac#"${mac%%[![:space:]]*}"}"
+                mac="${mac%"${mac##*[![:space:]]}"}"
                 looks_like_mac "$mac" || {
                     ok=0
                     break
@@ -325,8 +327,8 @@ case "$ud_mode" in
     file)
         while : ; do
             USER_DATA_FILE=$(input "Path to the cloud-config file:" "") || abort
-            [ -s "$USER_DATA_FILE" ] && {
-                USER_DATA_FILE=$(realpath -- "$USER_DATA_FILE")
+            [ -s "$(anchor_path "$USER_DATA_FILE")" ] && {
+                USER_DATA_FILE=$(realpath -- "$(anchor_path "$USER_DATA_FILE")")
                 break
             }
             bad "File not found or empty: $USER_DATA_FILE" || true
@@ -334,12 +336,10 @@ case "$ud_mode" in
         ;;
     text)
         ud_tmp=$(mktemp "${TMPDIR:-/tmp}/launch-openstack-userdata.XXXXXX")
+        dialog_tmp_files+=("$ud_tmp")
         printf '#cloud-config\n' > "$ud_tmp"
         while : ; do
-            OS_USER_DATA=$(dlg --editbox "$ud_tmp" "$(height 20)" "$COLS") || {
-                rm -f "$ud_tmp"
-                abort
-            }
+            OS_USER_DATA=$(dlg --editbox "$ud_tmp" "$(height 20)" "$COLS") || abort
             printf '%s\n' "$OS_USER_DATA" > "$ud_tmp"
             [ -n "${OS_USER_DATA//[[:space:]]/}" ] && [ "$OS_USER_DATA" != '#cloud-config' ] && break
             bad "The user-data cannot be empty." || true

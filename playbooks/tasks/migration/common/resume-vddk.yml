@@ -35,11 +35,34 @@
     GOVC_INSECURE: "{{ govc_insecure }}"
   ansible.builtin.command:
     stdin: "{{ govc_password }}"
-    cmd: >-
-      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} find /{{ datacenter }}/vm -type m -name "{{ vm_name }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - find
+      - "/{{ datacenter }}/vm"
+      - -type
+      - m
+      - -name
+      - "{{ vm_name }}"
+  no_log: true
   register: source_vm_find
   changed_when: false
-  failed_when: source_vm_find.rc != 0 or (source_vm_find.stdout_lines | length != 1)
+  # no_log hides the whole result, so failure is judged by the assert below,
+  # which can show the (password-free) detail.
+  failed_when: false
+  when: migration_resume_mode | bool
+
+- name: Fail unless the source VM resolves to exactly one inventory path
+  ansible.builtin.assert:
+    that:
+      - source_vm_find.rc == 0
+      - source_vm_find.stdout_lines | length == 1
+    fail_msg: >-
+      Could not resolve '{{ vm_name }}' in datacenter '{{ datacenter }}' (govc
+      exit {{ source_vm_find.rc }}, {{ source_vm_find.stdout_lines | length }}
+      match(es)). {{ source_vm_find.stderr | default('') | trim }}
   when: migration_resume_mode | bool
 
 - name: Record the source VM path
@@ -62,6 +85,7 @@
       - "{{ govc_bin }}"
       - snapshot.tree
       - "-vm={{ source_vm_path }}"
+  no_log: true
   register: resume_snapshot_tree
   changed_when: false
   when: migration_resume_mode | bool
@@ -135,8 +159,14 @@
     GOVC_INSECURE: "{{ govc_insecure }}"
   ansible.builtin.command:
     stdin: "{{ govc_password }}"
-    cmd: >-
-      {{ stdin_env_bin }} GOVC_PASSWORD -- {{ govc_bin }} vm.info -json "{{ source_vm_path }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - vm.info
+      - -json
+      - "{{ source_vm_path }}"
   register: source_vm_info
   changed_when: false
   no_log: true

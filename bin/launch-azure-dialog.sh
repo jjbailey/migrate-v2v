@@ -6,6 +6,8 @@
 # final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-azure-dialog
@@ -106,8 +108,8 @@ key_file_default=no
 if yesno "Inject an additional SSH public key from a local file?\\n\\nThis overrides the registered Azure key resource $AZURE_SSH_KEY_NAME for the admin user $AZURE_ADMIN_USERNAME." "$key_file_default" ; then
     while : ; do
         AZURE_SSH_KEY_FILE=$(input "SSH public key file:" "$AZURE_SSH_KEY_FILE") || abort
-        [ -r "$AZURE_SSH_KEY_FILE" ] && {
-            AZURE_SSH_KEY_FILE=$(realpath -- "$AZURE_SSH_KEY_FILE")
+        [ -r "$(anchor_path "$AZURE_SSH_KEY_FILE")" ] && {
+            AZURE_SSH_KEY_FILE=$(realpath -- "$(anchor_path "$AZURE_SSH_KEY_FILE")")
             break
         }
         bad "That file is not readable: $AZURE_SSH_KEY_FILE" || true

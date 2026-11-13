@@ -135,6 +135,32 @@
           - vpc_subnet_id | length > 0
         fail_msg: "Provide vpc_subnet_id (or AWS_SUBNET_ID) before launching an AWS instance"
 
+    # ec2_instance is idempotent on the Name tag and would silently report
+    # "no change" for an instance of the same name that came from a different
+    # AMI or migration. Check first and stop clearly instead.
+    - name: Look for a live instance with this name
+      amazon.aws.ec2_instance_info:
+        region: "{{ aws_region }}"
+        filters:
+          "tag:Name": "{{ instance_name }}"
+          instance-state-name: [pending, running, stopping, stopped]
+      register: existing_instances
+
+    - name: Refuse to reuse an instance from another AMI or migration
+      ansible.builtin.assert:
+        that:
+          - item.image_id == ami_id
+          - (item.tags | default({})).MigratedFrom | default('') == vm_name
+          - (item.tags | default({})).SourceImportTaskId | default('') == source_import_task_id
+        fail_msg: >-
+          Existing instance {{ item.instance_id }} named {{ instance_name }} was
+          not launched from AMI {{ ami_id }} (migration {{ source_import_task_id }})
+          of {{ vm_name }}. It uses image {{ item.image_id }}. Inspect it before
+          retrying; choose another instance_name or terminate the stale instance.
+      loop: "{{ existing_instances.instances | default([]) }}"
+      loop_control:
+        label: "{{ item.instance_id }}"
+
     - name: Launch the instance
       amazon.aws.ec2_instance:
         name: "{{ instance_name }}"
@@ -176,10 +202,17 @@
             aws_deployment_entry: "{{ aws_deployment_entry | combine({'aws_account_id': aws_account_id}) }}"
           when: aws_account_id | default('') | length > 0
 
+        - name: Create a private temporary file for the catalog entry
+          ansible.builtin.tempfile:
+            state: file
+            prefix: .deployment-entry.
+            suffix: .json
+          register: catalog_entry_file
+
         - name: Prepare deployment catalog entry
           ansible.builtin.copy:
             content: "{{ aws_deployment_entry | to_json }}"
-            dest: "/tmp/.{{ launch_result.instances[0].instance_id }}.deployment-entry.json"
+            dest: "{{ catalog_entry_file.path }}"
             mode: "0600"
 
         - name: Record the deployment in the deployment catalog
@@ -190,14 +223,15 @@
               - --catalog
               - "{{ deployment_catalog_path }}"
               - --entry
-              - "/tmp/.{{ launch_result.instances[0].instance_id }}.deployment-entry.json"
+              - "{{ catalog_entry_file.path }}"
           changed_when: true
 
       always:
         - name: Remove temporary catalog entry file
           ansible.builtin.file:
-            path: "/tmp/.{{ launch_result.instances[0].instance_id | default('aws-instance') }}.deployment-entry.json"
+            path: "{{ catalog_entry_file.path }}"
             state: absent
+          when: catalog_entry_file.path is defined
           failed_when: false
 
     - name: Show how to log in

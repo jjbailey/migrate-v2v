@@ -6,6 +6,8 @@
 # final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-gcp-dialog
@@ -145,8 +147,8 @@ key_default=no
 if yesno "Inject an additional SSH public key?\n\nThe project-level key is normally sufficient." "$key_default" ; then
     while : ; do
         GCP_SSH_KEY_FILE=$(input "SSH public key file:" "$GCP_SSH_KEY_FILE") || abort
-        [ -r "$GCP_SSH_KEY_FILE" ] && {
-            GCP_SSH_KEY_FILE=$(realpath -- "$GCP_SSH_KEY_FILE")
+        [ -r "$(anchor_path "$GCP_SSH_KEY_FILE")" ] && {
+            GCP_SSH_KEY_FILE=$(realpath -- "$(anchor_path "$GCP_SSH_KEY_FILE")")
             break
         }
         bad "That file is not readable: $GCP_SSH_KEY_FILE" || true

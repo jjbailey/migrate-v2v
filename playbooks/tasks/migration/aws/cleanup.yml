@@ -68,6 +68,17 @@
     state: absent
   failed_when: false
 
+# The shared cleanup removes this file again later (a no-op by then); it goes
+# first here so the rmdir below finds an empty directory.
+- name: Remove the temporary catalog entry before its directory
+  ansible.builtin.file:
+    path: "{{ catalog_entry_path }}"
+    state: absent
+  when:
+    - migration_run_dir is not defined
+    - catalog_entry_path is defined
+  failed_when: false
+
 - name: Remove the empty local AWS artifact directory
   ansible.builtin.command:
     argv:

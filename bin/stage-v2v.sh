@@ -21,10 +21,12 @@ repo_dir=$(CDPATH= builtin cd -- "$script_dir/.." > /dev/null && builtin pwd -P)
 
 usage()
 {
-    cat << EOF
+    local out=1
+    [ "${1:-2}" -eq 0 ] || out=2
+    cat >&"$out" << EOF
 Usage: $(basename -- "$0") -c vcenter -H vm [-a address] [-u ssh_username] [-k ssh_private_key_file] [-- ansible-playbook args]
 
-  -c vcenter   vCenter hostname (or $MIGRATE_V2V_VAULT_DIR/vsphere.yml key) to use
+  -c vcenter   vCenter hostname (or ${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/vsphere.yml key) to use
   -H vm        VM name, as it appears in vCenter
   -a address   address to SSH to (default: the VM name, which must resolve)
   -u username  SSH username (default: from the vault, else ansible's default)
@@ -56,10 +58,25 @@ if [ -z "$vcenter_hostname" ] || [ -z "$inventory_hostname" ] ; then
     usage
 fi
 
-# The name goes into an INI inventory line, where whitespace would split it.
-case "$inventory_hostname$ssh_address" in
-    *[[:space:]]*)
-        echo "$(basename -- "$0"): VM name and address must not contain whitespace" >&2
+# The key file is read after the cd into the repository, so anchor it to the
+# caller's directory first (wrapper-common.sh does the same for variables).
+case "$ssh_private_key_file" in
+    "" | /*) ;;
+    *) ssh_private_key_file="$PWD/$ssh_private_key_file" ;;
+esac
+
+# The name goes into an INI inventory line, where whitespace would split it,
+# "[01:03]" would expand as a host range, and "=", "#" or ":" would be parsed
+# as variables or comments.
+case "$inventory_hostname" in
+    *[[:space:]\[\]=#:]*)
+        echo "$(basename -- "$0"): VM name must not contain whitespace or any of [ ] = # :" >&2
+        exit 2
+        ;;
+esac
+case "$ssh_address" in
+    *[[:space:]=#]*)
+        echo "$(basename -- "$0"): address must not contain whitespace, = or #" >&2
         exit 2
         ;;
 esac

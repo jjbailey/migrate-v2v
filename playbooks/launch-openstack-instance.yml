@@ -249,12 +249,12 @@
       ansible.builtin.set_fact:
         os: >-
           {{ os | combine({
-               'security_group_ids': os.security_group_ids + [item.security_groups[0].id]
+               'security_group_ids': (openstack_security_group_lookups.results | default([]))
+                 | map(attribute='security_groups') | map('first') | map(attribute='id') | list
              }) }}
-      loop: "{{ openstack_security_group_lookups.results | default([]) }}"
-      loop_control:
-        label: "{{ item.item | default('security group') }}"
-      when: os.security_group_ids | length == 0
+      when:
+        - os.security_group_ids | length == 0
+        - openstack_security_group_lookups.results | default([]) | length > 0
 
     - name: Look up the latest completed OpenStack migration
       when: os.image_ids | length == 0
@@ -472,6 +472,14 @@
       when: openstack_user_data_file | length > 0
       ansible.builtin.set_fact:
         openstack_user_data: "{{ lookup('ansible.builtin.file', openstack_user_data_file) }}"
+
+    - name: Warn that the bundled DHCP user-data has no effect
+      when: openstack_dhcp_user_data | bool
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: openstack_dhcp_user_data is deprecated. Cloud-init ignores
+          network: configuration in ordinary user-data, so it does not
+          configure DHCP. Configure DHCP through Neutron instead.
 
     - name: Use the bundled DHCP-only cloud-init user-data
       when:
@@ -817,10 +825,17 @@
 
     - name: Record the OpenStack deployment in the catalog
       block:
+        - name: Create a private temporary file for the catalog entry
+          ansible.builtin.tempfile:
+            state: file
+            prefix: .deployment-entry.
+            suffix: .json
+          register: catalog_entry_file
+
         - name: Prepare OpenStack deployment catalog entry
           ansible.builtin.copy:
             content: "{{ openstack_deployment_entry | to_json }}"
-            dest: "/tmp/.{{ launch_result.server.id }}.openstack-deployment-entry.json"
+            dest: "{{ catalog_entry_file.path }}"
             mode: "0600"
 
         - name: Record the OpenStack deployment
@@ -831,14 +846,15 @@
               - --catalog
               - "{{ deployment_catalog_path }}"
               - --entry
-              - "/tmp/.{{ launch_result.server.id }}.openstack-deployment-entry.json"
+              - "{{ catalog_entry_file.path }}"
           changed_when: true
 
       always:
         - name: Remove temporary deployment catalog entry
           ansible.builtin.file:
-            path: "/tmp/.{{ launch_result.server.id | default('openstack-instance') }}.openstack-deployment-entry.json"
+            path: "{{ catalog_entry_file.path }}"
             state: absent
+          when: catalog_entry_file.path is defined
           failed_when: false
 
     # Prefer a floating IP, then any fixed address.

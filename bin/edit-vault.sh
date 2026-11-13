@@ -50,6 +50,9 @@ mkdir -p -- "$(dirname -- "$VAULT")"
 
 # Vault password lookup: explicit file, default file, then prompt.
 pass_args=()
+if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ ! -s "$VAULT_PASSWORD_FILE" ] ; then
+    echo "$invoked_as: warning: VAULT_PASSWORD_FILE=$VAULT_PASSWORD_FILE is missing or empty; trying the default password files" >&2
+fi
 if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
     pass_args=(--vault-password-file "$VAULT_PASSWORD_FILE")
 elif [ -s "$HOME/.dib-vault-pass" ] ; then

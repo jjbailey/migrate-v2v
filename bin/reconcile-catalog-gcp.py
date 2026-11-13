@@ -220,6 +220,7 @@ def main():
         print(f"{total} entries would be removed (--dry-run, catalogs not written)")
         return 0
     scope_total = candidate_count(migration_catalog, deployment_catalog, project_id)
+    # Deliberate: a lone stale row always trips this guard and needs --force.
     if stale_total and scope_total and stale_total * 2 > scope_total and not args.force:
         raise ValueError(
             f"refusing to remove {stale_total} of {scope_total} scoped entries; inspect --dry-run and rerun with --force if this is intentional")

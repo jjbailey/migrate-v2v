@@ -6,6 +6,8 @@
 # final confirmation.
 
 script_dir=$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/null && builtin pwd -P)
+# shellcheck disable=SC2034 # read by launch-dialog-common.sh
+orig_pwd=$PWD
 cd "$script_dir/.." || exit
 # shellcheck disable=SC2034 # read by launch-dialog-common.sh
 DIALOG_NAME=launch-aws-dialog

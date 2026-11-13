@@ -30,8 +30,11 @@ def catalog_scope(migration_catalog, deployment_catalog, account_id=None):
         for entry in catalog[list_key]:
             if entry.get("target_platform") != "aws":
                 continue
-            # With --account-id, another account's rows are out of scope, so a
-            # malformed one there must not abort this run.
+            # Rows without an account cannot be attributed to one and are
+            # skipped. With --account-id, another account's rows are out of
+            # scope, so a malformed one there must not abort this run.
+            if not entry.get("aws_account_id"):
+                continue
             if account_id and not account_matches(entry, account_id):
                 continue
             region = entry.get("aws_region")
@@ -45,11 +48,22 @@ def catalog_scope(migration_catalog, deployment_catalog, account_id=None):
     return regions, accounts
 
 def account_matches(entry, account_id):
-    # Catalog rows written before account metadata are legacy rows. They are
-    # usable in the authenticated account, but new rows are exact-scoped.
+    # Legacy rows written before account metadata could belong to any
+    # account, so they are never in scope (reconcile-catalog-openstack.py
+    # skips its unscoped rows the same way).
     return (entry.get("target_platform") != "aws"
-            or not entry.get("aws_account_id")
-            or str(entry["aws_account_id"]) == str(account_id))
+            or (bool(entry.get("aws_account_id"))
+                and str(entry["aws_account_id"]) == str(account_id)))
+
+def accountless_rows(migration_catalog, deployment_catalog):
+    """Live AWS rows with no aws_account_id, which reconcile leaves alone."""
+    return [entry
+            for catalog, list_key in ((migration_catalog, "migrations"),
+                                      (deployment_catalog, "deployments"))
+            for entry in catalog[list_key]
+            if entry.get("target_platform") == "aws"
+            and entry.get("status") != "retired"
+            and not entry.get("aws_account_id")]
 
 def resource_missing(client, operation, identifier, cache):
     key = (operation, identifier)
@@ -230,6 +244,12 @@ def main():
                            and account_matches(entry, account_id)
                            and (not args.region or entry.get("aws_region") == args.region)]
 
+    for entry in accountless_rows(migration_catalog, deployment_catalog):
+        print(
+            f"skipping {entry.get('vm_name', '<unknown>')} "
+            f"{entry.get('clone_name') or entry.get('instance_id') or '<unknown>'}: "
+            "no aws_account_id recorded, so it is not checked or removed "
+            f"for account {account_id}")
     for entry, ami_id in stale_migrations:
         print(
             f"removing migration {entry.get('vm_name', '<unknown>')} {entry.get('import_task_id', '<unknown>')}: missing AMI {ami_id} in {entry.get('aws_region', '<unknown>')}")
@@ -253,6 +273,7 @@ def main():
         return 0
     scope_total = candidate_count(
         migration_catalog, deployment_catalog, account_id, args.region)
+    # Deliberate: a lone stale row always trips this guard and needs --force.
     if stale_total and scope_total and stale_total * 2 > scope_total and not args.force:
         raise ValueError(
             f"refusing to remove {stale_total} of {scope_total} scoped entries; inspect --dry-run and rerun with --force if this is intentional")

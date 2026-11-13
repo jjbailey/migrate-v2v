@@ -38,6 +38,8 @@
     azure_nsg_name: "migrate-v2v-nsg"
     # Source the NSG's SSH rule admits when the play creates the NSG. An
     # existing NSG keeps its own rules.
+    # WARNING: the default "*" admits SSH from anywhere, and VMs get a public
+    # IP unless azure_no_public_ip. Set this to your own CIDR.
     azure_ssh_source_prefix: "*"
     azure_no_public_ip: false
     # Delete unattached <vm>-osdisk / <vm>-data-N disks a deleted VM of the
@@ -133,6 +135,8 @@
                   - "{{ vm_name }}"
                   - --project
                   - "{{ azure_subscription_id }}"
+                  - --region
+                  - "{{ azure_location }}"
               register: azure_migration_lookup
               changed_when: false
 
@@ -191,9 +195,8 @@
                 azure_vm_tags: "{{ (azure_vm_check.vms | first).tags | default({}, true) }}"
               ansible.builtin.assert:
                 that:
-                  - azure_migration_id_effective | length > 0
                   - azure_vm_tags.MigratedFrom | default('') == vm_name
-                  - azure_vm_tags.SourceMigrationId | default('') == azure_migration_id_effective
+                  - azure_vm_tags.SourceMigrationId | default('') == (azure_migration_id_effective | default('manual', true))
                 fail_msg: >-
                   Existing VM {{ azure_vm_name }} is not tagged as a launch of
                   migration {{ azure_migration_id_effective | default('manual', true) }}.
@@ -278,10 +281,17 @@
               status: "RUNNING"
               launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
 
+        - name: Create a private temporary file for the catalog entry
+          ansible.builtin.tempfile:
+            state: file
+            prefix: .deployment-entry.
+            suffix: .json
+          register: catalog_entry_file
+
         - name: Prepare the Azure deployment catalog entry
           ansible.builtin.copy:
             content: "{{ azure_deployment_entry | to_json }}"
-            dest: "/tmp/.{{ azure_vm_name }}.azure-deployment-entry.json"
+            dest: "{{ catalog_entry_file.path }}"
             mode: "0600"
 
         - name: Record the Azure deployment
@@ -292,7 +302,7 @@
               - --catalog
               - "{{ deployment_catalog_path }}"
               - --entry
-              - "/tmp/.{{ azure_vm_name }}.azure-deployment-entry.json"
+              - "{{ catalog_entry_file.path }}"
           changed_when: true
 
         - name: Show how to log in
@@ -304,7 +314,8 @@
       always:
         - name: Remove the temporary Azure deployment entry
           ansible.builtin.file:
-            path: "/tmp/.{{ azure_vm_name | default('azure-vm') }}.azure-deployment-entry.json"
+            path: "{{ catalog_entry_file.path }}"
             state: absent
+          when: catalog_entry_file.path is defined
           failed_when: false
 

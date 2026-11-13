@@ -13,6 +13,12 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlparse
 
+try:
+    # Refuses entity-expansion tricks in an untrusted OVF when available.
+    from defusedxml.ElementTree import parse as parse_xml
+except ImportError:
+    parse_xml = ET.parse
+
 UNIT_FACTORS = {
     "byte": Decimal(1), "bytes": Decimal(1), "kb": Decimal(1000),
     "mb": Decimal(1000) ** 2, "gb": Decimal(1000) ** 3,
@@ -51,6 +57,8 @@ def capacity_bytes(value, units):
         result = Decimal(value) * factor
     except InvalidOperation as error:
         raise ValueError(f"invalid OVF capacity: {value}") from error
+    if not result.is_finite():
+        raise ValueError(f"invalid OVF capacity: {value}")
     if result != result.to_integral_value():
         raise ValueError(f"non-integral OVF capacity in bytes: {value} {units}")
     return int(result)
@@ -171,7 +179,7 @@ def inspect_ova(path):
         stream = archive.extractfile(ovf_member)
         if stream is None:
             raise ValueError(f"could not read OVF descriptor {ovf_member.name}")
-        return _inspect_descriptor(ET.parse(stream).getroot(), "ova", path, ovf_member.name)
+        return _inspect_descriptor(parse_xml(stream).getroot(), "ova", path, ovf_member.name)
 
 def inspect_ovf(path):
     path = Path(path)
@@ -202,7 +210,7 @@ def inspect_ovf(path):
                 actual_size != file_entry["size_bytes"]):
             raise ValueError(f"OVF disk size mismatch for {href}: expected {file_entry['size_bytes']}, found {actual_size}")
 
-    return _inspect_descriptor(ET.parse(path).getroot(), "ovf", path, path.name, validate_file)
+    return _inspect_descriptor(parse_xml(path).getroot(), "ovf", path, path.name, validate_file)
 
 def main():
     parser = argparse.ArgumentParser()

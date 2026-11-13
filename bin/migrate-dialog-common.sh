@@ -85,9 +85,9 @@ if [[ $MIGRATE_WRAPPER == *-vddk.sh ]] ; then
     if yesno "Provide a custom CA bundle for the vCenter certificate?\n\nSay Yes if vCenter uses a certificate not trusted by the system CA store." "$ca_default" ; then
         while : ; do
             VCENTER_CA_BUNDLE=$(input "Path to the CA bundle PEM file:" "${VCENTER_CA_BUNDLE:-}") || abort
-            if [ -r "$VCENTER_CA_BUNDLE" ] ; then
+            if [ -r "$(anchor_path "$VCENTER_CA_BUNDLE")" ] ; then
                 # The playbook runs from the repository, so anchor the path.
-                VCENTER_CA_BUNDLE=$(realpath -- "$VCENTER_CA_BUNDLE")
+                VCENTER_CA_BUNDLE=$(realpath -- "$(anchor_path "$VCENTER_CA_BUNDLE")")
                 break
             fi
             bad "That file is not readable: $VCENTER_CA_BUNDLE" || true

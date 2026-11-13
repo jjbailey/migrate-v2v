@@ -24,6 +24,7 @@
   when:
     - migration_target in ['azure', 'gcp', 'openstack']
     - (migration_succeeded | default(false) | bool) or (discard_failed_artifacts | bool)
+    - migration_run_dir_derived | default(false) | bool
   register: cleanup_run_dir_remove
   # ignore_errors rather than failed_when: false, so a failed removal keeps
   # its failed flag: the discard report below must not claim the directory
@@ -66,7 +67,9 @@
   ansible.builtin.file:
     path: "{{ migration_run_dir }}"
     state: absent
-  when: migration_nothing_to_resume | default(false) | bool
+  when:
+    - migration_nothing_to_resume | default(false) | bool
+    - migration_run_dir_derived | default(false) | bool
   failed_when: false
 
 - name: Report a run that stopped before creating anything
