@@ -22,7 +22,10 @@ args = sys.argv[1:]
 if '--inputbox' in args:
     prompt = args[args.index('--inputbox') + 1]
     values = {
-        'Azure VM name': '',
+        'Azure VM name': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'EC2 instance Name tag': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'GCP instance name': os.environ.get('TEST_INSTANCE_NAME', ''),
+        'OpenStack server name': os.environ.get('TEST_INSTANCE_NAME', ''),
         'VM name': "Web Server's 01",
         'AWS subnet': 'subnet-123',
         'Security group names': 'default,web',
@@ -143,10 +146,10 @@ class LaunchDialogTests(unittest.TestCase):
                 command = files[0].read_text()
                 self.assertIn("export VM_NAME='Web Server'\\''s 01'", command)
                 self.assertIn(f"'{BIN / wrapper}'", command)
+                self.assertIn("export INSTANCE_NAME=''", command)
                 if platform == "aws":
                     self.assertIn("export AWS_INSTANCE_TYPE=''", command)
                 elif platform == "azure":
-                    self.assertIn("export INSTANCE_NAME=''", command)
                     self.assertIn("export AZURE_SSH_KEY_NAME='cloud'", command)
                     self.assertIn("export AZURE_SSH_KEY_FILE=''", command)
                 elif platform == "gcp":
@@ -188,6 +191,23 @@ class LaunchDialogTests(unittest.TestCase):
         command = files[0].read_text()
         self.assertIn("export OS_SECURITY_GROUPS_JSON='[\"default\",\"web\"]'", command)
         self.assertIn("export OS_PRESERVE_MAC='true'", command)
+
+    def test_custom_instance_name_reaches_every_playbook(self):
+        # The destination name can differ from the source VM's name.
+        for platform in self.SCRIPTS:
+            with self.subTest(platform=platform):
+                files = self.run_dialog(platform, TEST_INSTANCE_NAME="new-name")
+                self.assertIn("export INSTANCE_NAME='new-name'", files[0].read_text())
+                subprocess.run(["bash", files[0]], env=self.env, check=True,
+                               capture_output=True, text=True, timeout=30)
+                argv = json.loads((self.tmp / "argv.json").read_text())
+                extra = {}
+                for position, arg in enumerate(argv):
+                    if arg == "-e":
+                        extra.update(json.loads(argv[position + 1]))
+                self.assertEqual(extra["instance_name"], "new-name")
+                self.assertEqual(extra["vm_name"], "Web Server's 01")
+                files[0].unlink()
 
     def test_cancel_stops_before_command_generation(self):
         self.assertEqual(self.run_dialog("gcp", TEST_CANCEL="1"), [])

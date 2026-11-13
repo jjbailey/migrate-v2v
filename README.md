@@ -709,9 +709,13 @@ OpenStack also supports `openstack_boot_mode` (use `bios` for BIOS guests),
 `openstack_nics`, `openstack_preserve_mac`, `openstack_mac_addresses`,
 `openstack_fixed_ips`, and `openstack_auto_ip`, plus the playbook-only
 `openstack_volume_type` and `openstack_availability_zone` (no wrapper
-environment variable; pass them with `-e`). GCP launch accepts `instance_name`,
-`gcp_disk_type` and the network/tag options. AWS launch accepts
-`assign_public_ip` and `extra_tags`. When manually supplying multiple
+environment variable; pass them with `-e`). GCP launch accepts `gcp_disk_type`
+and the network/tag options. AWS launch accepts
+`assign_public_ip` and `extra_tags`. Every launch (AWS, Azure, GCP, OpenStack)
+names the new instance after the source VM by default. To give it a different
+name, set `INSTANCE_NAME` for the wrapper (the launch dialogs ask for it; leave
+it blank to keep the default) or pass `-e instance_name=...` to the playbook.
+Catalog lookups still use the source `VM_NAME`. When manually supplying multiple
 OpenStack image IDs, also supply `source_artifact_manifest` with a
 `capacity_bytes` entry for every disk.
 On a GCP launch retry, an existing instance is reused only when its metadata

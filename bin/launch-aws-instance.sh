@@ -12,6 +12,8 @@ source "$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/nul
 wrapper_capture_args "$@"
 
 VM_NAME=${VM_NAME:-}
+# Optional name for the new instance when it should differ from the source VM.
+INSTANCE_NAME=${INSTANCE_NAME:-}
 AWS_TARGET_PROJECT=${AWS_TARGET_PROJECT:-}
 AWS_SUBNET_ID=${AWS_SUBNET_ID:-}
 AWS_SECURITY_GROUPS_JSON=${AWS_SECURITY_GROUPS_JSON:-'["default"]'}
@@ -24,6 +26,7 @@ wrapper_require_json_array AWS_SECURITY_GROUPS_JSON "$AWS_SECURITY_GROUPS_JSON"
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
+[ -n "$INSTANCE_NAME" ] && args+=(-e "$(wrapper_var instance_name "$INSTANCE_NAME")")
 [ -n "$AWS_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var aws_target_project "$AWS_TARGET_PROJECT")")
 [ -n "$AWS_SUBNET_ID" ] && args+=(-e "$(wrapper_var vpc_subnet_id "$AWS_SUBNET_ID")")
 [ -n "$AWS_SECURITY_GROUPS_JSON" ] && args+=(-e "$(wrapper_json_var security_groups "$AWS_SECURITY_GROUPS_JSON")")

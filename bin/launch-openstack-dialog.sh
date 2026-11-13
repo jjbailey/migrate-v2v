@@ -155,6 +155,7 @@ print("\n".join(out))' "$facts" 2> /dev/null
 # Project first: it decides where the instance and its volumes land.
 PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/openstack.yml" openstack_projects "${OS_PROJECT_NAME:-}") || abort
 VM_NAME=$(choose_vm_required openstack OpenStack) || abort
+INSTANCE_NAME=$(input "OpenStack server name (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 FIXED_IPS_JSON=""
 addr_mode=$(radio "How should the new instance get its IP addresses?" \
@@ -367,6 +368,7 @@ done
 
 say "Launch summary for ${VM_NAME}
 
+  Server name: ${INSTANCE_NAME:-same as $VM_NAME}
   Project....: ${PROJECT:-auto-select}
   Addressing.: ${addr_mode}${FIXED_IPS_JSON:+ ($FIXED_IPS_JSON)}
   MACs.......: ${mac_mode}${MAC_JSON:+ ($MAC_JSON)}
@@ -376,7 +378,7 @@ say "Launch summary for ${VM_NAME}
   User data..: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
   Flavor.....: ${FLAVOR}
   SSH key....: ${KEY_NAME}
-  Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 18
+  Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 {
@@ -388,7 +390,8 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
         "OS_PRESERVE_MAC=$PRESERVE_MAC" "OS_MAC_ADDRESSES_JSON=$MAC_JSON" \
         "OS_FIXED_IPS_JSON=$FIXED_IPS_JSON" "OS_AUTO_IP=$AUTO_IP" \
         "OS_CONFIG_DRIVE=$CONFIG_DRIVE" "OS_DHCP_USER_DATA=$DHCP_USER_DATA" \
-        "OS_USER_DATA=$OS_USER_DATA" "OS_USER_DATA_FILE=$USER_DATA_FILE" "OS_PROJECT_NAME=$PROJECT" ; do
+        "OS_USER_DATA=$OS_USER_DATA" "OS_USER_DATA_FILE=$USER_DATA_FILE" "OS_PROJECT_NAME=$PROJECT" \
+        "INSTANCE_NAME=$INSTANCE_NAME" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-openstack-instance.sh")"

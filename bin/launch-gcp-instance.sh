@@ -12,6 +12,8 @@ source "$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/nul
 wrapper_capture_args "$@"
 
 VM_NAME=${VM_NAME:-}
+# Optional name for the new instance when it should differ from the source VM.
+INSTANCE_NAME=${INSTANCE_NAME:-}
 GCP_ZONE=${GCP_ZONE:-}
 GCP_TARGET_PROJECT=${GCP_TARGET_PROJECT:-}
 GCP_MACHINE_TYPE=${GCP_MACHINE_TYPE:-}
@@ -32,6 +34,7 @@ wrapper_require_json_array GCP_TAGS_JSON "$GCP_TAGS_JSON"
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
+[ -n "$INSTANCE_NAME" ] && args+=(-e "$(wrapper_var instance_name "$INSTANCE_NAME")")
 [ -n "$GCP_ZONE" ] && args+=(-e "$(wrapper_var gcp_zone "$GCP_ZONE")")
 [ -n "$GCP_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var gcp_target_project "$GCP_TARGET_PROJECT")")
 [ -n "$GCP_MACHINE_TYPE" ] && args+=(-e "$(wrapper_var gcp_machine_type "$GCP_MACHINE_TYPE")")

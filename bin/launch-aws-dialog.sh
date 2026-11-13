@@ -190,6 +190,7 @@ load_aws_instance_type_choices()
 
 AWS_TARGET_PROJECT=$(choose_target "Which AWS account should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/aws.yml" aws_projects "${AWS_TARGET_PROJECT:-}") || abort
 VM_NAME=$(choose_vm_required aws AWS) || abort
+INSTANCE_NAME=$(input "EC2 instance Name tag (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 while : ; do
     subnet_choices=$(load_aws_subnet_choices "$AWS_TARGET_PROJECT" "${AWS_SUBNET_ID:-}") || subnet_choices=""
@@ -311,11 +312,12 @@ done
 
 say "Launch summary for $VM_NAME
 
+  Instance name..: ${INSTANCE_NAME:-same as $VM_NAME}
   Account........: ${AWS_TARGET_PROJECT:-auto-select}
   Subnet.........: $AWS_SUBNET_ID
   Instance type..: ${AWS_INSTANCE_TYPE:-playbook default}
   Security groups: ${sg_mode}${AWS_SECURITY_GROUPS_JSON:+ ($AWS_SECURITY_GROUPS_JSON)}
-  SSH key pair...: ${AWS_KEY_NAME:-none}" 14
+  SSH key pair...: ${AWS_KEY_NAME:-none}" 15
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
 {
@@ -325,6 +327,7 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
     printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export AWS_TARGET_PROJECT=%s\n' "$(quote "$AWS_TARGET_PROJECT")"
     printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
+    printf 'export INSTANCE_NAME=%s\n' "$(quote "$INSTANCE_NAME")"
     printf 'export AWS_SUBNET_ID=%s\n' "$(quote "$AWS_SUBNET_ID")"
     printf 'export AWS_SECURITY_GROUPS_JSON=%s\n' "$(quote "$AWS_SECURITY_GROUPS_JSON")"
     printf 'export AWS_INSTANCE_TYPE=%s\n' "$(quote "$AWS_INSTANCE_TYPE")"
