@@ -1567,7 +1567,10 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
   `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`, default
   any) are created only when missing and otherwise used as they are
-  (`AZURE_VNET_NAME`, `AZURE_SUBNET_NAME`, `AZURE_NSG_NAME`). Each VM gets its
+  (`AZURE_VNET_NAME`, `AZURE_SUBNET_NAME`, `AZURE_NSG_NAME`). Set
+  `AZURE_SSH_SOURCE_PREFIX` (the dialog asks when the VM gets a public IP) to
+  restrict the SSH rule of an NSG created by the launch; the default `*` admits
+  SSH from anywhere, and an existing NSG keeps its own rules. Each VM gets its
   own NIC and, unless `AZURE_NO_PUBLIC_IP=true`, a static Standard public IP.
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.

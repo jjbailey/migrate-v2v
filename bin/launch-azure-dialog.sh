@@ -78,6 +78,14 @@ public_ip_default=no
 [ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=yes
 if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE_NO_PUBLIC_IP=true; else AZURE_NO_PUBLIC_IP=false; fi
 
+# The NSG's SSH rule is only created when the NSG is missing, and only matters
+# when the VM is reachable from outside, so ask only for a public IP.
+if [ "$AZURE_NO_PUBLIC_IP" = true ] ; then
+    AZURE_SSH_SOURCE_PREFIX=""
+else
+    AZURE_SSH_SOURCE_PREFIX=$(input_required "Allow SSH from (CIDR, IP, service tag, or * for anywhere).\nOnly used if the NSG is created now; an existing NSG keeps its own rules:" "${AZURE_SSH_SOURCE_PREFIX:-*}" "The SSH source cannot be empty.") || abort
+fi
+
 AZURE_ADMIN_USERNAME=$(input_required "Admin user cloud-init creates:" "${AZURE_ADMIN_USERNAME:-azureuser}" "The admin user cannot be empty.") || abort
 
 # Like the AWS and OpenStack key pairs, the key is an SSH public key resource
@@ -126,6 +134,7 @@ say "Launch summary for $VM_NAME
   VNet / subnet: $AZURE_VNET_NAME / $AZURE_SUBNET_NAME
   NSG..........: $AZURE_NSG_NAME
   No public IP.: $AZURE_NO_PUBLIC_IP
+  SSH source...: ${AZURE_SSH_SOURCE_PREFIX:-n/a (no public IP)}
   Admin user...: $AZURE_ADMIN_USERNAME
   SSH key......: $AZURE_SSH_KEY_NAME" 17
 
@@ -138,7 +147,7 @@ file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \
         "AZURE_NO_PUBLIC_IP=$AZURE_NO_PUBLIC_IP" "AZURE_ADMIN_USERNAME=$AZURE_ADMIN_USERNAME" \
         "AZURE_SSH_KEY_NAME=$AZURE_SSH_KEY_NAME" "AZURE_SSH_KEY_FILE=$AZURE_SSH_KEY_FILE" \
-        "INSTANCE_NAME=$INSTANCE_NAME" ; do
+        "INSTANCE_NAME=$INSTANCE_NAME" "AZURE_SSH_SOURCE_PREFIX=$AZURE_SSH_SOURCE_PREFIX" ; do
         printf 'export %s=%s\n' "${pair%%=*}" "$(quote "${pair#*=}")"
     done
     printf '%s\n' "$(quote "$script_dir/launch-azure-instance.sh")"

@@ -22,6 +22,7 @@ args = sys.argv[1:]
 if '--inputbox' in args:
     prompt = args[args.index('--inputbox') + 1]
     values = {
+        'Allow SSH from': os.environ.get('TEST_SSH_SOURCE', '*'),
         'Azure VM name': os.environ.get('TEST_INSTANCE_NAME', ''),
         'EC2 instance Name tag': os.environ.get('TEST_INSTANCE_NAME', ''),
         'GCP instance name': os.environ.get('TEST_INSTANCE_NAME', ''),
@@ -152,6 +153,7 @@ class LaunchDialogTests(unittest.TestCase):
                 elif platform == "azure":
                     self.assertIn("export AZURE_SSH_KEY_NAME='cloud'", command)
                     self.assertIn("export AZURE_SSH_KEY_FILE=''", command)
+                    self.assertIn("export AZURE_SSH_SOURCE_PREFIX='*'", command)
                 elif platform == "gcp":
                     self.assertIn("export GCP_SSH_KEY_FILE=''", command)
                 subprocess.run(["bash", "-n", files[0]], check=True)
@@ -208,6 +210,18 @@ class LaunchDialogTests(unittest.TestCase):
                 self.assertEqual(extra["instance_name"], "new-name")
                 self.assertEqual(extra["vm_name"], "Web Server's 01")
                 files[0].unlink()
+
+    def test_azure_ssh_source_prefix_reaches_the_playbook(self):
+        files = self.run_dialog("azure", TEST_SSH_SOURCE="203.0.113.0/24")
+        self.assertIn("export AZURE_SSH_SOURCE_PREFIX='203.0.113.0/24'", files[0].read_text())
+        subprocess.run(["bash", files[0]], env=self.env, check=True,
+                       capture_output=True, text=True, timeout=30)
+        argv = json.loads((self.tmp / "argv.json").read_text())
+        extra = {}
+        for position, arg in enumerate(argv):
+            if arg == "-e":
+                extra.update(json.loads(argv[position + 1]))
+        self.assertEqual(extra["azure_ssh_source_prefix"], "203.0.113.0/24")
 
     def test_cancel_stops_before_command_generation(self):
         self.assertEqual(self.run_dialog("gcp", TEST_CANCEL="1"), [])

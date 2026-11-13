@@ -39,7 +39,8 @@
     # Source the NSG's SSH rule admits when the play creates the NSG. An
     # existing NSG keeps its own rules.
     # WARNING: the default "*" admits SSH from anywhere, and VMs get a public
-    # IP unless azure_no_public_ip. Set this to your own CIDR.
+    # IP unless azure_no_public_ip. Set this to your own CIDR (wrapper:
+    # AZURE_SSH_SOURCE_PREFIX).
     azure_ssh_source_prefix: "*"
     azure_no_public_ip: false
     # Delete unattached <vm>-osdisk / <vm>-data-N disks a deleted VM of the
