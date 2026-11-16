@@ -161,6 +161,10 @@ class OvaInspectionTests(unittest.TestCase):
                 info = tarfile.TarInfo("vm.ovf")
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
+                for name, size in (("boot.vmdk", 10), ("data.vmdk", 20)):
+                    info = tarfile.TarInfo(name)
+                    info.size = size
+                    archive.addfile(info, io.BytesIO(b"\0" * size))
             manifest = inspect_ova.inspect_ova(ova)
         self.assertEqual(manifest["disk_count"], 2)
         self.assertEqual([disk["disk_id"] for disk in manifest["disks"]], ["disk-boot", "disk-data"])

@@ -29,7 +29,8 @@ if '--inputbox' in args:
         'OpenStack server name': os.environ.get('TEST_INSTANCE_NAME', ''),
         'VM name': "Web Server's 01",
         'AWS subnet': 'subnet-123',
-        'Security group names': 'default,web',
+        'Security group names or IDs': 'default,web',
+        'Security groups as a JSON array of names': '["default","web"]',
         'EC2 key pair': 'cloud',
         'VM size': 'Standard_B2s_v2',
         'Admin user': 'azureuser',
@@ -70,6 +71,7 @@ elif '--radiolist' in args:
         'Which instance type': '_blank',
         'How should the new instance get': 'dhcp',
         'How should MAC': os.environ.get('TEST_MAC_MODE', 'auto'),
+        'How should SSH access': 'key',
         'Should cloud-init': 'none',
     }
     value = next((value for name, value in choices.items() if name in prompt), None)
@@ -114,6 +116,8 @@ class LaunchDialogTests(unittest.TestCase):
         catalog_dir.mkdir()
         key = self.tmp / "key.pub"
         key.write_text("ssh-ed25519 AAAA test\n")
+        vault_password = self.tmp / "vault-password"
+        vault_password.write_text("test-password\n")
         inherited = {name: os.environ[name] for name in
                      ("PATH", "LANG", "LC_ALL", "TERM") if name in os.environ}
         self.env = {
@@ -124,7 +128,7 @@ class LaunchDialogTests(unittest.TestCase):
             "ARTIFACT_ROOT": str(self.tmp / "artifacts"),
             "MIGRATE_V2V_VAULT_DIR": str(vault_dir),
             "MIGRATE_V2V_CATALOG_DIR": str(catalog_dir),
-            "VAULT_PASSWORD_FILE": str(self.tmp / "missing-vault-password"),
+            "VAULT_PASSWORD_FILE": str(vault_password),
             "TEST_KEY": str(key),
             "TEST_ARGV": str(self.tmp / "argv.json"),
         }

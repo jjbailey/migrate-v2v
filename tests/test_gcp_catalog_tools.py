@@ -47,6 +47,8 @@ class FakeResponse:
             raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
+        if self.status_code == 404:
+            return {"error": {"errors": [{"reason": "notFound"}]}}
         return {"status": "READY"}
 
 class FakeSession:
@@ -57,7 +59,7 @@ class FakeSession:
         self.errors = set(errors)
         self.calls = []
 
-    def get(self, url):
+    def get(self, url, params=None, timeout=None):
         self.calls.append(url)
         if url in self.errors:
             return FakeResponse(500)
