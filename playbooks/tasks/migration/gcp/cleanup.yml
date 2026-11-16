@@ -94,6 +94,18 @@
         - item.rc is defined and item.rc == 0
         - gcp_cleanup_job.state | default('') not in ['SUCCEEDED', 'FAILED', 'CANCELLED']
 
+    - name: Preserve imports whose state could not be read
+      ansible.builtin.set_fact:
+        gcp_cleanup_running_imports: >-
+          {{ gcp_cleanup_running_imports | default([])
+             + [{'image': item.item, 'job': ''}] }}
+      loop: "{{ gcp_cleanup_import_state.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - item.rc is defined and item.rc != 0
+        - (item.stderr | default('') | lower) is not search(gcp_absent_resource_pattern)
+
     # gcloud has no cancel command for image-import jobs, so the Migrate to Virtual
     # Machines API is called directly with the run's own service-account token.
     - name: Get an access token to cancel running image imports
@@ -218,7 +230,7 @@
     - name: Report image imports left running for a resume
       ansible.builtin.debug:
         msg: >-
-          Image imports still running were left to finish:
+          Image imports still running or with an unreadable state were left alone:
           {{ gcp_cleanup_running_imports | map(attribute='image') | join(', ') }}.
           A resume with -e resume_run_id={{ migration_run_id }} reuses each image
           that finishes and removes its import resource.

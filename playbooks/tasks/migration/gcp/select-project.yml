@@ -81,6 +81,23 @@
 # missing or malformed leave the no_log task; the assert can then show its
 # message (a no_log assert hides it). A key stored as a YAML mapping rather
 # than a JSON string is named as such instead of failing inside from_json.
+- name: Check whether the GCP service-account key contains valid JSON
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - import json,sys; json.load(sys.stdin)
+    stdin: "{{ gcp_project_config.service_account_key | string }}"
+  register: gcp_key_json_check
+  changed_when: false
+  failed_when: false
+  no_log: true
+  when:
+    - gcp_project_config is defined
+    - gcp_project_config.service_account_key is defined
+    - gcp_project_config.service_account_key is not mapping
+    - (gcp_project_config.service_account_key | string | trim | length) > 0
+
 - name: List the required GCP project keys that are missing or malformed
   ansible.builtin.set_fact:
     gcp_project_problems: >-
@@ -93,6 +110,8 @@
       {%- endfor -%}
       {%- if cfg.service_account_key is mapping -%}
       {%- set _ = problems.append('service_account_key is a YAML mapping; store the JSON key file contents as a string') -%}
+      {%- elif cfg.service_account_key is defined and (cfg.service_account_key | string | trim) != '' and (gcp_key_json_check.rc | default(1) | int) != 0 -%}
+      {%- set _ = problems.append('service_account_key is not valid JSON') -%}
       {%- elif cfg.service_account_key is defined and (cfg.service_account_key | string | trim) != '' -%}
       {%- if ((cfg.service_account_key | from_json).client_email | default('') | string | trim) == '' -%}
       {%- set _ = problems.append('service_account_key has no client_email') -%}

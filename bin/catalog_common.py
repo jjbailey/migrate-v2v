@@ -107,8 +107,13 @@ def atomic_write_json(path, payload):
 
 def write_catalog(path, catalog, list_key):
     timestamp = "migrated_at" if list_key == "migrations" else "launched_at"
-    catalog[list_key].sort(key=lambda item: (
-        item.get("vm_name", ""), timestamp_sort_key(item.get(timestamp))))
+    def sort_key(item):
+        if not isinstance(item, dict):
+            return ("", timestamp_sort_key(None))
+        name = item.get("vm_name", "")
+        return (name if isinstance(name, str) else str(name or ""),
+                timestamp_sort_key(item.get(timestamp)))
+    catalog[list_key].sort(key=sort_key)
     catalog["generated_at"] = now_utc()
     atomic_write_json(path, catalog)
 
@@ -116,15 +121,25 @@ def write_catalog(path, catalog, list_key):
 def exclusive_lock(path):
     """Hold the catalog's sidecar lock for the duration of the block."""
     lock_path = path.with_name(path.name + ".lock")
-    # 0666 before umask, so writers under another uid can open the lock.
-    # O_CREAT leaves an existing lock file's mode alone.
-    os.close(os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666))
-    with lock_path.open("a+", encoding="utf-8") as lock:
+    with _open_lock(lock_path) as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
             yield
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
+
+def _open_lock(lock_path):
+    """Open a shared lock file with the intended cross-uid access mode."""
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o666)
+    try:
+        try:
+            os.fchmod(fd, 0o666)
+        except PermissionError:
+            pass
+        return os.fdopen(fd, "a+", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
 
 def require_nonempty_string(entry, name):
     value = entry.get(name)
@@ -169,9 +184,8 @@ def read_snapshot(path, list_key):
     """
     if not path.exists():
         raise ValueError(f"no catalog at {path}")
-    lock_path = path.with_name(path.name + ".lock")
     try:
-        lock = lock_path.open("a+", encoding="utf-8")
+        lock = _open_lock(path.with_name(path.name + ".lock"))
     except OSError:
         return load_catalog(path, list_key)
     with lock:
@@ -180,6 +194,12 @@ def read_snapshot(path, list_key):
             return load_catalog(path, list_key)
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
+
+def read_optional_snapshot(path, list_key):
+    """Read an existing catalog, treating a never-created catalog as empty."""
+    if not path.exists():
+        return {"schema_version": 1, list_key: []}
+    return read_snapshot(path, list_key)
 
 def _row_fingerprint(entry):
     """Stable identity of one catalog row, not of its cloud resource.

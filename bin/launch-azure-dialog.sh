@@ -83,7 +83,7 @@ if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE
 if [ "$AZURE_NO_PUBLIC_IP" = true ] ; then
     AZURE_SSH_SOURCE_PREFIX=""
 else
-    AZURE_SSH_SOURCE_PREFIX=$(input_required "Allow SSH from (CIDR, IP, service tag, or * for anywhere).\nOnly used if the NSG is created now; an existing NSG keeps its own rules:" "${AZURE_SSH_SOURCE_PREFIX:-*}" "The SSH source cannot be empty.") || abort
+    AZURE_SSH_SOURCE_PREFIX=$(input_required "Allow SSH from (CIDR, IP, service tag, or * for anywhere).\nOnly used if the NSG is created now; an existing NSG keeps its own rules. * allows SSH from anywhere:" "${AZURE_SSH_SOURCE_PREFIX:-}" "Enter a restricted source or explicitly enter * to allow SSH from anywhere.") || abort
 fi
 
 AZURE_ADMIN_USERNAME=$(input_required "Admin user cloud-init creates:" "${AZURE_ADMIN_USERNAME:-azureuser}" "The admin user cannot be empty.") || abort
@@ -139,8 +139,10 @@ say "Launch summary for $VM_NAME
   SSH key......: $AZURE_SSH_KEY_NAME" 17
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-azure.XXXXXX")
+dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
+    emit_runtime_path_exports
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "VM_NAME=$VM_NAME" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
         "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \

@@ -25,6 +25,8 @@ needs a one-time move; see [Secrets](#secrets) and
 
 ## Prerequisites
 
+- Bash 4.4 or newer for the shell wrappers and dialog scripts.
+
 - VMware OVF Tool. This repository is tested with the 5.1.0 Linux ZIP;
   Broadcom currently publishes 9.1.1, but newer releases are not part of the
   validated toolchain yet. Run `./bin/install-ovftool.py` to download the
@@ -288,8 +290,11 @@ flow is illustrated in [doc/workflow.md](doc/workflow.md).
     [Credentials for the bin/ Tools](doc/vaults.md#credentials-for-the-bin-tools).
 
 14. **`bin/reconcile-catalog-azure.py`** - removes completed Azure migration
-    entries whose managed images or snapshots are gone. It supports `--dry-run`,
-    `--subscription`, and the same `--force` safety guard.
+    entries whose managed images or snapshots are gone, and active Azure
+    deployment entries whose VMs are gone. It also removes entries already
+    marked `retired` from either catalog. It supports `--dry-run`,
+    `--subscription`/`--project`, `--vault`, and the same `--force` safety
+    guard.
 
 The migration playbooks are thin target entry points. Shared vSphere
 preflight, snapshot, clone, OVF/OVA export, manifest inspection, catalog append,
@@ -300,13 +305,14 @@ common pipeline. Shared defaults are kept in `playbooks/vars/migration-common.ym
 
 ## Documentation
 
+- [web/README.md](web/README.md) - controller website, local accounts, and job queue
 - [doc/vaults.md](doc/vaults.md) - vault file layouts in one place
 - [doc/workflow.md](doc/workflow.md) - illustrated migration workflow
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
 - [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
-  Preparation-only dependency plan for a future Ubuntu 24.04 container
+  Dependency plan for the migration runtime image used by the web controller
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
@@ -432,9 +438,9 @@ keypair injection to add the public key; otherwise use credentials already
 present in the source VM. The launch wrapper reads `OS_FLAVOR`,
 `OS_KEY_NAME`, `OS_SECURITY_GROUPS_JSON`, and
 the explicit ID variables above. `OS_KEY_NAME` defaults to a keypair named
-`cloud`, which must already exist in the target project; set it to the
-keypair you use. The playbook's `openstack_key_name` has no default and
-launches without a keypair when it is empty.
+`cloud`, which must exist for the authenticated OpenStack user; set it to the
+keypair you use. Set it to an empty value to omit keypair injection. In that
+case, the image or user-data must already provide a way to access the guest.
 
 For a guided launch, run `./bin/launch-openstack-dialog.sh`. It collects
 the same common wrapper settings, shows the generated shell command, and can
@@ -888,7 +894,7 @@ What each kind asks:
   and key pair for AWS; VM size, network names, public IP, admin user, and SSH
   key resource for Azure; zone, machine type, network, tags, external IP and
   optional SSH key for GCP; and IP, MAC, floating IP, security group,
-  config-drive, user-data, flavor, key pair, and network choices for OpenStack
+  config-drive, user-data, flavor, optional key pair, and network choices for OpenStack
   (see [OpenStack Launch Networking](#openstack-launch-networking)).
   Wherever the cloud API can list valid values, the dialog offers a live
   picker (backed by `bin/openstack-project-facts.py`,
@@ -1244,7 +1250,8 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   `aws_region`, `s3_bucket`, `vmimport_role_name`, and optionally
   `aws_account_id`, `aws_profile`, `aws_access_key_id`, `aws_secret_access_key`,
   and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
-  a single entry is selected automatically. A legacy flat mapping remains supported.
+  a single entry is selected automatically. There is no separate default-account
+  setting; a one-entry map is the default. A legacy flat mapping remains supported.
   Loaded by all three playbooks. The playbooks export
   the access keys into the task environment so the `amazon.aws` modules pick
   them up the normal boto3 way; if those entries are empty, boto3 falls back
@@ -1385,9 +1392,12 @@ Every successful AWS, Azure, OpenStack, or GCP migration run appends one record 
 `vm_name`, source vCenter/datacenter, `clone_name`, `snapshot_name`, the
 source `artifact_type`, target-neutral `artifact_manifest`, target platform,
 `status`, and `migrated_at`. AWS records additionally contain the S3 location,
-`ami_id`, and `import_task_id`, plus `aws_account_id` for new multi-account
-entries; OpenStack records contain ordered Glance image
-IDs and names plus the OpenStack project (key, always recorded) and optional
+`ami_id`, `import_task_id`, and the selected vault project key; they also record
+`aws_account_id` when it is known. Retries use the account ID when both rows
+have one, otherwise the project key when both rows have one. Older rows with
+neither field are not attributed to an account or project-scoped row.
+OpenStack records contain ordered Glance image IDs and names plus the
+OpenStack project (key, always recorded) and optional
 project ID and region; GCP records contain the
 project, import location, GCS staging bucket and prefix, the boot image name
 and selfLink, and ordered data-disk image names and selfLinks; Azure records
@@ -1444,10 +1454,10 @@ entry for the given `vm_name`; pass `--project <account-id-or-key>` when
 selecting among multiple AWS accounts and `--region <region>` to restrict
 the match to one region (the launch playbook passes its `aws_region`,
 since an AMI cannot be launched in another region). With `--project`,
-rows recorded for that account win; legacy rows without `aws_account_id`
-are used only when no row for the account matches, since they could come
-from any account. OpenStack entries contain an ordered list of Glance
-image IDs, one per source disk, for use by the OpenStack launch workflow;
+rows recorded for that account or vault project key win; only the oldest legacy
+rows without either `aws_account_id` or `aws_project` are used as a fallback,
+since they could come from any account. OpenStack entries contain an ordered
+list of Glance image IDs, one per source disk, for use by the OpenStack launch workflow;
 `bin/lookup-migration-openstack.py --project <name-or-id> --region <region>`
 picks the newest `completed` migration for one `vm_name` in one project and
 region, and the launch playbook refuses a migration from another project
@@ -1517,19 +1527,21 @@ automatically. Credentials go to every `azure.azcollection` module through
 secret is not visible in `ps` during a multi-GB upload, and the modules never
 fall back to a logged-in `az` session.
 
-Reconcile the catalog against Azure with `bin/reconcile-catalog-azure.py`
-when images may have been removed outside this repository. It removes
-completed Azure migration rows whose managed images or snapshots are gone, and rows already
-marked `retired`; it never deletes cloud resources. It scopes one subscription
-per run (inferred when the catalog holds one, else `--subscription`, alias
-`--project`), verifies each row's image ID belongs to that subscription, and
-refuses unusually large removals unless `--force` is supplied. Use `--dry-run`
-first. Exported `AZURE_TENANT` (or `AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and
-`AZURE_SECRET` (or `AZURE_CLIENT_SECRET`) are used when set. Otherwise it uses
-the service principal from the Azure vault, matched by subscription ID
-(`--project` also accepts a vault key; `--vault` names another file), and
-only then `DefaultAzureCredential` (`az login`, managed identity), so a
-personal login blocked by Entra ID security defaults does not matter:
+Reconcile the catalogs against Azure with `bin/reconcile-catalog-azure.py`
+when migrated images, snapshots, or launched VMs may have been removed outside
+this repository. It removes completed migration rows whose managed images or
+snapshots are gone, active deployment rows whose Azure VMs are gone, and rows
+already marked `retired` from either catalog. It never deletes cloud resources.
+It scopes one subscription per run (inferred when the catalogs hold one, else
+`--subscription`, alias `--project`), verifies each migration image or snapshot
+ID belongs to that subscription, and refuses unusually large removals unless
+`--force` is supplied. Use `--dry-run` first. Exported `AZURE_TENANT` (or
+`AZURE_TENANT_ID`), `AZURE_CLIENT_ID`, and `AZURE_SECRET` (or
+`AZURE_CLIENT_SECRET`) are used when set. Otherwise it uses the service
+principal from the Azure vault, matched by subscription ID (`--project` also
+accepts a vault key; `--vault` names another file), and only then
+`DefaultAzureCredential` (`az login`, managed identity), so a personal login
+blocked by Entra ID security defaults does not matter:
 
 ```bash
 ./bin/reconcile-catalog-azure.py --dry-run
@@ -1565,12 +1577,13 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   dialog offers them as a picker.
 - Networking lives in the vault's resource group: the VNet
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
-  `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`, default
-  any) are created only when missing and otherwise used as they are
+  `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`) are created
+  only when missing and otherwise used as they are
   (`AZURE_VNET_NAME`, `AZURE_SUBNET_NAME`, `AZURE_NSG_NAME`). Set
   `AZURE_SSH_SOURCE_PREFIX` (the dialog asks when the VM gets a public IP) to
-  restrict the SSH rule of an NSG created by the launch; the default `*` admits
-  SSH from anywhere, and an existing NSG keeps its own rules. Each VM gets its
+  choose the SSH source. Supply a CIDR or service tag;
+  `*` explicitly allows SSH from anywhere. An existing NSG keeps its own
+  rules. Each VM gets its
   own NIC and, unless `AZURE_NO_PUBLIC_IP=true`, a static Standard public IP.
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.
@@ -1692,8 +1705,9 @@ Every successful AWS, Azure, OpenStack, or GCP launch appends one record to
 `/work/migrate-v2v/catalogs/deployment-catalog.json` via
 `bin/append-deployment-catalog.py`.
 AWS records contain `vm_name`, `target_platform`, `ami_id`, the
-`import_task_id` it came from, `instance_id`, `instance_type`, `aws_region`,
-`vpc_subnet_id`, `status`, and `launched_at`. Azure records contain the VM name,
+`import_task_id` it came from, `instance_id`, `instance_type`, the selected
+vault project key, `aws_region`, `vpc_subnet_id`, `status`, and `launched_at`;
+they also record `aws_account_id` when known. Azure records contain the VM name,
 subscription, resource group, location, size, boot image ID, attached data-disk
 names, private and public IPs, source migration ID, `status`, and `launched_at`.
 OpenStack records contain `vm_name`, `target_platform`,

@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import (default_catalog_path, read_snapshot,
+from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -43,8 +43,15 @@ def validate_scope(migration_catalog, deployment_catalog, project_id):
 def get_resource(session, url, cache):
     if url in cache:
         return cache[url]
-    response = session.get(url)
+    response = session.get(url, timeout=30)
     if response.status_code == 404:
+        try:
+            reasons = [item.get("reason") for item in
+                       response.json().get("error", {}).get("errors", [])]
+        except (AttributeError, TypeError, ValueError):
+            reasons = []
+        if "notFound" not in reasons:
+            response.raise_for_status()
         resource = None
     else:
         response.raise_for_status()
@@ -52,8 +59,46 @@ def get_resource(session, url, cache):
     cache[url] = resource
     return resource
 
+def verify_project_and_zones(session, project_id, deployment_catalog):
+    if get_resource(session, f"{COMPUTE_API}/{project_id}", {}) is None:
+        raise ValueError(f"GCP project {project_id} does not exist or is inaccessible")
+    zones = {entry.get("gcp_zone") for entry in deployment_catalog["deployments"]
+             if entry.get("target_platform") == "gcp"
+             and entry.get("gcp_project") == project_id
+             and entry.get("status") != "retired"
+             and entry.get("gcp_zone")}
+    for zone in sorted(zones):
+        if get_resource(session, f"{COMPUTE_API}/{project_id}/zones/{zone}", {}) is None:
+            raise ValueError(
+                f"GCP deployment catalog references missing zone {zone} in {project_id}; "
+                "refusing to treat resources there as deleted")
+
+def aggregated_resource_location(session, project_id, collection, name, cache):
+    key = (collection, name)
+    if key in cache:
+        return cache[key]
+    url = f"{COMPUTE_API}/{project_id}/aggregated/{collection}"
+    page_token = None
+    while True:
+        params = {"filter": f"name = {name}", "maxResults": 500}
+        if page_token:
+            params["pageToken"] = page_token
+        response = session.get(url, params=params, timeout=30)
+        response.raise_for_status()
+        body = response.json()
+        for scope, scoped in (body.get("items") or {}).items():
+            if any(resource.get("name") == name
+                   for resource in ((scoped or {}).get(collection) or [])):
+                cache[key] = scope
+                return scope
+        page_token = body.get("nextPageToken")
+        if not page_token:
+            cache[key] = None
+            return None
+
 def find_missing_resources(session, project_id, migration_catalog, deployment_catalog):
     image_cache, instance_cache, disk_cache = {}, {}, {}
+    aggregate_cache = {}
     stale_migrations, stale_deployments = [], []
 
     for entry in migration_catalog["migrations"]:
@@ -87,6 +132,13 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
         instance_url = f"{COMPUTE_API}/{project_id}/zones/{zone}/instances/{instance_name}"
         missing_instance = get_resource(
             session, instance_url, instance_cache) is None
+        if missing_instance:
+            location = aggregated_resource_location(
+                session, project_id, "instances", instance_name, aggregate_cache)
+            if location:
+                raise ValueError(
+                    f"GCP instance {instance_name} is present in {location}, not "
+                    f"the catalog's zones/{zone}; refusing to remove its deployment row")
         disk_names = entry.get("gcp_data_disk_names", [])
         if not isinstance(disk_names, list):
             raise ValueError(
@@ -95,6 +147,12 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
         for disk_name in disk_names:
             disk_url = f"{COMPUTE_API}/{project_id}/zones/{zone}/disks/{disk_name}"
             if get_resource(session, disk_url, disk_cache) is None:
+                location = aggregated_resource_location(
+                    session, project_id, "disks", disk_name, aggregate_cache)
+                if location:
+                    raise ValueError(
+                        f"GCP disk {disk_name} is present in {location}, not "
+                        f"the catalog's zones/{zone}; refusing to remove its deployment row")
                 missing_disks.append(disk_name)
         if missing_instance or missing_disks:
             stale_deployments.append((entry, missing_instance, missing_disks))
@@ -168,7 +226,18 @@ def main():
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")
-    deployment_catalog = read_snapshot(args.deployment_catalog, "deployments")
+    deployment_catalog = read_optional_snapshot(args.deployment_catalog, "deployments")
+    unscoped = [entry for catalog, list_key in (
+        (migration_catalog, "migrations"), (deployment_catalog, "deployments"))
+        for entry in catalog[list_key]
+        if entry.get("target_platform") == "gcp"
+        and entry.get("status") != "retired"
+        and not str(entry.get("gcp_project") or "").strip()]
+    for entry in unscoped:
+        print(
+            f"skipping {entry.get('vm_name', '<unknown>')} "
+            f"{entry.get('clone_name') or entry.get('gcp_instance_name') or '<unknown>'}: "
+            "no gcp_project recorded, so it cannot be checked or removed")
     projects = catalog_scope(migration_catalog, deployment_catalog)
     if args.project_id:
         project_id = args.project_id
@@ -189,6 +258,7 @@ def main():
     session = AuthorizedSession(credentials)
 
     print(f"GCP scope: project_id={project_id} (credentials: {source})")
+    verify_project_and_zones(session, project_id, deployment_catalog)
     stale_migrations, stale_deployments = find_missing_resources(
         session, project_id, migration_catalog, deployment_catalog)
     retired_migrations = [entry for entry in migration_catalog["migrations"] if entry.get("target_platform") == "gcp" and entry.get("status") == "retired" and entry.get("gcp_project") == project_id]

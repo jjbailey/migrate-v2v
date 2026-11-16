@@ -15,7 +15,7 @@ VM_NAME=${VM_NAME:-}
 # Optional name for the new server when it should differ from the source VM.
 INSTANCE_NAME=${INSTANCE_NAME:-}
 OS_FLAVOR=${OS_FLAVOR:-}
-OS_KEY_NAME=${OS_KEY_NAME:-cloud}
+OS_KEY_NAME=${OS_KEY_NAME-cloud}
 OS_SECURITY_GROUPS_JSON=${OS_SECURITY_GROUPS_JSON:-'["default"]'}
 OS_NETWORK=${OS_NETWORK:-}
 OS_NETWORK_ID=${OS_NETWORK_ID:-}
@@ -66,6 +66,9 @@ fi
 [ -n "$OS_NICS_JSON" ] && args+=(-e "$(wrapper_json_var openstack_nics "$OS_NICS_JSON")")
 [ -n "$OS_PROJECT_NAME" ] && args+=(-e "$(wrapper_var openstack_target_project "$OS_PROJECT_NAME")")
 [ -n "$OS_USER_DATA" ] && [ -n "$OS_USER_DATA_FILE" ] && wrapper_error "OS_USER_DATA and OS_USER_DATA_FILE are mutually exclusive"
+if [ -n "$OS_USER_DATA_FILE" ] && [ ! -r "$OS_USER_DATA_FILE" ] ; then
+    wrapper_error "OS_USER_DATA_FILE is not a readable file: $OS_USER_DATA_FILE"
+fi
 if [ -n "$OS_USER_DATA" ] ; then
     # Inline user-data goes through a private file, not ansible's argv, where
     # any local user could read it from ps.

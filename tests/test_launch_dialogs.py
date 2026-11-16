@@ -22,7 +22,7 @@ args = sys.argv[1:]
 if '--inputbox' in args:
     prompt = args[args.index('--inputbox') + 1]
     values = {
-        'Allow SSH from': os.environ.get('TEST_SSH_SOURCE', '*'),
+        'Allow SSH from': os.environ.get('TEST_SSH_SOURCE', '203.0.113.10/32'),
         'Azure VM name': os.environ.get('TEST_INSTANCE_NAME', ''),
         'EC2 instance Name tag': os.environ.get('TEST_INSTANCE_NAME', ''),
         'GCP instance name': os.environ.get('TEST_INSTANCE_NAME', ''),
@@ -108,13 +108,23 @@ class LaunchDialogTests(unittest.TestCase):
         ansible.chmod(0o755)
         home = self.tmp / "home"
         home.mkdir()
+        vault_dir = self.tmp / "vaults"
+        vault_dir.mkdir()
+        catalog_dir = self.tmp / "catalogs"
+        catalog_dir.mkdir()
         key = self.tmp / "key.pub"
         key.write_text("ssh-ed25519 AAAA test\n")
+        inherited = {name: os.environ[name] for name in
+                     ("PATH", "LANG", "LC_ALL", "TERM") if name in os.environ}
         self.env = {
-            **os.environ,
+            **inherited,
             "PATH": f"{stub_bin}:{os.environ['PATH']}",
             "HOME": str(home),
             "TMPDIR": str(self.tmp),
+            "ARTIFACT_ROOT": str(self.tmp / "artifacts"),
+            "MIGRATE_V2V_VAULT_DIR": str(vault_dir),
+            "MIGRATE_V2V_CATALOG_DIR": str(catalog_dir),
+            "VAULT_PASSWORD_FILE": str(self.tmp / "missing-vault-password"),
             "TEST_KEY": str(key),
             "TEST_ARGV": str(self.tmp / "argv.json"),
         }
@@ -153,7 +163,7 @@ class LaunchDialogTests(unittest.TestCase):
                 elif platform == "azure":
                     self.assertIn("export AZURE_SSH_KEY_NAME='cloud'", command)
                     self.assertIn("export AZURE_SSH_KEY_FILE=''", command)
-                    self.assertIn("export AZURE_SSH_SOURCE_PREFIX='*'", command)
+                    self.assertIn("export AZURE_SSH_SOURCE_PREFIX='203.0.113.10/32'", command)
                 elif platform == "gcp":
                     self.assertIn("export GCP_SSH_KEY_FILE=''", command)
                 subprocess.run(["bash", "-n", files[0]], check=True)

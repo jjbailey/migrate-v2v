@@ -21,6 +21,47 @@
     - migration_run_dir_derived | default(false) | bool
   failed_when: false
 
+- name: Check whether the failed OVF run has both resume artifacts
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ ovf_local_path }}"
+    - "{{ artifact_manifest_path }}"
+  register: cleanup_ovf_artifact_stats
+  when:
+    - migration_target in ['azure', 'gcp', 'openstack']
+    - not (migration_succeeded | default(false) | bool)
+    - not (discard_failed_artifacts | bool)
+    - not (migration_resume_mode | default(false) | bool)
+
+- name: Record whether this failed OVF run is resumable
+  ansible.builtin.set_fact:
+    migration_ovf_resumable: >-
+      {{ (cleanup_ovf_artifact_stats.results | default([])
+          | selectattr('stat.exists') | list | length) == 2 }}
+  when: cleanup_ovf_artifact_stats is not skipped
+
+- name: Remove an incomplete OVF run that cannot be resumed
+  ansible.builtin.file:
+    path: "{{ migration_run_dir }}"
+    state: absent
+  when:
+    - cleanup_ovf_artifact_stats is not skipped
+    - not (migration_ovf_resumable | default(false) | bool)
+    - migration_run_dir_derived | default(false) | bool
+  failed_when: false
+
+- name: Report an OVF run that stopped before it could be resumed
+  ansible.builtin.debug:
+    msg: >-
+      Migration did not produce both export.ovf and artifact-manifest.json, so
+      this run cannot be resumed. Any derived run directory was removed;
+      explicitly configured artifact directories were kept. Correct the
+      failure and start a new run.
+  when:
+    - cleanup_ovf_artifact_stats is not skipped
+    - not (migration_ovf_resumable | default(false) | bool)
+
 - name: Report retained artifacts for a resumable failed run
   ansible.builtin.debug:
     msg: >-
@@ -31,6 +72,7 @@
     - migration_target in ['azure', 'gcp', 'openstack']
     - not (migration_succeeded | default(false) | bool)
     - not (discard_failed_artifacts | bool)
+    - migration_resume_mode | default(false) | bool or migration_ovf_resumable | default(true) | bool
 
 - name: Remove the temporary catalog entry
   ansible.builtin.file:

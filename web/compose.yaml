@@ -1,0 +1,47 @@
+services:
+  controller:
+    image: ${MIGRATE_V2V_RUNTIME_IMAGE:?Set MIGRATE_V2V_RUNTIME_IMAGE to the prepared migration runtime image}
+    init: true
+    working_dir: /opt/migrate-v2v
+    command: ["python3", "web/app.py", "serve", "--host", "0.0.0.0", "--port", "8080"]
+    user: "${HOST_UID:?Set HOST_UID}:${HOST_GID:?Set HOST_GID}"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      ARTIFACT_ROOT: /work/migrate-v2v
+      MIGRATE_V2V_VAULT_DIR: /work/migrate-v2v/vaults
+      MIGRATE_V2V_CATALOG_DIR: /work/migrate-v2v/catalogs
+      VAULT_PASSWORD_FILE: /run/secrets/migrate-v2v-vault-password
+      WEB_STATE_DIR: /work/migrate-v2v/web-state
+      WEB_INPUT_DIR: /work/migrate-v2v/web-inputs
+      WEB_SECURE_COOKIE: "true"
+    volumes:
+      - ..:/opt/migrate-v2v:ro
+      - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}:/work/migrate-v2v
+      - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}/vaults:/work/migrate-v2v/vaults:ro
+      - ${VAULT_PASSWORD_FILE_HOST:?Set VAULT_PASSWORD_FILE_HOST}:/run/secrets/migrate-v2v-vault-password:ro
+    networks: [private]
+    restart: unless-stopped
+
+  https:
+    image: caddy:2
+    depends_on: [controller]
+    environment:
+      CADDY_HOSTS: "localhost:8443, 127.0.0.1:8443"
+      CADDY_UPSTREAM: controller:8080
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports:
+      - "127.0.0.1:8443:8443"
+    networks: [private]
+    restart: unless-stopped
+
+networks:
+  private:
+
+volumes:
+  caddy-data:
+  caddy-config:

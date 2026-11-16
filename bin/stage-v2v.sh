@@ -69,12 +69,20 @@ esac
 # "[01:03]" would expand as a host range, and "=", "#" or ":" would be parsed
 # as variables or comments.
 case "$inventory_hostname" in
+    -*)
+        echo "$(basename -- "$0"): VM name must not begin with a hyphen" >&2
+        exit 2
+        ;;
     *[[:space:]\[\]=#:]*)
         echo "$(basename -- "$0"): VM name must not contain whitespace or any of [ ] = # :" >&2
         exit 2
         ;;
 esac
 case "$ssh_address" in
+    -*)
+        echo "$(basename -- "$0"): address must not begin with a hyphen" >&2
+        exit 2
+        ;;
     *[[:space:]=#]*)
         echo "$(basename -- "$0"): address must not contain whitespace, = or #" >&2
         exit 2

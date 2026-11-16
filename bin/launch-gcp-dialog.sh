@@ -172,8 +172,10 @@ say "Launch summary for $VM_NAME
   Extra SSH key: ${GCP_SSH_KEY_FILE:-none}" 17
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-gcp.XXXXXX")
+dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
+    emit_runtime_path_exports
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "VM_NAME=$VM_NAME" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
         "GCP_NETWORK=$GCP_NETWORK" "GCP_SUBNETWORK=$GCP_SUBNETWORK" "GCP_TAGS_JSON=$GCP_TAGS_JSON" \

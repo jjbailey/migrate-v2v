@@ -656,7 +656,7 @@ class ReviewFixTests(unittest.TestCase):
             catalog_common.atomic_write_json(path, {"a": 1})
             self.assertEqual(path.stat().st_mode & 0o777, 0o660)
             self.assertEqual(json.loads(path.read_text()), {"a": 1})
-            old_umask = os.umask(0)
+            old_umask = os.umask(0o022)
             try:
                 with catalog_common.exclusive_lock(path):
                     pass

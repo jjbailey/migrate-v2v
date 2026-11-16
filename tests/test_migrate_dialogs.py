@@ -60,11 +60,21 @@ class MigrateDialogTests(unittest.TestCase):
         fake.chmod(0o755)
         home = self.tmp / "home"
         home.mkdir()
+        vault_dir = self.tmp / "vaults"
+        vault_dir.mkdir()
+        catalog_dir = self.tmp / "catalogs"
+        catalog_dir.mkdir()
+        inherited = {name: os.environ[name] for name in
+                     ("PATH", "LANG", "LC_ALL", "TERM") if name in os.environ}
         self.env = {
-            **os.environ,
+            **inherited,
             "PATH": f"{stub_bin}:{os.environ['PATH']}",
             "HOME": str(home),
             "TMPDIR": str(self.tmp),
+            "ARTIFACT_ROOT": str(self.tmp / "artifacts"),
+            "MIGRATE_V2V_VAULT_DIR": str(vault_dir),
+            "MIGRATE_V2V_CATALOG_DIR": str(catalog_dir),
+            "VAULT_PASSWORD_FILE": str(self.tmp / "missing-vault-password"),
             "TEST_DATACENTER": "Legacy DC",
             "TEST_TARGET": "target one",
         }

@@ -320,8 +320,10 @@ say "Launch summary for $VM_NAME
   SSH key pair...: ${AWS_KEY_NAME:-none}" 15
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-aws.XXXXXX")
+dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
+    emit_runtime_path_exports
     printf 'export ARTIFACT_ROOT=%s\n' "$(quote "$ARTIFACT_ROOT")"
     printf 'export MIGRATE_V2V_VAULT_DIR=%s\n' "$(quote "$MIGRATE_V2V_VAULT_DIR")"
     printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"

@@ -192,6 +192,7 @@
               import_task_id: "{{ source_import_task_id }}"
               instance_id: "{{ launch_result.instances[0].instance_id }}"
               instance_type: "{{ instance_type }}"
+              aws_project: "{{ aws_target_project_name }}"
               aws_region: "{{ aws_region }}"
               vpc_subnet_id: "{{ vpc_subnet_id }}"
               status: "{{ launch_result.instances[0].state.name | default('running') }}"

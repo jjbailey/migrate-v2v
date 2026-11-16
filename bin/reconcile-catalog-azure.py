@@ -218,6 +218,17 @@ def main(argv=None):
         deployment_catalog = read_snapshot(args.deployment_catalog, "deployments")
     else:
         deployment_catalog = {"schema_version": 1, "deployments": []}
+    unscoped = [entry for catalog, list_key in (
+        (migration_catalog, "migrations"), (deployment_catalog, "deployments"))
+        for entry in catalog[list_key]
+        if entry.get("target_platform") == "azure"
+        and entry.get("status") != "retired"
+        and not str(entry.get("azure_subscription_id") or "").strip()]
+    for entry in unscoped:
+        print(
+            f"skipping {entry.get('vm_name', '<unknown>')} "
+            f"{entry.get('clone_name') or entry.get('azure_vm_name') or '<unknown>'}: "
+            "no azure_subscription_id recorded, so it cannot be checked or removed")
     subscriptions = catalog_scope(migration_catalog, deployment_catalog)
     if not subscriptions:
         print("no Azure catalog entries found")

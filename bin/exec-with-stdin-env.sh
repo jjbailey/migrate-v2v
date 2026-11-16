@@ -5,7 +5,8 @@
 # Usage: exec-with-stdin-env.sh NAME... -- COMMAND [ARG...]
 #
 # Reads one line from stdin per NAME, exports each non-empty value under that
-# name, then execs COMMAND. Playbooks use it to hand a secret to a CLI (govc,
+# name, unsets a name for an empty line, then execs COMMAND. A missing line is
+# warned about and also unsets the name. Playbooks use it to hand a secret to a CLI (govc,
 # aws) through the command module's stdin: an Ansible `environment:` would run
 # the module as `sh -c 'NAME=secret python ...'`, leaving the secret readable
 # in ps by every local user for as long as the command runs.
@@ -29,9 +30,13 @@ shift
 
 for name in "${names[@]}" ; do
     value=
-    IFS= read -r value || true
+    if ! IFS= read -r value ; then
+        printf 'exec-with-stdin-env.sh: warning: stdin ended before a value for %s\n' "$name" >&2
+    fi
     if [ -n "$value" ] ; then
         export "$name=$value"
+    else
+        unset "$name"
     fi
 done
 

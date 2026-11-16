@@ -37,11 +37,9 @@
     azure_subnet_cidr: "10.80.0.0/24"
     azure_nsg_name: "migrate-v2v-nsg"
     # Source the NSG's SSH rule admits when the play creates the NSG. An
-    # existing NSG keeps its own rules.
-    # WARNING: the default "*" admits SSH from anywhere, and VMs get a public
-    # IP unless azure_no_public_ip. Set this to your own CIDR (wrapper:
-    # AZURE_SSH_SOURCE_PREFIX).
-    azure_ssh_source_prefix: "*"
+    # existing NSG keeps its own rules. A public-IP launch must provide a value;
+    # "*" is an explicit choice to allow SSH from anywhere.
+    azure_ssh_source_prefix: ""
     azure_no_public_ip: false
     # Delete unattached <vm>-osdisk / <vm>-data-N disks a deleted VM of the
     # same name left behind, instead of refusing the launch.
@@ -90,6 +88,13 @@
           AZURE_SSH_KEY_NAME, default cloud) or -e azure_ssh_public_key_file=<path
           to a .pub file> (wrapper: AZURE_SSH_KEY_FILE); Azure provisions the
           admin user with that key.
+
+    - name: Require an explicit SSH source for a public-IP launch
+      ansible.builtin.assert:
+        that: (azure_no_public_ip | bool) or (azure_ssh_source_prefix | length > 0)
+        fail_msg: >-
+          Set azure_ssh_source_prefix to a CIDR or service tag before launching
+          a VM with a public IP. Use '*' only if SSH from anywhere is intended.
 
     - name: Read the SSH public key file for the admin user
       ansible.builtin.slurp:

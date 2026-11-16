@@ -244,12 +244,11 @@ while : ; do
             if [ -z "$sg_choices" ] ; then
                 say "Could not list security groups for '${PROJECT:-auto-select}'.\\n\\nEnter the names manually instead." 9 || true
                 while : ; do
-                    sgs=$(input "Security group names, comma-separated:" "default") || abort
-                    [ -n "$sgs" ] && {
-                        SGS_JSON=$(json_list "$sgs")
+                    sgs=$(input "Security groups as a JSON array of names:" '["default"]') || abort
+                    if SGS_JSON=$(json_string_array "$sgs") && [ "$SGS_JSON" != '[]' ] ; then
                         break
-                    }
-                    bad "Enter at least one security group name." || true
+                    fi
+                    bad "Enter a non-empty JSON array of security group names." || true
                 done
             else
                 sg_args=()
@@ -259,9 +258,9 @@ while : ; do
                 done <<< "$sg_choices"
                 while : ; do
                     picked=$(checklist 'Which security groups should the instance join?\n(Space toggles, Enter confirms ; choose more than one when needed.)' "${sg_args[@]}") || abort
-                    picked=$(printf '%s' "$picked" | sed -e '/^[[:space:]]*$/d' | paste -sd ',' -)
+                    picked=$(printf '%s\n' "$picked" | sed -e '/^[[:space:]]*$/d')
                     [ -n "$picked" ] && {
-                        SGS_JSON=$(json_list "$picked")
+                        SGS_JSON=$(printf '%s\n' "$picked" | json_lines_array)
                         break
                     }
                     if yesno 'No security groups selected.\n\nProceed with none (cloud default policy applies)?' no ; then
@@ -273,8 +272,11 @@ while : ; do
             ;;
         names)
             while : ; do
-                sgs=$(input "Security group names, comma-separated:" "default") || abort
-                SGS_JSON=$(json_list "$sgs")
+                sgs=$(input "Security groups as a JSON array of names:" '["default"]') || abort
+                if ! SGS_JSON=$(json_string_array "$sgs") ; then
+                    bad "Enter a JSON array of security group names." || true
+                    continue
+                fi
                 [ "$SGS_JSON" != '[]' ] && {
                     break
                 }
@@ -349,12 +351,23 @@ case "$ud_mode" in
         ;;
 esac
 
+KEY_NAME=${OS_KEY_NAME-cloud}
 while : ; do
     FLAVOR=$(pick_os_value "Which flavor (instance size) should the instance use?" "$PROJECT" "--flavors" "flavors" "${OS_FLAVOR:-${FLAVOR:-}}" "s1-8" "OpenStack flavor (instance size):") || abort
-    KEY_NAME=$(pick_os_value "Which SSH key pair should the instance use?" "$PROJECT" "--keypairs" "keypairs" "${OS_KEY_NAME:-${KEY_NAME:-}}" "cloud" "SSH key pair name registered in OpenStack:") || abort
+    key_default=OFF
+    none_default=OFF
+    if [ -n "$KEY_NAME" ] ; then key_default=ON; else none_default=ON; fi
+    key_mode=$(radio "How should SSH access be configured?" \
+        key "Use an OpenStack key pair" "$key_default" \
+        none "Do not attach a key pair (image or user-data must provide access)" "$none_default") || abort
+    if [ "$key_mode" = none ] ; then
+        KEY_NAME=""
+    else
+        KEY_NAME=$(pick_os_value "Which SSH key pair should the instance use?" "$PROJECT" "--keypairs" "keypairs" "$KEY_NAME" "cloud" "SSH key pair name registered in OpenStack:") || abort
+    fi
     NETWORK=$(pick_os_value "Which network should the instance attach to?" "$PROJECT" "--networks" "networks" "${OS_NETWORK:-${NETWORK:-}}" "Ext-Net" "OpenStack network name:") || abort
-    [ -n "$FLAVOR" ] && [ -n "$KEY_NAME" ] && [ -n "$NETWORK" ] && break
-    bad "Flavor, SSH key, and network cannot be empty." || true
+    [ -n "$FLAVOR" ] && [ -n "$NETWORK" ] && break
+    bad "Flavor and network cannot be empty." || true
 done
 NETWORK_ID=$(input "Network UUID (optional ; leave blank to use the name):" "") || abort
 while : ; do
@@ -377,12 +390,14 @@ say "Launch summary for ${VM_NAME}
   ConfigDrive: ${CONFIG_DRIVE}
   User data..: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
   Flavor.....: ${FLAVOR}
-  SSH key....: ${KEY_NAME}
+  SSH key....: ${KEY_NAME:-none}
   Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
+dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
+    emit_runtime_path_exports
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
         "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=$OS_NICS_JSON" \

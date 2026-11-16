@@ -10,6 +10,7 @@ then discarded. Broadcom's download page and license terms are at PAGE_URL.
 """
 
 import hashlib
+import http.client
 import http.cookiejar
 import json
 import os
@@ -142,12 +143,12 @@ def official_download_url():
         )
 
     parsed = urllib.parse.urlparse(download_url)
-    if parsed.scheme != "https" or not (
-        parsed.hostname == "broadcom.com"
-        or (parsed.hostname or "").endswith(".broadcom.com")
-    ):
+    if parsed.scheme != "https" or not is_broadcom_host(parsed.hostname):
         raise SystemExit("Broadcom returned an unexpected download host.")
     return download_url
+
+def is_broadcom_host(hostname):
+    return hostname == "broadcom.com" or bool(hostname and hostname.endswith(".broadcom.com"))
 
 def acquire_archive(destination):
     supplied = os.environ.get("OVFTOOL_ARCHIVE")
@@ -164,9 +165,12 @@ def acquire_archive(destination):
     )
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
+            final_url = urllib.parse.urlparse(response.geturl())
+            if final_url.scheme != "https" or not is_broadcom_host(final_url.hostname):
+                raise ValueError("Broadcom download redirected to an unexpected host.")
             with destination.open("wb") as output:
                 shutil.copyfileobj(response, output)
-    except (OSError, urllib.error.URLError) as error:
+    except (OSError, http.client.HTTPException, urllib.error.URLError, ValueError) as error:
         raise SystemExit(f"Could not download OVF Tool from Broadcom: {error}") from error
 
 def verify_archive(path):
@@ -309,5 +313,6 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, zipfile.BadZipFile, urllib.error.URLError, subprocess.TimeoutExpired) as error:
+    except (OSError, http.client.HTTPException, zipfile.BadZipFile,
+            urllib.error.URLError, subprocess.TimeoutExpired) as error:
         raise SystemExit(f"OVF Tool installation failed: {error}") from error

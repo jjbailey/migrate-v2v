@@ -289,12 +289,32 @@
         {%- set _ = names.append(azure_vm_name ~ '-data-' ~ (lun + 1)) -%}
         {%- endfor -%}
         {{ names }}
-      failed_when: false
+      register: azure_failed_launch_disk_cleanup
+      # Azure can report a disk as attached briefly after rejecting the VM
+      # deployment. Retry that transient state before leaving a stale disk
+      # for the next launch; other cleanup errors are reported below.
+      until: >-
+        'being attached to VM' not in
+        (azure_failed_launch_disk_cleanup.msg | default(''))
+      retries: 12
+      delay: 5
+      ignore_errors: true
+
+    - name: Report managed disks the failed launch could not remove
+      ansible.builtin.debug:
+        msg: >-
+          Azure could not remove managed disk {{ item.item }} during failed
+          launch cleanup: {{ item.msg | default('see the task result above') }}
+      loop: "{{ azure_failed_launch_disk_cleanup.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.failed | default(false)
 
     - name: Fail the launch after cleaning up
       ansible.builtin.fail:
         msg: >-
-          Creating Azure VM {{ azure_vm_name }} failed. The public IP, network
-          interface, VM and disks this run created were removed; retry after fixing the cause:
+          Creating Azure VM {{ azure_vm_name }} failed. Cleanup was attempted;
+          check the cleanup task results above and verify whether the VM, network
+          interface, public IP, or disks remain before retrying. Cause:
           {{ ansible_failed_result.msg | default('see the error above') }}
 

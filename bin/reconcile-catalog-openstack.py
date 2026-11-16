@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import (default_catalog_path, read_snapshot,
+from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -445,7 +445,7 @@ def main():
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")
-    deployment_catalog = read_snapshot(args.deployment_catalog, "deployments")
+    deployment_catalog = read_optional_snapshot(args.deployment_catalog, "deployments")
     projects, _ = catalog_scope(migration_catalog, deployment_catalog)
     project_groups = catalog_project_groups(
         migration_catalog, deployment_catalog)

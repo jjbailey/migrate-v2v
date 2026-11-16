@@ -6,6 +6,20 @@
 # would still print "Validation passed." and exit 0. Do not remove.
 set -euo pipefail
 
+# Resolve path settings while the caller's working directory is still active.
+# The rest of this script changes to the repository root.
+for validate_path_var in \
+    VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR \
+    ARTIFACT_ROOT OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE \
+    OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE \
+    AZURE_SSH_KEY_FILE GCP_SSH_KEY_FILE OS_USER_DATA_FILE VCENTER_CA_BUNDLE ; do
+    case "${!validate_path_var:-}" in
+        "" | /*) ;;
+        *) export "$validate_path_var=$PWD/${!validate_path_var}" ;;
+    esac
+done
+unset validate_path_var
+
 repo_dir="$(CDPATH= builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." > /dev/null && builtin pwd -P)"
 cd "$repo_dir"
 
@@ -27,13 +41,18 @@ for playbook in playbooks/*.yml ; do
 done
 
 echo "== shell syntax =="
-while IFS= read -r script ; do
-    if bash -n "$script" ; then
-        echo "  ok   $script"
-    else
-        fail "$script failed bash -n"
-    fi
-done < <(find -L bin local playbooks/templates -type f \( -name '*.sh' -o -name '*.sh.j2' \) 2> /dev/null)
+mapfile -t shell_scripts < <(find -L bin local playbooks/templates -type f \( -name '*.sh' -o -name '*.sh.j2' \) 2> /dev/null)
+if [ "${#shell_scripts[@]}" -eq 0 ] ; then
+    fail "no shell scripts found to check"
+else
+    for script in "${shell_scripts[@]}" ; do
+        if bash -n "$script" ; then
+            echo "  ok   $script"
+        else
+            fail "$script failed bash -n"
+        fi
+    done
+fi
 
 echo "== shellcheck =="
 # SC1007 is the intentional `CDPATH= builtin cd` idiom. local/ holds the
@@ -301,7 +320,12 @@ fi
 echo "== Python requirements =="
 # Playbooks run bin/ scripts with the python3 on PATH, while collection modules
 # run under the Python that runs ansible-playbook; both need requirements.txt.
-ansible_python="$(ansible-playbook --version 2>/dev/null | sed -n 's/^ *python version = .*(\(\/[^)]*\))$/\1/p')"
+if command -v ansible-playbook > /dev/null 2>&1 ; then
+    ansible_python="$(ansible-playbook --version 2>/dev/null | sed -n 's/^ *python version = .*(\(\/[^)]*\))$/\1/p' || true)"
+else
+    ansible_python=""
+    echo "  WARN ansible-playbook is not installed; cannot inspect its Python runtime" >&2
+fi
 for python_bin in python3 "${ansible_python:-python3}" ; do
     if "$python_bin" - << 'PYTHON' ; then
 from importlib.metadata import PackageNotFoundError, version
