@@ -32,8 +32,7 @@ footer span{color:#e4ad3a;margin:0 6px}
 .card-icon{width:60px;height:60px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:12px}
 .card-icon svg{width:32px;height:32px;display:block}
 .card-icon.aws{color:#ffffff}
-.card-icon.aws path{fill:currentColor}
-.card-icon.aws span{color:currentColor;font-weight:800;font-size:11px}
+.card-icon.aws .cloud-label{display:none}
 .card-kicker{font-size:10px;letter-spacing:1.7px;color:#9eb5ba;font-weight:750}
 .cloud-card h3{color:white;font-size:20px;margin:2px 0}
 .card-links{margin-top:auto;display:flex;flex-direction:column;gap:5px}

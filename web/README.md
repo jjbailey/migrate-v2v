@@ -1,10 +1,16 @@
 # Controller web UI
 
-The site queues the repository's existing `bin/` migrate and launch
-wrappers. It offers AWS, Azure, GCP, and OpenStack; Azure and OpenStack also
-offer datastore-direct VDDK migration. A completed migration in the image
-catalog is required before launch. Each controller uses its own vaults,
-and every local web account can use the environments in those vaults.
+![The controller overview: migrate and launch cards for AWS, Azure, Google Cloud, and OpenStack, with recent jobs below](overview.svg)
+
+The overview puts every destination one click away. Choose a cloud to migrate
+a vSphere VM, then launch from its completed image. Azure and OpenStack also
+offer datastore-direct migration. Recent jobs keep the controller's activity
+in view. The SVG shows a new controller before its first job.
+
+The site queues the repository's existing `bin/` migrate and launch wrappers.
+A completed migration in the image catalog is required before launch. Each
+controller uses its own vaults, and every local web account can use the
+environments in those vaults.
 
 Migrate and launch both begin with a vault project selector. Migration then
 asks for the source vCenter and VM. Launch loads the selected project's

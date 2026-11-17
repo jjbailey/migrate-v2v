@@ -685,8 +685,7 @@ class Handler(BaseHTTPRequestHandler):
                 for mode in ("migrate", "launch"):
                     methods = ("standard", "vddk") if mode == "migrate" and cloud in ("azure", "openstack") else ("standard",)
                     links = ''.join(f'<a href="/new/{mode}/{cloud}/{method}">{"Datastore direct" if method == "vddk" else "Open form"} <span>↗</span></a>' for method in methods)
-                    aws_label = ' <span class="cloud-label">aws</span>' if cloud == "aws" else ""
-                    cards.append(f'<article class="cloud-card"><div class="card-icon {cloud}">{icon_html(cloud)}{aws_label}</div><div><div class="card-kicker">{mode.upper()}</div><h3>{cloud_name(cloud)}</h3></div><div class="card-links">{links}</div></article>')
+                    cards.append(f'<article class="cloud-card"><div class="card-icon {cloud}">{icon_html(cloud)}</div><div><div class="card-kicker">{mode.upper()}</div><h3>{cloud_name(cloud)}</h3></div><div class="card-links">{links}</div></article>')
             with db() as conn:
                 recent = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 5").fetchall()
             body = '''<section class="hero"><div class="eyebrow"><i></i> VMWARE TO CLOUD</div><h1>Move with clarity.</h1><p>Choose a cloud, migrate a VM, then launch from its completed image. Operations are queued and run one at a time.</p></section>'''
