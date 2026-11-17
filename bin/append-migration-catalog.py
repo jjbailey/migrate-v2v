@@ -78,6 +78,37 @@ def migration_identity(entry):
     resource = entry.get("import_task_id", entry.get("clone_name"))
     return target, resource, str(scope)
 
+def same_migration_identity(left, right):
+    """Compare retry identity while using AWS project keys as account fallback.
+
+    Some AWS rows have a vault project key but no resolved account ID. The
+    project key is sufficient to recognize a retry when both rows record it.
+    Rows with neither field remain unscoped and are deliberately not merged
+    into a scoped row.
+    """
+    if left.get("target_platform") != "aws" or right.get("target_platform") != "aws":
+        return migration_identity(left) == migration_identity(right)
+
+    if (left.get("import_task_id", left.get("clone_name"))
+            != right.get("import_task_id", right.get("clone_name"))):
+        return False
+    if str(left.get("aws_region", "")) != str(right.get("aws_region", "")):
+        return False
+
+    left_account = str(left.get("aws_account_id") or "")
+    right_account = str(right.get("aws_account_id") or "")
+    if left_account and right_account:
+        return left_account == right_account
+
+    left_project = str(left.get("aws_project") or "")
+    right_project = str(right.get("aws_project") or "")
+    if left_project and right_project:
+        return left_project == right_project
+
+    # Preserve idempotency for genuinely unscoped entries, but never use one
+    # unscoped row to replace a row that names an account or project.
+    return not (left_account or right_account or left_project or right_project)
+
 def validate_disk_order(disks):
     """Disk order is boot order: index i is the i-th disk, and only 0 boots."""
     for position, disk in enumerate(disks):
@@ -257,10 +288,9 @@ def main():
         # AWS reruns are identified by their import task. OpenStack and GCP
         # imports have no EC2 task ID, so their unique snapshot-backed clone
         # name is the run identity instead.
-        entry_identity = migration_identity(entry)
         catalog["migrations"] = [
             old for old in catalog["migrations"]
-            if migration_identity(old) != entry_identity
+            if not same_migration_identity(old, entry)
         ]
         catalog["migrations"].append(entry)
         write_catalog(path, catalog, "migrations")

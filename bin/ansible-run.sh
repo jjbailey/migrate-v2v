@@ -79,7 +79,11 @@ done
 
 if [ "$has_vault_option" = true ] ; then
     : # vault password handling already on the command line
-elif [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "${VAULT_PASSWORD_FILE}" ] ; then
+elif [ -n "${VAULT_PASSWORD_FILE:-}" ] ; then
+    if [ ! -r "$VAULT_PASSWORD_FILE" ] || [ ! -s "$VAULT_PASSWORD_FILE" ] ; then
+        echo "ansible-run: VAULT_PASSWORD_FILE is missing, unreadable, or empty: $VAULT_PASSWORD_FILE" >&2
+        exit 2
+    fi
     ARGS+=("--vault-password-file" "${VAULT_PASSWORD_FILE}")
 elif [ -s "${DEFAULT_VAULT_PASSWORD_FILE}" ] ; then
     ARGS+=("--vault-password-file" "${DEFAULT_VAULT_PASSWORD_FILE}")

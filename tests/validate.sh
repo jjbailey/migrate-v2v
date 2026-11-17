@@ -6,6 +6,20 @@
 # would still print "Validation passed." and exit 0. Do not remove.
 set -euo pipefail
 
+# Resolve path settings while the caller's working directory is still active.
+# The rest of this script changes to the repository root.
+for validate_path_var in \
+    VAULT_PASSWORD_FILE MIGRATE_V2V_VAULT_DIR MIGRATE_V2V_CATALOG_DIR \
+    ARTIFACT_ROOT OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE \
+    OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE \
+    AZURE_SSH_KEY_FILE GCP_SSH_KEY_FILE OS_USER_DATA_FILE VCENTER_CA_BUNDLE ; do
+    case "${!validate_path_var:-}" in
+        "" | /*) ;;
+        *) export "$validate_path_var=$PWD/${!validate_path_var}" ;;
+    esac
+done
+unset validate_path_var
+
 repo_dir="$(CDPATH= builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." > /dev/null && builtin pwd -P)"
 cd "$repo_dir"
 
@@ -27,13 +41,18 @@ for playbook in playbooks/*.yml ; do
 done
 
 echo "== shell syntax =="
-while IFS= read -r script ; do
-    if bash -n "$script" ; then
-        echo "  ok   $script"
-    else
-        fail "$script failed bash -n"
-    fi
-done < <(find -L bin local playbooks/templates -type f \( -name '*.sh' -o -name '*.sh.j2' \) 2> /dev/null)
+mapfile -t shell_scripts < <(find -L bin local playbooks/templates -type f \( -name '*.sh' -o -name '*.sh.j2' \) 2> /dev/null)
+if [ "${#shell_scripts[@]}" -eq 0 ] ; then
+    fail "no shell scripts found to check"
+else
+    for script in "${shell_scripts[@]}" ; do
+        if bash -n "$script" ; then
+            echo "  ok   $script"
+        else
+            fail "$script failed bash -n"
+        fi
+    done
+fi
 
 echo "== shellcheck =="
 # SC1007 is the intentional `CDPATH= builtin cd` idiom. local/ holds the
@@ -134,13 +153,20 @@ done <<< "$vault_files"
 # Optional: decrypt the vaults and check their schemas (vsphere.yml required,
 # each cloud vault when present). Skipped silently when the vault password is missing so
 # the gate still runs on machines without credentials.
-# Same lookup as bin/ansible-run.sh: VAULT_PASSWORD_FILE when it names a
-# non-empty file, else the default file.
+# Same lookup as bin/ansible-run.sh: an explicitly set VAULT_PASSWORD_FILE
+# must name a non-empty readable file (ansible-run.sh exits 2 otherwise, so a
+# silent fallback here would pass a gate the real run fails); unset, the
+# default file is used when present.
 vault_pass="$HOME/.dib-vault-pass"
-if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
-    vault_pass=$VAULT_PASSWORD_FILE
+if [ -n "${VAULT_PASSWORD_FILE:-}" ] ; then
+    if [ -s "$VAULT_PASSWORD_FILE" ] && [ -r "$VAULT_PASSWORD_FILE" ] ; then
+        vault_pass=$VAULT_PASSWORD_FILE
+    else
+        fail "VAULT_PASSWORD_FILE=$VAULT_PASSWORD_FILE is not a readable, non-empty file"
+        vault_pass=
+    fi
 fi
-if [ -n "$vault_files" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
+if [ -n "$vault_files" ] && [ -n "$vault_pass" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
     echo "== vault schema =="
     if python3 tests/check_vault_schema.py "$vault_pass" "$vault_dir" ; then
         echo "  ok   vault schemas (vsphere/openstack/aws/gcp/azure)"
@@ -152,13 +178,18 @@ else
 fi
 
 echo "== Python syntax =="
+python_checked=0
 while IFS= read -r script ; do
+    python_checked=$((python_checked + 1))
     if python3 -m py_compile "$script" ; then
         echo "  ok   $script"
     else
         fail "$script failed py_compile"
     fi
-done < <(find bin local tests -type f -name '*.py' 2> /dev/null)
+done < <(find bin local tests web -type f -name '*.py' -not -path '*/__pycache__/*' 2> /dev/null)
+if [ "$python_checked" -eq 0 ] ; then
+    fail "no Python files found to check"
+fi
 
 echo "== catalogs =="
 # append-migration-catalog.py / append-deployment-catalog.py are the
@@ -253,7 +284,13 @@ if python3 - << 'PYTHON' ; then
 import sys
 import unittest
 
-suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+loader = unittest.defaultTestLoader
+suite = unittest.TestSuite([
+    loader.discover("tests", pattern="test_*.py"),
+    # web/tests is not a package; its modules import web from the
+    # repository root, which is on sys.path for this script.
+    loader.discover("web/tests", pattern="test_*.py", top_level_dir="web/tests"),
+])
 result = unittest.TextTestRunner().run(suite)
 if result.skipped:
     reasons = sorted({reason for _, reason in result.skipped})
@@ -262,7 +299,8 @@ sys.exit(0 if result.wasSuccessful() else 1)
 PYTHON
     echo "  ok   focused unit tests"
     # After the tests, which re-create bin/ and tests/ caches by importing.
-    rm -rf bin/__pycache__ local/__pycache__ tests/__pycache__
+    rm -rf bin/__pycache__ local/__pycache__ tests/__pycache__ \
+        web/__pycache__ web/tests/__pycache__
 else
     fail "focused unit tests failed"
 fi
@@ -301,7 +339,12 @@ fi
 echo "== Python requirements =="
 # Playbooks run bin/ scripts with the python3 on PATH, while collection modules
 # run under the Python that runs ansible-playbook; both need requirements.txt.
-ansible_python="$(ansible-playbook --version 2>/dev/null | sed -n 's/^ *python version = .*(\(\/[^)]*\))$/\1/p')"
+if command -v ansible-playbook > /dev/null 2>&1 ; then
+    ansible_python="$(ansible-playbook --version 2>/dev/null | sed -n 's/^ *python version = .*(\(\/[^)]*\))$/\1/p' || true)"
+else
+    ansible_python=""
+    echo "  WARN ansible-playbook is not installed; cannot inspect its Python runtime" >&2
+fi
 for python_bin in python3 "${ansible_python:-python3}" ; do
     if "$python_bin" - << 'PYTHON' ; then
 from importlib.metadata import PackageNotFoundError, version

@@ -58,7 +58,17 @@ def read_vault(vault):
         raise SystemExit(f"timed out decrypting {vault}")
     if result.returncode != 0:
         raise SystemExit(f"could not decrypt {vault}")
-    return yaml.safe_load(result.stdout) or {}
+    try:
+        data = yaml.safe_load(result.stdout)
+    except yaml.YAMLError as error:
+        mark = getattr(error, "problem_mark", None)
+        location = f" at line {mark.line + 1}" if mark is not None else ""
+        raise SystemExit(f"could not parse decrypted vault {vault}{location}") from None
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise SystemExit(f"decrypted vault {vault} must contain a YAML mapping")
+    return data
 
 def vault_projects(vault, map_name):
     """The vault's <map_name> entries keyed by string, or None without a file.

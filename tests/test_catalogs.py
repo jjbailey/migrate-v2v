@@ -161,6 +161,10 @@ class OvaInspectionTests(unittest.TestCase):
                 info = tarfile.TarInfo("vm.ovf")
                 info.size = len(data)
                 archive.addfile(info, io.BytesIO(data))
+                for name, size in (("boot.vmdk", 10), ("data.vmdk", 20)):
+                    info = tarfile.TarInfo(name)
+                    info.size = size
+                    archive.addfile(info, io.BytesIO(b"\0" * size))
             manifest = inspect_ova.inspect_ova(ova)
         self.assertEqual(manifest["disk_count"], 2)
         self.assertEqual([disk["disk_id"] for disk in manifest["disks"]], ["disk-boot", "disk-data"])
@@ -656,7 +660,7 @@ class ReviewFixTests(unittest.TestCase):
             catalog_common.atomic_write_json(path, {"a": 1})
             self.assertEqual(path.stat().st_mode & 0o777, 0o660)
             self.assertEqual(json.loads(path.read_text()), {"a": 1})
-            old_umask = os.umask(0)
+            old_umask = os.umask(0o022)
             try:
                 with catalog_common.exclusive_lock(path):
                     pass

@@ -28,8 +28,8 @@
   ansible.builtin.set_fact:
     snapshot_name: "ansible-aws-snap-{{ migration_run_id }}"
     clone_name: "{{ vm_name }}-aws-export-clone-{{ migration_run_id }}"
-    ova_local_path: "{{ aws_migration_run_dir }}/{{ vm_name }}-aws-export-clone-{{ migration_run_id }}.ova"
-    s3_key: "imports/{{ vm_name }}-aws-export-clone-{{ migration_run_id }}.ova"
+    ova_local_path: "{{ aws_migration_run_dir }}/{{ aws_vm_slug }}-aws-export-clone-{{ migration_run_id }}.ova"
+    s3_key: "imports/{{ aws_vm_slug }}-aws-export-clone-{{ migration_run_id }}.ova"
     # Inside the private run directory rather than a predictable /tmp name
     # built from the raw VM name.
     catalog_entry_path: "{{ aws_migration_run_dir }}/catalog-entry.json"

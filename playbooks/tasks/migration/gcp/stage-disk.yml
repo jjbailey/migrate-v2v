@@ -22,6 +22,81 @@
     gcp_existing_image_check.rc != 0 and
     (gcp_existing_image_check.stderr | lower) is not search(gcp_absent_resource_pattern)
 
+# M2VM may accept an import before its Compute image becomes visible. A resume
+# in that window must wait for the import before start-import.yml can remove it.
+# Ansible marks a task failed when its until retries run out, so the wait
+# ignores errors and the next task stops with a clear message instead; a real
+# lookup error (not "absent") also stops there.
+- name: Wait for an earlier M2VM import when its image is not visible yet
+  ansible.builtin.command:
+    argv:
+      - gcloud
+      - compute
+      - migration
+      - image-imports
+      - describe
+      - "{{ gcp_disk.image }}"
+      - "--location={{ gcp_import_location }}"
+      - "--project={{ gcp_project }}"
+      - "--format=value(recentImageImportJobs[0].state)"
+  environment: "{{ gcp_gcloud_env }}"
+  register: gcp_resume_import_without_image
+  until: >-
+    (gcp_resume_import_without_image.rc == 0 and
+     gcp_resume_import_without_image.stdout.strip() in ['SUCCEEDED', 'FAILED', 'CANCELLED'])
+    or (gcp_resume_import_without_image.rc != 0 and
+        (gcp_resume_import_without_image.stderr | lower) is search(gcp_absent_resource_pattern))
+  retries: "{{ gcp_import_poll_retries | int }}"
+  delay: "{{ gcp_import_poll_delay | int }}"
+  changed_when: false
+  failed_when: >-
+    gcp_resume_import_without_image.rc != 0 and
+    (gcp_resume_import_without_image.stderr | lower) is not search(gcp_absent_resource_pattern)
+  ignore_errors: true
+  when:
+    - migration_resume_mode | bool
+    - gcp_existing_image_check.rc != 0
+
+- name: Stop if the earlier import without an image is unreadable or still running
+  ansible.builtin.fail:
+    msg: >-
+      {{ ('Could not read the earlier M2VM import of ' ~ gcp_disk.image ~ ': ' ~
+          (gcp_resume_import_without_image.stderr | trim))
+         if gcp_resume_import_without_image.rc != 0 else
+         ('The earlier M2VM import of ' ~ gcp_disk.image ~ ' is still ' ~
+          (gcp_resume_import_without_image.stdout | trim) ~
+          ' after the poll window. Resume again once it finishes.') }}
+  when:
+    - gcp_resume_import_without_image is not skipped
+    - gcp_resume_import_without_image is failed
+
+# The import may have created the image while we waited (or a failed import
+# may have left one). Check again so the reuse and replacement steps below see
+# the image as it is now, not as it was before the wait. A separate register
+# keeps a skipped recheck from clobbering the first check.
+- name: Check again for this disk's image after the earlier import finished
+  ansible.builtin.command:
+    argv:
+      - gcloud
+      - compute
+      - images
+      - describe
+      - "{{ gcp_disk.image }}"
+      - "--project={{ gcp_project }}"
+      - "--format=value(status)"
+  environment: "{{ gcp_gcloud_env }}"
+  register: gcp_image_after_import_wait
+  changed_when: false
+  failed_when: >-
+    gcp_image_after_import_wait.rc != 0 and
+    (gcp_image_after_import_wait.stderr | lower) is not search(gcp_absent_resource_pattern)
+  when: gcp_resume_import_without_image is not skipped
+
+- name: Use the post-wait image check for the steps below
+  ansible.builtin.set_fact:
+    gcp_existing_image_check: "{{ gcp_image_after_import_wait }}"
+  when: gcp_image_after_import_wait is not skipped
+
 # On resume, an image that exists is not proof of a completed import: a failed
 # import can leave an image behind, and cleanup.yml leaves running imports to
 # finish. An image is reused only when it is READY and its import is known to
@@ -63,18 +138,20 @@
       failed_when: >-
         gcp_prior_import_state.rc != 0 and
         (gcp_prior_import_state.stderr | lower) is not search(gcp_absent_resource_pattern)
+      # An exhausted until marks the task failed; stop below with a clear
+      # message instead. Replacing the image now could race the import.
+      ignore_errors: true
 
-    # failed_when overrides an exhausted until, so a timeout lands here.
-    # Replacing the image now could race the import still writing it.
-    - name: Stop if the earlier import is still running
+    - name: Stop if the earlier import is unreadable or still running
       ansible.builtin.fail:
         msg: >-
-          The earlier M2VM import of {{ gcp_disk.image }} is still
-          '{{ gcp_prior_import_state.stdout | trim }}' after the poll window.
-          Resume again once it finishes.
-      when:
-        - gcp_prior_import_state.rc == 0
-        - gcp_prior_import_state.stdout.strip() not in ['SUCCEEDED', 'FAILED', 'CANCELLED']
+          {{ ('Could not read the earlier M2VM import of ' ~ gcp_disk.image ~ ': ' ~
+              (gcp_prior_import_state.stderr | trim))
+             if gcp_prior_import_state.rc != 0 else
+             ('The earlier M2VM import of ' ~ gcp_disk.image ~ ' is still ' ~
+              (gcp_prior_import_state.stdout | trim) ~
+              ' after the poll window. Resume again once it finishes.') }}
+      when: gcp_prior_import_state is failed
 
     - name: Note whether the earlier import is known to have succeeded
       ansible.builtin.set_fact:
@@ -161,6 +238,17 @@
       staging upload and M2VM re-import.
   when: gcp_disk.image in gcp_reused_image_names
 
+- name: Refuse to overwrite an existing image when replacement is disabled
+  ansible.builtin.fail:
+    msg: >-
+      GCP image {{ gcp_disk.image }} already exists. Set
+      gcp_replace_existing_image=true to replace it.
+  when:
+    - gcp_existing_image_check.rc == 0
+    - gcp_disk.image not in gcp_reused_image_names
+    - not (migration_resume_mode | bool)
+    - not (gcp_replace_existing_image | bool)
+
 - name: Check whether this disk already exists in the staging bucket
   ansible.builtin.command:
     argv:
@@ -203,17 +291,6 @@
   ansible.builtin.set_fact:
     gcp_gcs_object_names: "{{ gcp_gcs_object_names + [gcp_disk.object] }}"
   when: gcp_existing_object_check.rc == 0 or gcp_disk.image not in gcp_reused_image_names
-
-- name: Refuse to overwrite an existing image when replacement is disabled
-  ansible.builtin.fail:
-    msg: >-
-      GCP image {{ gcp_disk.image }} already exists. Set
-      gcp_replace_existing_image=true to replace it.
-  when:
-    - gcp_existing_image_check.rc == 0
-    - gcp_disk.image not in gcp_reused_image_names
-    - not (migration_resume_mode | bool)
-    - not (gcp_replace_existing_image | bool)
 
 - name: Delete the existing image when replacement is enabled
   ansible.builtin.command:

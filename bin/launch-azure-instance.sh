@@ -19,8 +19,8 @@ AZURE_VNET_NAME=${AZURE_VNET_NAME:-}
 AZURE_SUBNET_NAME=${AZURE_SUBNET_NAME:-}
 AZURE_NSG_NAME=${AZURE_NSG_NAME:-}
 AZURE_NO_PUBLIC_IP=${AZURE_NO_PUBLIC_IP:-false}
-# Source the NSG SSH rule admits when this launch creates the NSG. Empty keeps
-# the playbook default ("*", anywhere); set a CIDR to restrict it.
+# Source the NSG SSH rule admits when this launch creates the NSG. A public-IP
+# launch must explicitly supply this; use * only when world-wide SSH is intended.
 AZURE_SSH_SOURCE_PREFIX=${AZURE_SSH_SOURCE_PREFIX:-}
 # Azure provisions the admin user through cloud-init with the Azure SSH public
 # key resource AZURE_SSH_KEY_NAME in the project's resource group, the way the

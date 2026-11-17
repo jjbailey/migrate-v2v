@@ -213,6 +213,43 @@ class AppendDeploymentMainTests(AppendMainTestCase):
             {(row["azure_resource_group"], row["status"]) for row in rows},
             {("RG-A", "STOPPED"), ("rg-b", "RUNNING")})
 
+    @staticmethod
+    def aws_deployment(instance, status="running", **scope):
+        return {
+            "vm_name": "vm-a", "target_platform": "aws", "status": status,
+            "launched_at": "2026-09-14T12:00:00Z", "ami_id": "ami-1",
+            "import_task_id": "import-ami-1", "instance_id": instance,
+            "instance_type": "t3.small", "aws_region": "us-west-2",
+            "vpc_subnet_id": "subnet-1", **scope,
+        }
+
+    def test_aws_relaunch_replaces_a_legacy_unscoped_row(self):
+        # A row from before aws_account_id/aws_project were recorded must not
+        # linger as a duplicate when the same instance is reused.
+        self.append(self.aws_deployment("i-1"))
+        self.append(self.aws_deployment("i-1", status="stopped", aws_project="lab"))
+        rows = self.rows()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["status"], rows[0]["aws_project"]), ("stopped", "lab"))
+
+    def test_aws_rows_in_different_accounts_or_projects_are_kept(self):
+        self.append(self.aws_deployment("i-1", aws_account_id="111"))
+        self.append(self.aws_deployment("i-1", aws_account_id="222"))
+        self.append(self.aws_deployment("i-2", aws_project="lab"))
+        self.append(self.aws_deployment("i-2", aws_project="prod"))
+        self.assertEqual(len(self.rows()), 4)
+
+    def test_aws_account_only_and_project_only_rows_stay_separate(self):
+        self.append(self.aws_deployment("i-1", aws_account_id="111"))
+        self.append(self.aws_deployment("i-1", aws_project="lab"))
+        self.assertEqual(len(self.rows()), 2)
+
+    def test_aws_same_scope_is_replaced(self):
+        self.append(self.aws_deployment("i-1", aws_account_id="111", aws_project="lab"))
+        self.append(self.aws_deployment("i-1", status="stopped", aws_account_id="111"))
+        rows = self.rows()
+        self.assertEqual([row["status"] for row in rows], ["stopped"])
+
     def test_azure_deployment_requires_its_fields(self):
         entry = azure_deployment("vm-a", "vm-a")
         del entry["azure_vm_size"]

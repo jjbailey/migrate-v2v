@@ -56,6 +56,9 @@ except json.JSONDecodeError as exc:
     raise SystemExit(f"{name} must be a JSON array: {exc}")
 if not isinstance(parsed, list):
     raise SystemExit(f"{name} must be a JSON array")
+expected = dict(OS_NICS_JSON=dict).get(name, str)
+if any(not isinstance(item, expected) for item in parsed):
+    raise SystemExit(f"{name} must contain only {expected.__name__} values")
 ' "$name" "$value" || wrapper_error "invalid $name"
 }
 
@@ -69,6 +72,9 @@ wrapper_var()
 import json
 import sys
 
+value = sys.argv[2]
+if any(token in value for token in ("{{", "{%", "{#")):
+    raise SystemExit("Ansible template syntax is not allowed in input values")
 print(json.dumps({sys.argv[1]: sys.argv[2]}))
 ' "$1" "$2"
 }
@@ -79,7 +85,21 @@ wrapper_json_var()
 import json
 import sys
 
-print(json.dumps({sys.argv[1]: json.loads(sys.argv[2])}))
+def check(value):
+    if isinstance(value, str):
+        if any(token in value for token in ("{{", "{%", "{#")):
+            raise SystemExit("Ansible template syntax is not allowed in input values")
+    elif isinstance(value, list):
+        for item in value:
+            check(item)
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            check(key)
+            check(item)
+
+value = json.loads(sys.argv[2])
+check(value)
+print(json.dumps({sys.argv[1]: value}))
 ' "$1" "$2"
 }
 

@@ -81,7 +81,7 @@ def api_list(session, url, params=None):
         query = dict(params or {})
         if page_token:
             query["pageToken"] = page_token
-        response = session.get(url, params=query or None)
+        response = session.get(url, params=query or None, timeout=30)
         response.raise_for_status()
         body = response.json()
         items.extend(body.get("items", []) or [])

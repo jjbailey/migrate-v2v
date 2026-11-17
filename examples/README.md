@@ -502,6 +502,52 @@ source ~/my-project-a-openrc.sh
 
 ---
 
+## Caddy on the Ansible Control Host
+
+Caddy can be run on the ansible control host as a reverse proxy / TLS
+terminator in front of the migration web app. The `examples/` directory
+provides example systemd unit files and a test script:
+
+- `caddy.service.example` — runs Caddy from the repository's
+  `web/Caddyfile`. Suitable when you manage the config file directly.
+- `caddy-api.service.example` — runs Caddy with its API and `--resume`, so
+  configuration changes made through the API persist across restarts. It
+  loads no Caddyfile; you supply the config through the API.
+- `migrate-v2v-web.service.example` — runs the web app itself
+  (`web/app.py serve` on `127.0.0.1:8080`). Neither Caddy unit starts it.
+- `run-caddy-example.sh` — example script for running Caddy plus the web app
+  in the foreground on the ansible controller for testing purposes.
+
+`caddy.service.example` sets `PROJECT_HOME` to the repository checkout with
+`Environment="PROJECT_HOME=/path/to/repo"` and loads
+`${PROJECT_HOME}/web/Caddyfile`. Edit that path; systemd has no shell-style
+defaults such as `${VAR:-default}`, and a variable inside a longer word must
+be written with braces (`${PROJECT_HOME}/web`, not `$PROJECT_HOME/web`).
+
+`web/Caddyfile` serves only `localhost`, `127.0.0.1` and `[::1]` on port
+8443 unless `CADDY_HOSTS` is set. To reach the site from other machines, add
+every address clients will use to the unit, for example
+`Environment="CADDY_HOSTS=localhost:8443, 127.0.0.1:8443, 192.0.2.10:8443"`.
+Serve the site over HTTPS only: the login cookie is `Secure`, so a plain
+`http://` site cannot sign anyone in. Use a `redir` to the HTTPS address if
+you want port 80 to answer.
+
+Install both units, adjust the paths and accounts in each, then enable them:
+
+```bash
+sudo cp examples/caddy.service.example /etc/systemd/system/caddy.service
+sudo cp examples/migrate-v2v-web.service.example /etc/systemd/system/migrate-v2v-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now migrate-v2v-web caddy
+```
+
+Install Caddy first (https://caddyserver.com/docs/install). The Caddy unit's
+user needs to read the Caddyfile and keeps its certificates and local CA
+under its own home. The web unit's user needs to read the vault password
+file and write `ARTIFACT_ROOT`.
+
+---
+
 ## Tips
 
 - Pass list-shaped extra-vars as **native JSON**

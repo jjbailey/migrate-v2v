@@ -1,7 +1,8 @@
 # Ubuntu 24.04 Container Dependency Plan
 
-This is preparation only. It records the dependency plan for a future
-container; it does not add a Dockerfile or Compose configuration.
+This is the dependency plan for a future full migration runtime image. The
+[web UI](../web/README.md) now has Compose configuration, but it requires a
+prepared runtime image; this document is still preparation for that image.
 
 ## Target
 

@@ -69,6 +69,8 @@ def validate(entry):
     target = entry["target_platform"]
     if target == "aws" and entry.get("aws_account_id") is not None:
         require_nonempty_string(entry, "aws_account_id")
+    if target == "aws" and entry.get("aws_project") is not None:
+        require_nonempty_string(entry, "aws_project")
     if target == "openstack":
         image_ids = validate_string_list(
             entry, "openstack_image_ids", allow_empty=False
@@ -178,12 +180,39 @@ def main():
                          item.get("openstack_region", ""))
             return target, resource, tuple(str(value) for value in scope)
 
+        def same_deployment_identity(left, right):
+            if (left.get("target_platform") != "aws"
+                    or right.get("target_platform") != "aws"):
+                return deployment_identity(left) == deployment_identity(right)
+            if (left.get("instance_id") != right.get("instance_id")
+                    or str(left.get("aws_region", ""))
+                    != str(right.get("aws_region", ""))):
+                return False
+
+            left_account = str(left.get("aws_account_id") or "")
+            right_account = str(right.get("aws_account_id") or "")
+            if left_account and right_account:
+                return left_account == right_account
+
+            left_project = str(left.get("aws_project") or "")
+            right_project = str(right.get("aws_project") or "")
+            if left_project and right_project:
+                return left_project == right_project
+
+            # A legacy row recorded before either field existed carries no
+            # scope at all. EC2 instance IDs are unique, so the same ID in the
+            # same region is the same instance: replace that row rather than
+            # leave a duplicate beside the scoped one. One side with only an
+            # account and the other with only a project stays ambiguous.
+            left_scoped = bool(left_account or left_project)
+            right_scoped = bool(right_account or right_project)
+            return not (left_scoped and right_scoped)
+
         # Keep deployment history. A target-specific resource ID identifies
         # the exact launch to replace on an idempotent catalog append.
-        entry_identity = deployment_identity(entry)
         catalog["deployments"] = [
             old for old in catalog["deployments"]
-            if deployment_identity(old) != entry_identity
+            if not same_deployment_identity(old, entry)
         ]
         catalog["deployments"].append(entry)
         write_catalog(path, catalog, "deployments")

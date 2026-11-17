@@ -30,8 +30,6 @@
       - "/{{ datacenter }}/vm"
       - -type
       - m
-      - -name
-      - "{{ vm_name }}"
   no_log: true
   register: source_vm_find
   changed_when: false
@@ -39,20 +37,26 @@
   # which can show the (password-free) detail.
   failed_when: false
 
+- name: Select exact source VM name matches
+  ansible.builtin.set_fact:
+    source_vm_exact_matches: >-
+      {{ (source_vm_find.stdout_lines | default([]))
+         | select('match', '.*/' ~ (vm_name | regex_escape) ~ '$') | list }}
+
 - name: Fail unless the source VM resolves to exactly one inventory path
   ansible.builtin.assert:
     that:
       - source_vm_find.rc == 0
-      - source_vm_find.stdout_lines | length == 1
+      - source_vm_exact_matches | length == 1
     fail_msg: >-
       Could not resolve '{{ vm_name }}' in datacenter '{{ datacenter }}' (govc
-      exit {{ source_vm_find.rc }}, {{ source_vm_find.stdout_lines | length }}
+      exit {{ source_vm_find.rc }}, {{ source_vm_exact_matches | length }}
       match(es)). {{ source_vm_find.stderr | default('') | trim }}
 
 - name: Record the source inventory path
   ansible.builtin.set_fact:
-    source_vm_path: "{{ source_vm_find.stdout | trim }}"
-    source_vm_folder: "{{ source_vm_find.stdout | trim | regex_replace('/[^/]+$', '') }}"
+    source_vm_path: "{{ source_vm_exact_matches | first }}"
+    source_vm_folder: "{{ (source_vm_exact_matches | first) | regex_replace('/[^/]+$', '') }}"
 
 - name: Read the source VM configuration before the snapshot
   environment:

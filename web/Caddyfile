@@ -1,0 +1,19 @@
+{
+	auto_https disable_redirects
+	# Use hard request/response deadlines for compatibility with the Caddy 2.6
+	# binary used by local/run-caddy.sh; idle timeout options are newer.
+	servers {
+		timeouts {
+			read_body 2m
+			read_header 10s
+			write 10m
+			idle 2m
+		}
+	}
+}
+
+{$CADDY_HOSTS:localhost:8443, 127.0.0.1:8443, [::1]:8443} {
+	tls internal
+	encode gzip
+	reverse_proxy {$CADDY_UPSTREAM:127.0.0.1:8080}
+}

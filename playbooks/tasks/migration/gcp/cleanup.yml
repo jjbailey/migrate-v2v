@@ -94,6 +94,18 @@
         - item.rc is defined and item.rc == 0
         - gcp_cleanup_job.state | default('') not in ['SUCCEEDED', 'FAILED', 'CANCELLED']
 
+    - name: Preserve imports whose state could not be read
+      ansible.builtin.set_fact:
+        gcp_cleanup_running_imports: >-
+          {{ gcp_cleanup_running_imports | default([])
+             + [{'image': item.item, 'job': ''}] }}
+      loop: "{{ gcp_cleanup_import_state.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when:
+        - item.rc is defined and item.rc != 0
+        - (item.stderr | default('') | lower) is not search(gcp_absent_resource_pattern)
+
     # gcloud has no cancel command for image-import jobs, so the Migrate to Virtual
     # Machines API is called directly with the run's own service-account token.
     - name: Get an access token to cancel running image imports
@@ -218,7 +230,7 @@
     - name: Report image imports left running for a resume
       ansible.builtin.debug:
         msg: >-
-          Image imports still running were left to finish:
+          Image imports still running or with an unreadable state were left alone:
           {{ gcp_cleanup_running_imports | map(attribute='image') | join(', ') }}.
           A resume with -e resume_run_id={{ migration_run_id }} reuses each image
           that finishes and removes its import resource.
@@ -228,6 +240,9 @@
 
     # A resumed run reuses images an earlier attempt created
     # (gcp_reused_image_names); a discard removes those along with this attempt's.
+    # Images whose import could not be stopped are left alone: the import may
+    # still be writing them, and deleting one now lets the import recreate it
+    # after cleanup as an orphan. The warning below lists them for later.
     - name: Remove Compute images created by this failed run
       ansible.builtin.command:
         argv:
@@ -239,7 +254,10 @@
           - "--project={{ gcp_project }}"
           - --quiet
       environment: "{{ gcp_gcloud_env | default({}) }}"
-      loop: "{{ (gcp_created_image_names | default([])) | union(gcp_reused_image_names | default([])) }}"
+      loop: >-
+        {{ (gcp_created_image_names | default([]))
+           | union(gcp_reused_image_names | default([]))
+           | difference(gcp_cleanup_unstopped_imports | default([])) }}
       loop_control:
         label: "{{ item }}"
       when:
@@ -266,12 +284,13 @@
     - name: Warn about images a still-running import may create
       ansible.builtin.debug:
         msg: >-
-          These image imports could not be stopped and may still create an image
-          after this cleanup: {{ gcp_cleanup_unstopped_imports | join(', ') }}.
-          Check later with gcloud compute images list --project={{ gcp_project }}
-          --filter="name~^{{ gcp_image_prefix | default('') }}" and delete what
-          remains, then remove the import resources with gcloud compute migration
-          image-imports delete NAME --location={{ gcp_import_location }}.
+          These image imports could not be stopped, so their images were not
+          deleted and may still be created after this cleanup:
+          {{ gcp_cleanup_unstopped_imports | join(', ') }}. Once the imports
+          finish, delete each with gcloud compute images delete NAME
+          --project={{ gcp_project }}, then remove the import resources with
+          gcloud compute migration image-imports delete NAME
+          --location={{ gcp_import_location }}.
       when:
         - discard_failed_artifacts | bool
         - gcp_cleanup_unstopped_imports | default([]) | length > 0

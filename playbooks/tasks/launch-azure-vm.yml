@@ -135,6 +135,19 @@
     name: "{{ azure_nsg_name }}"
   register: azure_nsg_info
 
+# The prefix only matters here, where the play writes the SSH rule. An
+# existing NSG keeps its own rules, so a launch into it (or a reused VM)
+# needs no prefix.
+- name: Require an explicit SSH source before creating the NSG for a public-IP launch
+  ansible.builtin.assert:
+    that: (azure_no_public_ip | bool) or (azure_ssh_source_prefix | length > 0)
+    fail_msg: >-
+      The network security group {{ azure_nsg_name }} does not exist yet, and
+      this launch would create it with an SSH rule. Set azure_ssh_source_prefix
+      (wrapper: AZURE_SSH_SOURCE_PREFIX) to a CIDR or service tag. Use '*' only
+      if SSH from anywhere is intended.
+  when: azure_nsg_info.securitygroups | default([]) | length == 0
+
 - name: Create the launch network security group when it is missing
   azure.azcollection.azure_rm_securitygroup:
     resource_group: "{{ azure_resource_group }}"
@@ -289,12 +302,32 @@
         {%- set _ = names.append(azure_vm_name ~ '-data-' ~ (lun + 1)) -%}
         {%- endfor -%}
         {{ names }}
-      failed_when: false
+      register: azure_failed_launch_disk_cleanup
+      # Azure can report a disk as attached briefly after rejecting the VM
+      # deployment. Retry that transient state before leaving a stale disk
+      # for the next launch; other cleanup errors are reported below.
+      until: >-
+        'being attached to VM' not in
+        (azure_failed_launch_disk_cleanup.msg | default(''))
+      retries: 12
+      delay: 5
+      ignore_errors: true
+
+    - name: Report managed disks the failed launch could not remove
+      ansible.builtin.debug:
+        msg: >-
+          Azure could not remove managed disk {{ item.item }} during failed
+          launch cleanup: {{ item.msg | default('see the task result above') }}
+      loop: "{{ azure_failed_launch_disk_cleanup.results | default([]) }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.failed | default(false)
 
     - name: Fail the launch after cleaning up
       ansible.builtin.fail:
         msg: >-
-          Creating Azure VM {{ azure_vm_name }} failed. The public IP, network
-          interface, VM and disks this run created were removed; retry after fixing the cause:
+          Creating Azure VM {{ azure_vm_name }} failed. Cleanup was attempted;
+          check the cleanup task results above and verify whether the VM, network
+          interface, public IP, or disks remain before retrying. Cause:
           {{ ansible_failed_result.msg | default('see the error above') }}
 

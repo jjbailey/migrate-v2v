@@ -21,9 +21,36 @@
       {{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}; refusing to guess.
   when: disk_image_info.images | length > 1
 
-- name: Fail if the existing Glance image is not active
-  # An interrupted upload leaves the image queued, saving, or killed. Reusing
-  # it would catalog a broken image as completed.
+- name: Delete a non-active image belonging to this resumed run
+  # The run-ID-bearing name is unique to this migration. Ambiguous matches are
+  # rejected above, so this only removes the incomplete artifact being resumed.
+  openstack.cloud.image:
+    auth: "{{ openstack_auth }}"
+    region_name: "{{ openstack_region_name }}"
+    name: "{{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}"
+    state: absent
+  when:
+    - migration_resume_mode | default(false) | bool
+    - disk_image_info.images | length == 1
+    - (disk_image_info.images[0].status | default('')) != 'active'
+  no_log: true
+
+- name: Wait for the incomplete image to be removed
+  openstack.cloud.image_info:
+    auth: "{{ openstack_auth }}"
+    region_name: "{{ openstack_region_name }}"
+    name: "{{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}"
+  register: disk_incomplete_image_check
+  until: disk_incomplete_image_check.images | length == 0
+  retries: "{{ openstack_import_poll_retries | int }}"
+  delay: "{{ openstack_import_poll_delay | int }}"
+  when:
+    - migration_resume_mode | default(false) | bool
+    - disk_image_info.images | length == 1
+    - (disk_image_info.images[0].status | default('')) != 'active'
+  no_log: true
+
+- name: Fail if a fresh run finds a non-active Glance image
   ansible.builtin.fail:
     msg: >-
       Glance image {{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}
@@ -31,6 +58,15 @@
       '{{ disk_image_info.images[0].status | default('unknown') }}', not 'active',
       so an earlier upload did not finish. Delete it and resume again.
   when:
+    - not (migration_resume_mode | default(false) | bool)
+    - disk_image_info.images | length == 1
+    - (disk_image_info.images[0].status | default('')) != 'active'
+
+- name: Queue the replaced image for a fresh upload
+  ansible.builtin.set_fact:
+    openstack_pending_disks: "{{ openstack_pending_disks + [openstack_disk] }}"
+  when:
+    - migration_resume_mode | default(false) | bool
     - disk_image_info.images | length == 1
     - (disk_image_info.images[0].status | default('')) != 'active'
 
@@ -39,7 +75,9 @@
     openstack_disk_image_ids: >-
       {{ openstack_disk_image_ids
          | combine({openstack_disk.index | string: disk_image_info.images[0].id}) }}
-  when: disk_image_info.images | length == 1
+  when:
+    - disk_image_info.images | length == 1
+    - (disk_image_info.images[0].status | default('')) == 'active'
   no_log: true
 
 - name: Queue this disk for conversion and upload

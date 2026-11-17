@@ -12,6 +12,7 @@ stops only this run's servers.
 
 import json
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -62,6 +63,12 @@ def alive(pid):
 class StreamTests(unittest.TestCase):
 
     def setUp(self):
+        try:
+            with tempfile.TemporaryDirectory(prefix=".vddk-probe-", dir="/tmp") as directory:
+                with socket.socket(socket.AF_UNIX) as probe:
+                    probe.bind(str(Path(directory) / "probe.sock"))
+        except OSError as error:
+            self.skipTest(f"Unix sockets unavailable: {error}")
         self.tmp = Path(tempfile.mkdtemp(prefix="vddk-test-"))
         # Unix socket paths are short, so the socket directory sits in /tmp.
         self.sockets = Path(tempfile.mkdtemp(prefix=".vddk-test-", dir="/tmp"))

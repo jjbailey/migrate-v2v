@@ -20,7 +20,11 @@ anchor_path()
     esac
 }
 
-for path_var in ARTIFACT_ROOT MIGRATE_V2V_CATALOG_DIR MIGRATE_V2V_VAULT_DIR ; do
+for path_var in \
+    ARTIFACT_ROOT MIGRATE_V2V_CATALOG_DIR MIGRATE_V2V_VAULT_DIR \
+    VAULT_PASSWORD_FILE OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE \
+    OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE \
+    AZURE_SSH_KEY_FILE GCP_SSH_KEY_FILE OS_USER_DATA_FILE VCENTER_CA_BUNDLE ; do
     if [ -n "${!path_var:-}" ] ; then
         printf -v "$path_var" '%s' "$(anchor_path "${!path_var}")"
     fi
@@ -175,9 +179,40 @@ quote()
     printf "'%s'" "${1//\'/\'\\\'\'}"
 }
 
+emit_runtime_path_exports()
+{
+    local name value
+    for name in VAULT_PASSWORD_FILE OVFTOOL_INSTALL_DIR OVFTOOL_ARCHIVE \
+        OPENVDDK_INSTALL_DIR OPENVDDK_ARCHIVE ; do
+        value=${!name:-}
+        [ -n "$value" ] || continue
+        printf 'export %s=%s\n' "$name" "$(quote "$(anchor_path "$value")")"
+    done
+}
+
 json_list()
 {
     python3 -c 'import json,sys ; print(json.dumps([x.strip() for x in sys.argv[1].split(",") if x.strip()],separators=(",",":")))' "$1"
+}
+
+json_string_array()
+{
+    python3 -c '
+import json
+import sys
+try:
+    values = json.loads(sys.argv[1])
+except json.JSONDecodeError as error:
+    raise SystemExit(str(error))
+if not isinstance(values, list) or any(not isinstance(item, str) for item in values):
+    raise SystemExit("expected a JSON array of strings")
+print(json.dumps(values, separators=(",", ":")))
+' "$1"
+}
+
+json_lines_array()
+{
+    python3 -c 'import json,sys ; print(json.dumps([line for line in sys.stdin.read().splitlines() if line],separators=(",",":")))'
 }
 
 require_nonempty()
@@ -313,7 +348,6 @@ choose_target()
 finish()
 {
     local file=$1 vm=$2 verb=${3:-launch} saved=""
-    dialog_tmp_files+=("$file")
     if yesno "Review the generated command?\n\nNothing runs yet." yes ; then
         dlg --textbox "$file" "$(height 22)" "$COLS" || true
     fi

@@ -13,6 +13,7 @@ OPENVDDK_INSTALL_DIR so a host and a container can share it through
 
 import argparse
 import hashlib
+import http.client
 import os
 import platform
 import shutil
@@ -59,7 +60,7 @@ def acquire_archive(destination):
         with urllib.request.urlopen(request, timeout=60) as response:
             with destination.open("wb") as output:
                 shutil.copyfileobj(response, output)
-    except (OSError, urllib.error.URLError) as error:
+    except (OSError, http.client.HTTPException, urllib.error.URLError) as error:
         raise SystemExit(f"Could not download OpenVDDK from GitHub: {error}") from error
 
 def sha256(path):
@@ -170,8 +171,14 @@ def install_archive(archive, target_dir, temporary):
     staged_dir = temporary / "install"
     shutil.copytree(kit_dir, staged_dir, symlinks=True)
     lib64 = staged_dir / "lib64"
-    lib64.mkdir()
-    (lib64 / "libvixDiskLib.so.8").symlink_to("../lib/libvixDiskLib.so.8")
+    lib64.mkdir(exist_ok=True)
+    alias = lib64 / "libvixDiskLib.so.8"
+    if alias.is_symlink() and os.readlink(alias) == "../lib/libvixDiskLib.so.8":
+        pass
+    elif alias.exists() or alias.is_symlink():
+        raise SystemExit(f"Unexpected OpenVDDK compatibility path in archive: {alias}")
+    else:
+        alias.symlink_to("../lib/libvixDiskLib.so.8")
 
     existing_library = target_dir / "lib" / "libvixDiskLib.so.8.0.3"
     if existing_library.is_file() and sha256(existing_library) == LIBRARY_SHA256:
@@ -216,6 +223,16 @@ def main():
         print(f"OpenVDDK {VERSION} is already installed at {target_dir}")
         return 0
 
+    if target_dir.exists() or target_dir.is_symlink():
+        if (target_dir.is_dir() and not target_dir.is_symlink()
+                and not any(target_dir.iterdir())):
+            target_dir.rmdir()
+        else:
+            raise SystemExit(
+                f"Refusing to replace the existing VDDK directory {target_dir}; "
+                "choose another OPENVDDK_INSTALL_DIR."
+            )
+
     target_dir.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=".openvddk-install-", dir=target_dir.parent
@@ -231,5 +248,5 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, tarfile.TarError, urllib.error.URLError) as error:
+    except (OSError, http.client.HTTPException, tarfile.TarError, urllib.error.URLError) as error:
         raise SystemExit(f"OpenVDDK installation failed: {error}") from error

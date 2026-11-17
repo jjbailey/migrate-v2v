@@ -5,11 +5,13 @@
 """Download and install the tested Linux OVF Tool from Broadcom.
 
 The ZIP is downloaded to a temporary directory, checked against the MD5
-published on Broadcom's download page, extracted outside the repository, and
+published on Broadcom's download page and a pinned SHA-256 of the same file,
+extracted outside the repository, and
 then discarded. Broadcom's download page and license terms are at PAGE_URL.
 """
 
 import hashlib
+import http.client
 import http.cookiejar
 import json
 import os
@@ -32,7 +34,11 @@ PAGE_URL = (
     "open-virtualization-format-ovf-tool/5.1.0"
 )
 FILENAME = "VMware-ovftool-5.1.0-25410048-lin.x86_64.zip"
+# Broadcom publishes only an MD5. The SHA-256 was taken from a copy of this
+# exact ZIP whose MD5 matched Broadcom's; both must match, so a download is
+# held to SHA-256 even though the vendor does not publish one.
 MD5 = "ea1eb22fede461274eaff55a46318b63"
+SHA256 = "2c83970a212cc01262adb76ce3b9c52af396fad8340ff71acb749e33e86c8e33"
 ARTIFACT_ID = 29848
 PORTLET_ID = "SDK_AND_TOOL_DETAILS_INSTANCE_iwlk"
 DEFAULT_INSTALL_DIR = Path(
@@ -142,12 +148,24 @@ def official_download_url():
         )
 
     parsed = urllib.parse.urlparse(download_url)
-    if parsed.scheme != "https" or not (
-        parsed.hostname == "broadcom.com"
-        or (parsed.hostname or "").endswith(".broadcom.com")
-    ):
+    if parsed.scheme != "https" or not is_broadcom_host(parsed.hostname):
         raise SystemExit("Broadcom returned an unexpected download host.")
     return download_url
+
+def is_broadcom_host(hostname):
+    return hostname == "broadcom.com" or bool(hostname and hostname.endswith(".broadcom.com"))
+
+class BroadcomOnlyRedirects(urllib.request.HTTPRedirectHandler):
+    """Refuse any redirect hop that leaves https on a Broadcom host, not
+    just a bad final URL: an intermediate hop elsewhere would already have
+    received the request."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlparse(urllib.parse.urljoin(req.full_url, newurl))
+        if target.scheme != "https" or not is_broadcom_host(target.hostname):
+            raise urllib.error.URLError(
+                f"Broadcom download redirected to an unexpected host: {target.hostname}")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 def acquire_archive(destination):
     supplied = os.environ.get("OVFTOOL_ARCHIVE")
@@ -162,22 +180,32 @@ def acquire_archive(destination):
     request = urllib.request.Request(
         download_url, headers={"User-Agent": USER_AGENT}
     )
+    opener = urllib.request.build_opener(BroadcomOnlyRedirects)
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with opener.open(request, timeout=60) as response:
+            final_url = urllib.parse.urlparse(response.geturl())
+            if final_url.scheme != "https" or not is_broadcom_host(final_url.hostname):
+                raise ValueError("Broadcom download redirected to an unexpected host.")
             with destination.open("wb") as output:
                 shutil.copyfileobj(response, output)
-    except (OSError, urllib.error.URLError) as error:
+    except (OSError, http.client.HTTPException, urllib.error.URLError, ValueError) as error:
         raise SystemExit(f"Could not download OVF Tool from Broadcom: {error}") from error
 
 def verify_archive(path):
-    digest = hashlib.md5(usedforsecurity=False)
+    md5 = hashlib.md5(usedforsecurity=False)
+    sha256 = hashlib.sha256()
     with path.open("rb") as archive:
         for block in iter(lambda: archive.read(1024 * 1024), b""):
-            digest.update(block)
-    if digest.hexdigest().lower() != MD5:
+            md5.update(block)
+            sha256.update(block)
+    if md5.hexdigest().lower() != MD5:
         raise SystemExit(
             f"OVF Tool ZIP checksum mismatch for {path}; expected Broadcom's "
             f"published MD5 {MD5}."
+        )
+    if sha256.hexdigest().lower() != SHA256:
+        raise SystemExit(
+            f"OVF Tool ZIP checksum mismatch for {path}; expected SHA-256 {SHA256}."
         )
 
 def safe_extract(archive, destination):
@@ -309,5 +337,6 @@ def main():
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, zipfile.BadZipFile, urllib.error.URLError, subprocess.TimeoutExpired) as error:
+    except (OSError, http.client.HTTPException, zipfile.BadZipFile,
+            urllib.error.URLError, subprocess.TimeoutExpired) as error:
         raise SystemExit(f"OVF Tool installation failed: {error}") from error

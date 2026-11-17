@@ -10,7 +10,7 @@ import re
 import tarfile
 import xml.etree.ElementTree as ET
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urlparse
 
 try:
@@ -179,7 +179,44 @@ def inspect_ova(path):
         stream = archive.extractfile(ovf_member)
         if stream is None:
             raise ValueError(f"could not read OVF descriptor {ovf_member.name}")
-        return _inspect_descriptor(parse_xml(stream).getroot(), "ova", path, ovf_member.name)
+        members = {}
+        for member in archive.getmembers():
+            name = PurePosixPath(member.name)
+            if name.is_absolute() or ".." in name.parts or "\\" in member.name:
+                raise ValueError(f"unsafe path in OVA archive: {member.name}")
+            normalized = str(name)
+            if normalized in members:
+                raise ValueError(f"duplicate path in OVA archive: {member.name}")
+            members[normalized] = member
+
+        descriptor_parent = PurePosixPath(ovf_member.name).parent
+
+        def validate_file(disk, file_entry):
+            href = file_entry["path"]
+            parsed = urlparse(href)
+            relative = PurePosixPath(href)
+            if (not href or parsed.scheme or parsed.netloc or parsed.query or
+                    parsed.fragment or "\\" in href or relative.is_absolute() or
+                    ".." in relative.parts):
+                raise ValueError(f"unsafe OVF disk reference: {href}")
+            compression = (file_entry.get("compression") or "").lower()
+            if compression and compression != "none":
+                raise ValueError(f"compressed OVF disk is unsupported ({compression}): {href}")
+            if href.lower().endswith(".gz") or "gzip" in (disk.get("format") or "").lower():
+                raise ValueError(f"gzip-compressed OVF disk is unsupported: {href}")
+            member_path = descriptor_parent.joinpath(relative)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                raise ValueError(f"OVF disk escapes package directory: {href}")
+            member = members.get(str(member_path))
+            if member is None or not member.isfile():
+                raise ValueError(f"OVA disk is missing or not a regular file: {href}")
+            expected_size = file_entry["size_bytes"]
+            if expected_size is not None and member.size != expected_size:
+                raise ValueError(
+                    f"OVF disk size mismatch for {href}: expected {expected_size}, found {member.size}")
+
+        return _inspect_descriptor(parse_xml(stream).getroot(), "ova", path,
+                                   ovf_member.name, validate_file)
 
 def inspect_ovf(path):
     path = Path(path)

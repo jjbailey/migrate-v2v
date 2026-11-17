@@ -72,7 +72,7 @@ def run(tool, platform, project, parser_options=None, entry_filter=None,
     if fallback_filter is not None and fallback_filter(args) is not None:
         filters.append(fallback_filter)
     latest = None
-    for make_filter in filters:
+    for filter_index, make_filter in enumerate(filters):
         latest = latest_migration(
             args.catalog,
             args.vm_name,
@@ -82,6 +82,12 @@ def run(tool, platform, project, parser_options=None, entry_filter=None,
             tool=tool,
         )
         if latest is not None:
+            if filter_index:
+                print(
+                    f"{tool}: warning: using a legacy catalog row without "
+                    "project/account metadata",
+                    file=sys.stderr,
+                )
             break
     if latest is None:
         raise SystemExit(

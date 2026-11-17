@@ -77,7 +77,8 @@ aws_projects:
 ```
 
 Select an account with `-e aws_target_project=<key-or-account-id>`. A
-single-entry map is auto-selected. A legacy flat mapping containing
+single-entry map is auto-selected; there is no separate default-account
+setting. A legacy flat mapping containing
 `aws_region`, `s3_bucket`, and `vmimport_role_name` remains supported.
 
 `bin/aws-project-facts.py` reads `aws.yml` and selects an account

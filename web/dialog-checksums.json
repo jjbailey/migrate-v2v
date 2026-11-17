@@ -1,0 +1,14 @@
+{
+  "launch-dialog-common.sh": "dccc573a3fcccb1bbcc9703501e1c8eb2475a6a9f9e8602d8ce4d0b306d10dd9",
+  "migrate-dialog-common.sh": "95b87206cbb021083338bca69c77f4a76dd2e8e3f73046c9d07aebafe35f0d5a",
+  "launch-aws-dialog.sh": "7b9efae074b293178d3e15ee736f57b28efa59aceb929c23e31a4bc20f6fe824",
+  "launch-azure-dialog.sh": "42d6c1afb15c67cd54093bd8d697fd761b9aed05dc9e98a048eb458e904abe9a",
+  "launch-gcp-dialog.sh": "ebe67017476e4e9bf3ac015132970c7fc220241a00d13a2432e11fcdb072832e",
+  "launch-openstack-dialog.sh": "1129a9da3eacb5c6c0b8133bfc1ec9f53efd114bba00e8bb3155d7f1210e92c6",
+  "migrate-aws-dialog.sh": "6b5f4a13a1ea1ff05f55b7e6e835d18210e1cf0971ae59e18f99f65afc881bd9",
+  "migrate-azure-dialog.sh": "846ae75cce781752fe7b3451577b6a7335f5e81d1392ca6bb0f29e9815e4fe7d",
+  "migrate-azure-vddk-dialog.sh": "4c0bee3a401068882115f29ad0da3d11897b2b9160d93f4c8136567038906d93",
+  "migrate-gcp-dialog.sh": "bdd3e8bcc60ffddaa52304f4c54ae181e94c4a1575b482fd3e9021de49b1a5be",
+  "migrate-openstack-dialog.sh": "13954fd32e5c0a5925955f0da6ee8c59aaf07c592e050bb9cda86b7c7d080d6b",
+  "migrate-openstack-vddk-dialog.sh": "f51359971ae2958dee384f333e5976e494ac73810bde57e96d66e615248288bb"
+}

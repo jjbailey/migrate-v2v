@@ -352,8 +352,9 @@ class ExecWithStdinEnvTests(unittest.TestCase):
 
     SHOW = 'printf "%s|%s|%s" "$A" "$B" "${C-unset}"'
 
-    def run_helper(self, stdin, *argv):
+    def run_helper(self, stdin, *argv, inherited=None):
         env = {key: value for key, value in os.environ.items() if key not in {"A", "B", "C"}}
+        env.update(inherited or {})
         return subprocess.run([str(BIN / "exec-with-stdin-env.sh"), *argv], input=stdin,
                               capture_output=True, text=True, env=env, check=False)
 
@@ -362,9 +363,31 @@ class ExecWithStdinEnvTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "one two||unset")
 
-    def test_last_line_without_newline_is_read(self):
+    def test_empty_lines_keep_inherited_values(self):
+        # The AWS upload sends three empty lines when the vault has no keys;
+        # the operator's exported credentials must reach the CLI unchanged.
+        result = self.run_helper("\n\n\n", "A", "B", "C", "--", "sh", "-c", self.SHOW,
+                                 inherited={"A": "env-a", "B": "env-b", "C": "env-c"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "env-a|env-b|env-c")
+        self.assertEqual(result.stderr, "")
+
+    def test_stdin_values_replace_inherited_values(self):
+        result = self.run_helper("new-a\nnew-b\n\n", "A", "B", "C", "--", "sh", "-c", self.SHOW,
+                                 inherited={"A": "env-a", "C": "env-c"})
+        self.assertEqual(result.stdout, "new-a|new-b|env-c")
+
+    def test_last_line_without_newline_is_read_without_warning(self):
         result = self.run_helper("x\ny", "A", "B", "--", "sh", "-c", self.SHOW)
         self.assertEqual(result.stdout, "x|y|unset")
+        self.assertEqual(result.stderr, "")
+
+    def test_missing_lines_warn_and_keep_inherited_values(self):
+        result = self.run_helper("x\n", "A", "B", "--", "sh", "-c", self.SHOW,
+                                 inherited={"B": "env-b"})
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "x|env-b|unset")
+        self.assertIn("stdin ended before a value for B", result.stderr)
 
     def test_rejects_bad_names_and_missing_command(self):
         self.assertEqual(self.run_helper("", "1BAD", "--", "true").returncode, 2)

@@ -9,7 +9,7 @@ import json
 import os
 from pathlib import Path
 
-from catalog_common import (default_catalog_path, read_snapshot,
+from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -66,7 +66,8 @@ def accountless_rows(migration_catalog, deployment_catalog):
             and not entry.get("aws_account_id")]
 
 def resource_missing(client, operation, identifier, cache):
-    key = (operation, identifier)
+    key = (getattr(getattr(client, "meta", None), "region_name", None),
+           operation, identifier)
     if key in cache:
         return cache[key]
     try:
@@ -201,7 +202,7 @@ def main():
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")
-    deployment_catalog = read_snapshot(args.deployment_catalog, "deployments")
+    deployment_catalog = read_optional_snapshot(args.deployment_catalog, "deployments")
     regions, catalog_accounts = catalog_scope(
         migration_catalog, deployment_catalog, args.account_id)
     if args.region and args.region not in regions:
