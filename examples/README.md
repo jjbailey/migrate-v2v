@@ -502,6 +502,37 @@ source ~/my-project-a-openrc.sh
 
 ---
 
+## Caddy on the Ansible Control Host
+
+Caddy can be run on the ansible control host as a reverse proxy / TLS
+terminator in front of the migration web app. The `examples/` directory
+provides example systemd unit files and a test script:
+
+- `caddy.service.example` — runs Caddy from a static Caddyfile. Suitable when
+  you manage the config file directly.
+- `caddy-api.service.example` — runs Caddy with its API and `--resume`, so
+  configuration changes persist across restarts.
+- `run-caddy-example.sh` — example script for running Caddy plus the web app
+  on the ansible controller for testing purposes.
+
+Both unit files expect Caddy's config under `$ARTIFACT_ROOT/web` (default
+`/work/migrate-v2v/web`) and set `ARTIFACT_ROOT` via systemd `Environment=`
+with a bash-style default (`ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}`).
+
+Copy the unit you want to `/etc/systemd/system/caddy.service`, adjust as
+needed, then enable it:
+
+```bash
+sudo cp examples/caddy.service.example /etc/systemd/system/caddy.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now caddy
+```
+
+Install Caddy first (https://caddyserver.com/docs/install) and ensure the
+`caddy` user and group exist.
+
+---
+
 ## Tips
 
 - Pass list-shaped extra-vars as **native JSON**
