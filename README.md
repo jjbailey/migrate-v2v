@@ -350,7 +350,7 @@ migrate-v2v/
 │   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
 │   └── *-vault.sh               # Vault management scripts
 ├── doc/                         # Documentation, workflow diagram, presentation
-├── examples/                    # OpenStack launch matrix and sample cloud-init data
+├── examples/                    # Launch matrix, cloud-init data, Caddy and systemd units
 ├── playbooks/                   # Ansible playbooks
 │   ├── bootstrap-aws-import.yml
 │   ├── launch-{aws,azure,gcp,openstack}-instance.yml
@@ -362,6 +362,15 @@ migrate-v2v/
 │   └── vars/                    # Shared variables
 ├── requirements.yml             # Pinned Ansible collections
 ├── tests/                       # Static validation gate and catalog tests
+└── web/                         # Controller web UI (see web/README.md)
+    ├── app.py                   # Stdlib HTTP server: accounts, job queue, maintenance pages
+    ├── facts.py                 # Launch choices from bin/*-project-facts.py
+    ├── forms.py                 # Form fields derived from the bin/*-dialog.sh exports
+    ├── dialog-checksums.json    # Dialog hashes; a changed dialog needs form review
+    ├── Caddyfile                # HTTPS reverse proxy config
+    ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address)
+    ├── icons/, static/          # Cloud icons and the stylesheet
+    └── tests/                   # Web unit tests
 ```
 
 The platform wrappers also accept normal Ansible arguments such as `-e` and
