@@ -29,10 +29,11 @@ footer span{color:#e4ad3a;margin:0 6px}
 .cloud-card,.panel{background:linear-gradient(135deg,#193b43,#15343c);border:1px solid #31545a;border-radius:18px}
 .cloud-card{min-height:205px;padding:24px;display:flex;flex-direction:column;gap:18px;transition:border-color .15s,transform .15s}
 .cloud-card:hover{border-color:#6a9290;transform:translateY(-2px)}
-.card-icon{width:43px;height:43px;display:grid;place-items:center;border-radius:12px;background:#e4ad3a22;color:#e4ad3a;font-weight:800;font-size:19px}
-.card-icon.azure{background:#3978a82d;color:#74b6e7}
-.card-icon.gcp{background:#4d87662d;color:#7fcb9b}
-.card-icon.openstack{background:#087e8233;color:#5fc5c4}
+.card-icon{width:60px;height:60px;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:12px}
+.card-icon svg{width:32px;height:32px;display:block}
+.card-icon.aws{color:#ffffff}
+.card-icon.aws path{fill:currentColor}
+.card-icon.aws span{color:currentColor;font-weight:800;font-size:11px}
 .card-kicker{font-size:10px;letter-spacing:1.7px;color:#9eb5ba;font-weight:750}
 .cloud-card h3{color:white;font-size:20px;margin:2px 0}
 .card-links{margin-top:auto;display:flex;flex-direction:column;gap:5px}
