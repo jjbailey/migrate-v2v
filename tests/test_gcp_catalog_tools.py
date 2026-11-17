@@ -39,31 +39,54 @@ lookup_gcp = load_script("lookup-migration-gcp.py", "lookup_gcp")
 API = "https://compute.googleapis.com/compute/v1/projects"
 
 class FakeResponse:
-    def __init__(self, status_code):
+    def __init__(self, status_code, body=None):
         self.status_code = status_code
+        self.body = body
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise RuntimeError(f"HTTP {self.status_code}")
 
     def json(self):
-        if self.status_code == 404:
-            return {"error": {"errors": [{"reason": "notFound"}]}}
-        return {"status": "READY"}
+        return self.body
+
+def not_found(reason="notFound"):
+    return {"error": {"errors": [{"reason": reason}]}}
 
 class FakeSession:
-    """Answers 404 for the URLs in missing, 200 for the rest, and counts calls."""
+    """Answers 404 (reason notFound) for the URLs in missing, 404 with another
+    reason for those in forbidden_404, 500 for errors, 200 for the rest, and
+    records calls.
 
-    def __init__(self, missing=(), errors=()):
+    Aggregated list calls (.../aggregated/<collection>) answer from
+    elsewhere, a {(collection, name): scope} map, honouring the name filter
+    the reconcile passes in params, so a resource can be "present in another
+    zone".
+    """
+
+    def __init__(self, missing=(), errors=(), forbidden_404=(), elsewhere=None):
         self.missing = set(missing)
         self.errors = set(errors)
+        self.forbidden_404 = set(forbidden_404)
+        self.elsewhere = dict(elsewhere or {})
         self.calls = []
 
     def get(self, url, params=None, timeout=None):
         self.calls.append(url)
         if url in self.errors:
             return FakeResponse(500)
-        return FakeResponse(404 if url in self.missing else 200)
+        if url in self.forbidden_404:
+            return FakeResponse(404, not_found("accessNotConfigured"))
+        if "/aggregated/" in url:
+            collection = url.rsplit("/", 1)[-1]
+            name = (params or {}).get("filter", "").removeprefix("name = ")
+            items = {scope: {collection: [{"name": found}]}
+                     for (kind, found), scope in self.elsewhere.items()
+                     if kind == collection and found == name}
+            return FakeResponse(200, {"items": items})
+        if url in self.missing:
+            return FakeResponse(404, not_found())
+        return FakeResponse(200, {"status": "READY"})
 
 def image_url(project, name):
     return f"{API}/{project}/global/images/{name}"
@@ -166,6 +189,51 @@ class GcpReconcileLogicTests(unittest.TestCase):
             {"deployments": [no_instance, no_disk, healthy]})
         self.assertEqual(stale, [(no_instance, True, []),
                                  (no_disk, False, ["vm-b-data-2"])])
+
+    def test_404_without_not_found_reason_is_not_treated_as_missing(self):
+        # A 404 for a wrong project or a disabled API must not read as
+        # "deleted" and remove a live row.
+        session = FakeSession(forbidden_404={image_url("proj-a", "a-disk-0")})
+        with self.assertRaisesRegex(RuntimeError, "HTTP 404"):
+            reconcile_gcp.find_missing_resources(
+                session, "proj-a", {"migrations": [migration("a")]}, {"deployments": []})
+
+    def test_instance_present_in_another_zone_keeps_its_row_and_continues(self):
+        moved = deployment("moved")
+        gone = deployment("gone")
+        zone = f"{API}/proj-a/zones/us-central1-a"
+        session = FakeSession(
+            missing={f"{zone}/instances/moved-instance", f"{zone}/instances/gone-instance"},
+            elsewhere={("instances", "moved-instance"): "zones/us-east1-b"})
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            _, stale = reconcile_gcp.find_missing_resources(
+                session, "proj-a", {"migrations": []}, {"deployments": [moved, gone]})
+        self.assertEqual(stale, [(gone, True, [])])
+        self.assertIn("keeping deployment moved moved-instance", stderr.getvalue())
+        self.assertIn("zones/us-east1-b", stderr.getvalue())
+
+    def test_disk_present_in_another_zone_keeps_its_row(self):
+        entry = deployment("vm", disks=["vm-data-1"])
+        zone = f"{API}/proj-a/zones/us-central1-a"
+        session = FakeSession(
+            missing={f"{zone}/disks/vm-data-1"},
+            elsewhere={("disks", "vm-data-1"): "zones/us-central1-b"})
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            _, stale = reconcile_gcp.find_missing_resources(
+                session, "proj-a", {"migrations": []}, {"deployments": [entry]})
+        self.assertEqual(stale, [])
+        self.assertIn("disk vm-data-1 is present in zones/us-central1-b", stderr.getvalue())
+
+    def test_missing_zone_or_project_stops_the_reconcile(self):
+        deployments = {"deployments": [deployment("a", zone="us-gone1-a")]}
+        session = FakeSession(missing={f"{API}/proj-a/zones/us-gone1-a"})
+        with self.assertRaisesRegex(ValueError, "missing zone us-gone1-a"):
+            reconcile_gcp.verify_project_and_zones(session, "proj-a", deployments)
+        with self.assertRaisesRegex(ValueError, "does not exist or is inaccessible"):
+            reconcile_gcp.verify_project_and_zones(
+                FakeSession(missing={f"{API}/proj-a"}), "proj-a", deployments)
 
     def test_deployment_without_zone_or_disk_list_is_refused(self):
         with self.assertRaisesRegex(ValueError, "no gcp_instance_name or gcp_zone"):

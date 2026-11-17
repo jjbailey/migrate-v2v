@@ -19,6 +19,21 @@ import os
 import sys
 
 args = sys.argv[1:]
+
+def next_answer(name, default):
+    # TEST_<name>_SEQUENCE answers successive asks in order (state in a file).
+    sequence = os.environ.get(f'TEST_{name}_SEQUENCE')
+    if sequence is None:
+        return default
+    state = os.path.join(os.environ['TMPDIR'], f'{name}.asked')
+    asked = int(open(state).read()) if os.path.exists(state) else 0
+    open(state, 'w').write(str(asked + 1))
+    answers = sequence.split(',')
+    return answers[min(asked, len(answers) - 1)]
+
+if '--msgbox' in args and os.environ.get('TEST_MSG_LOG'):
+    with open(os.environ['TEST_MSG_LOG'], 'a') as log:
+        log.write(args[args.index('--msgbox') + 1] + '\n')
 if '--inputbox' in args:
     prompt = args[args.index('--inputbox') + 1]
     values = {
@@ -42,7 +57,7 @@ if '--inputbox' in args:
         'Subnetwork': '',
         'Network tags': 'web,ssh',
         'OpenStack flavor': 's1-8',
-        'SSH key pair name': 'cloud',
+        'SSH key pair name': next_answer('KEY_NAME', 'cloud') if 'SSH key pair name' in prompt else None,
         'OpenStack network name': 'Ext-Net',
         'Network UUID': '',
         'Custom NIC definitions': os.environ.get('TEST_NICS', ''),
@@ -191,6 +206,15 @@ class LaunchDialogTests(unittest.TestCase):
         self.assertEqual(extra["openstack_security_groups"], [])
         self.assertEqual(extra["openstack_network"], "Ext-Net")
         self.assertNotIn("openstack_nics", extra)
+
+    def test_openstack_blank_key_name_is_asked_again(self):
+        # "Use an OpenStack key pair" with a blank name must not silently
+        # launch without a key; "Do not attach a key pair" is the way to do that.
+        messages = self.tmp / "messages.log"
+        files = self.run_dialog("openstack", TEST_KEY_NAME_SEQUENCE=",cloud",
+                                TEST_MSG_LOG=str(messages))
+        self.assertIn("export OS_KEY_NAME='cloud'", files[0].read_text())
+        self.assertIn("Enter a key pair name", messages.read_text())
 
     def test_openstack_custom_nics_reach_the_command(self):
         nics = '[{"net-id":"abc"}]'

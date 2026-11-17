@@ -58,6 +58,7 @@ STOP_EVENT = threading.Event()
 LOGIN_LOCK = threading.Lock()
 VAULT_CACHE = {}
 VAULT_CACHE_LOCK = threading.Lock()
+VAULT_FILE_LOCKS = {}
 VAULT_CACHE_TTL = 15
 
 def esc(value):
@@ -185,7 +186,11 @@ def vault_keys(filename, map_name):
 
     source_signature = (signature(vault), signature(PASSFILE))
     now = time.monotonic()
+    # One lock per vault file, so a slow or hung decrypt of one vault does
+    # not stall pages that only need another.
     with VAULT_CACHE_LOCK:
+        file_lock = VAULT_FILE_LOCKS.setdefault(filename, threading.Lock())
+    with file_lock:
         cached = VAULT_CACHE.get(filename)
         if cached and cached[0] == source_signature and now < cached[1]:
             return list(cached[2])
@@ -237,6 +242,11 @@ def icon_html(cloud):
     if cloud not in _ICON_CACHE:
         svg = (ROOT / "web" / "icons" / _ICON_FILE[cloud]).read_text()
         svg = svg.replace("<svg ", '<svg width="60" height="60" ', 1)
+        # Each icon is inlined on both the migrate and launch cards, so ids
+        # from the source files would repeat in the page. Keep them when the
+        # icon refers to its own ids (gradients, <use>), which need them.
+        if "url(#" not in svg and 'href="#' not in svg:
+            svg = re.sub(r'\s+id="[^"]*"', "", svg)
         _ICON_CACHE[cloud] = svg
     return _ICON_CACHE[cloud]
 
@@ -359,6 +369,7 @@ def worker():
         log_path = STATE / f"job-{row['id']}.log"
         code = 1
         error_text = None
+        stopped = False
         try:
             with open(log_path, "wb", buffering=0) as log:
                 os.chmod(log_path, 0o600)
@@ -377,13 +388,20 @@ def worker():
                                 "PYTHONUNBUFFERED": "1"})
                     env.update(values)
                     command = [str(wrapper_path(row["mode"], row["cloud"], row["method"]))]
-                    if STOP_EVENT.is_set():
-                        raise RuntimeError("controller is shutting down")
+                    # Check for shutdown under the same lock stop_active_process
+                    # takes: otherwise a SIGTERM between the check and Popen
+                    # finds no active process, and the job starts orphaned.
                     with ACTIVE_LOCK:
+                        if STOP_EVENT.is_set():
+                            stopped = True
+                            raise RuntimeError("controller is shutting down")
                         ACTIVE_PROCESS = subprocess.Popen(
                             command, cwd=ROOT, env=env, stdin=subprocess.DEVNULL,
                             stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
                     code = ACTIVE_PROCESS.wait()
+                    if STOP_EVENT.is_set():
+                        stopped = True
+                        log.write(b"Job stopped because the controller is shutting down\n")
                 except Exception as error:
                     error_text = str(error)
                     log.write(f"Job failed before completion: {error}\n".encode(errors="replace"))
@@ -394,12 +412,20 @@ def worker():
             error_text = str(error)
             sys.stderr.write(f"web worker: job {row['id']} log error: {error}\n")
         finally:
+            # A job ended by controller shutdown is "interrupted", the same
+            # status a restart gives a job left running, whichever of the two
+            # gets to write it first.
+            if stopped:
+                status = "interrupted"
+            elif code == 0 and error_text is None:
+                status = "completed"
+            else:
+                status = "failed"
             try:
                 with db() as conn:
                     conn.execute(
                         "UPDATE jobs SET status=?, finished=datetime('now'), exit_code=?, log_path=? WHERE id=?",
-                        ("completed" if code == 0 and error_text is None else "failed",
-                         code, str(log_path), row["id"]))
+                        (status, code, str(log_path), row["id"]))
             except Exception as error:
                 sys.stderr.write(f"web worker: could not save job {row['id']} status: {error}\n")
 
@@ -699,12 +725,11 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 cleared, log_errors = None, 0
             return self.send(200, maintenance_jobs(user, csrf, cleared, log_errors))
-        match = re.fullmatch(r"/jobs/(\d+)", path)
+        # At most 18 digits: SQLite integers are 64-bit, and a longer id would
+        # raise OverflowError in the query rather than simply not match.
+        match = re.fullmatch(r"/jobs/(\d{1,18})", path)
         if match:
-            try:
-                job_id = int(match.group(1))
-            except ValueError:
-                return self.send(404)
+            job_id = int(match.group(1))
             with db() as conn:
                 row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
             if not row:
@@ -747,15 +772,19 @@ class Handler(BaseHTTPRequestHandler):
             name, password = posted.get("username", ""), posted.get("password", "")
             failure_key = (ip, name.casefold())
             prune_login_failures(now)
+            # Count this attempt before the slow scrypt check, in the same
+            # locked step as the limit test, so parallel requests cannot all
+            # pass the check before any of them is recorded.
             with LOGIN_LOCK:
-                failures = LOGIN_FAILURES.get(failure_key, [])
-            if len(failures) >= 10:
+                failures = LOGIN_FAILURES.setdefault(failure_key, [])
+                limited = len(failures) >= 10
+                if not limited:
+                    failures.append(now)
+            if limited:
                 return self.send(429, page("Try later", '<div class="alert">Too many sign-in attempts. Try again in five minutes.</div>'))
             stored = users().get(name, "")
             matched = verify_password(password, stored or DUMMY_PASSWORD_HASH)
             if not stored or not matched:
-                with LOGIN_LOCK:
-                    LOGIN_FAILURES.setdefault(failure_key, []).append(now)
                 return self.send(401, page("Sign in", '<div class="alert">Invalid username or password.</div><a href="/login">Try again</a>'))
             with LOGIN_LOCK:
                 LOGIN_FAILURES.pop(failure_key, None)

@@ -56,6 +56,14 @@ elif args[:4] == ["compute", "migration", "image-imports", "describe"]:
     if fmt.startswith("--format=json"):
         print("{}")
     elif "state" in fmt:
+        # "finish_after" polls of a RUNNING import, then it succeeds and its
+        # image appears, as a real import would while a resume waits on it.
+        if state.get("finish_after") is not None:
+            if state["finish_after"] <= 0:
+                state.update({"import": "SUCCEEDED", "image": "READY", "finish_after": None})
+            else:
+                state["finish_after"] -= 1
+            save()
         print(state["import"])
     else:
         print("projects/p/locations/l/imageImports/" + args[4])
@@ -93,16 +101,22 @@ class GcpImportResumeTests(unittest.TestCase):
         (self.run_dir / "disk-1.vmdk").write_text("")
         self.state_file = self.tmp / "state.json"
         self.log_file = self.tmp / "gcloud.log"
+        home = self.tmp / "home"
+        home.mkdir()
+        # A minimal environment: the operator's HOME, ANSIBLE_* settings and
+        # cloud credentials must not reach the playbook under test.
         self.env = {
-            **os.environ,
             "PATH": f"{stub_bin}:{os.environ.get('PATH', '/usr/bin:/bin')}",
+            "HOME": str(home),
+            "LANG": "C.UTF-8",
             "GCLOUD_STUB_STATE": str(self.state_file),
             "GCLOUD_STUB_LOG": str(self.log_file),
             "ANSIBLE_LOCALHOST_WARNING": "false",
         }
 
-    def run_import(self, image, import_state, marker=False, resume=True):
-        self.state_file.write_text(json.dumps({"image": image, "import": import_state}))
+    def run_import(self, image, import_state, marker=False, resume=True, finish_after=None):
+        self.state_file.write_text(json.dumps(
+            {"image": image, "import": import_state, "finish_after": finish_after}))
         if marker:
             (self.run_dir / f"{IMAGE}.imported").write_text("SUCCEEDED\n")
         playbook = self.tmp / "play.yml"
@@ -144,7 +158,7 @@ class GcpImportResumeTests(unittest.TestCase):
         }], sort_keys=False))
         result = subprocess.run(
             ["ansible-playbook", "-i", "localhost,", str(playbook)],
-            env=self.env, text=True, capture_output=True, timeout=120,
+            env=self.env, cwd=self.tmp, text=True, capture_output=True, timeout=120,
         )
         calls = self.log_file.read_text().splitlines() if self.log_file.exists() else []
         outcome = None
@@ -197,9 +211,30 @@ class GcpImportResumeTests(unittest.TestCase):
         result, calls, outcome = self.run_import("PENDING", "RUNNING")
         self.assertNotEqual(result.returncode, 0)
         self.assertIsNone(outcome)
-        self.assertIn("still", result.stdout)
+        self.assertIn("is still RUNNING after the poll window", result.stdout)
         self.assertFalse(self.called(calls, "compute images delete"), calls)
         self.assertFalse(self.called(calls, "compute migration image-imports delete"), calls)
+
+    def test_import_that_finishes_during_the_wait_is_reused(self):
+        # No image yet, import RUNNING: the resume waits, the import succeeds
+        # and creates the image. The image must be reused, not deleted and
+        # re-imported, and the succeeded import must not be thrown away
+        # before the reuse decision.
+        result, calls, outcome = self.run_import(None, "RUNNING", finish_after=1)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(outcome["reused"], [IMAGE])
+        self.assertEqual(outcome["images"], [IMAGE])
+        self.assertFalse(self.called(calls, "storage cp"), calls)
+        self.assertFalse(self.called(calls, "compute migration image-imports create"), calls)
+        self.assertFalse(self.called(calls, "compute images delete"), calls)
+
+    def test_import_without_image_still_running_stops_cleanly(self):
+        result, calls, outcome = self.run_import(None, "RUNNING")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIsNone(outcome)
+        self.assertIn("is still RUNNING after the poll window", result.stdout)
+        self.assertFalse(self.called(calls, "compute migration image-imports delete"), calls)
+        self.assertFalse(self.called(calls, "compute migration image-imports create"), calls)
 
     def test_fresh_run_refuses_to_overwrite_without_replacement(self):
         result, calls, outcome = self.run_import("READY", None, resume=False)

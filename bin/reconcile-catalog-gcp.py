@@ -7,6 +7,7 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 
 from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
@@ -129,31 +130,39 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
         if not instance_name or not zone:
             raise ValueError(
                 f"GCP deployment for {entry.get('vm_name', '<unknown>')} has no gcp_instance_name or gcp_zone")
-        instance_url = f"{COMPUTE_API}/{project_id}/zones/{zone}/instances/{instance_name}"
-        missing_instance = get_resource(
-            session, instance_url, instance_cache) is None
-        if missing_instance:
-            location = aggregated_resource_location(
-                session, project_id, "instances", instance_name, aggregate_cache)
-            if location:
-                raise ValueError(
-                    f"GCP instance {instance_name} is present in {location}, not "
-                    f"the catalog's zones/{zone}; refusing to remove its deployment row")
         disk_names = entry.get("gcp_data_disk_names", [])
         if not isinstance(disk_names, list):
             raise ValueError(
                 f"GCP deployment {instance_name} has invalid gcp_data_disk_names")
+        instance_url = f"{COMPUTE_API}/{project_id}/zones/{zone}/instances/{instance_name}"
+        missing_instance = get_resource(
+            session, instance_url, instance_cache) is None
+        # A resource missing from the catalog's zone but present in another
+        # zone is not proof of deletion: it may be a relaunch under the same
+        # name (zone is part of the deployment identity, so both rows can be
+        # legitimate) or a mis-recorded zone. Keep that row, say so, and go
+        # on with the rest of the project rather than abort the whole run.
+        elsewhere = None
+        if missing_instance:
+            location = aggregated_resource_location(
+                session, project_id, "instances", instance_name, aggregate_cache)
+            if location:
+                elsewhere = f"instance {instance_name} is present in {location}"
         missing_disks = []
-        for disk_name in disk_names:
+        for disk_name in disk_names if elsewhere is None else ():
             disk_url = f"{COMPUTE_API}/{project_id}/zones/{zone}/disks/{disk_name}"
             if get_resource(session, disk_url, disk_cache) is None:
                 location = aggregated_resource_location(
                     session, project_id, "disks", disk_name, aggregate_cache)
                 if location:
-                    raise ValueError(
-                        f"GCP disk {disk_name} is present in {location}, not "
-                        f"the catalog's zones/{zone}; refusing to remove its deployment row")
+                    elsewhere = f"disk {disk_name} is present in {location}"
+                    break
                 missing_disks.append(disk_name)
+        if elsewhere is not None:
+            print(f"keeping deployment {entry.get('vm_name', '<unknown>')} {instance_name}: "
+                  f"GCP {elsewhere}, not the catalog's zones/{zone}; "
+                  "check that row by hand", file=sys.stderr)
+            continue
         if missing_instance or missing_disks:
             stale_deployments.append((entry, missing_instance, missing_disks))
     return stale_migrations, stale_deployments

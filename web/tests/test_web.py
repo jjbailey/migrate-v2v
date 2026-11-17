@@ -5,6 +5,7 @@
 import io
 import hashlib
 import json
+import os
 import tempfile
 import time
 import unittest
@@ -145,7 +146,12 @@ class HttpTests(unittest.TestCase):
     def test_login_and_pages(self):
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp)
-            with patch.multiple(app, STATE=state, USERS=state / "users.json", KEY=state / "session.key", DB=state / "jobs.sqlite3"):
+            # init_state() creates INPUT_DIR and sets ANSIBLE_LOCAL_TEMP: keep
+            # both inside the temp dir and restore the environment afterwards.
+            with patch.multiple(app, STATE=state, USERS=state / "users.json", KEY=state / "session.key",
+                                DB=state / "jobs.sqlite3", INPUT_DIR=state / "web-inputs",
+                                VAULT_DIR=state / "vaults", CATALOG_DIR=state / "catalogs"), \
+                 patch.dict(os.environ):
                 app.init_state()
                 stored = app.password_hash("sample-password-123")
                 app.USERS.write_text(json.dumps({"operator": stored}) + "\n")

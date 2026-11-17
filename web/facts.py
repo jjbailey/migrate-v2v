@@ -18,6 +18,11 @@ BIN = Path(__file__).resolve().parents[1] / "bin"
 _CACHE = OrderedDict()
 _LOCK = threading.Lock()
 _TTL = 60
+# A failed lookup is remembered only briefly: long enough that one page's
+# parallel lookups don't all retry a dead endpoint, short enough that
+# "Update choices" works again soon after a transient cloud or credential
+# error.
+_NEGATIVE_TTL = 5
 _CACHE_LIMIT = 256
 
 def _cache_store(key, value, now):
@@ -32,7 +37,7 @@ def query(cloud, project, *flags):
     now = time.monotonic()
     with _LOCK:
         cached = _CACHE.get(key)
-        if cached and now - cached[0] < _TTL:
+        if cached and now - cached[0] < (_TTL if cached[1] is not None else _NEGATIVE_TTL):
             _CACHE.move_to_end(key)
             return cached[1]
         if cached:

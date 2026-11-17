@@ -153,13 +153,20 @@ done <<< "$vault_files"
 # Optional: decrypt the vaults and check their schemas (vsphere.yml required,
 # each cloud vault when present). Skipped silently when the vault password is missing so
 # the gate still runs on machines without credentials.
-# Same lookup as bin/ansible-run.sh: VAULT_PASSWORD_FILE when it names a
-# non-empty file, else the default file.
+# Same lookup as bin/ansible-run.sh: an explicitly set VAULT_PASSWORD_FILE
+# must name a non-empty readable file (ansible-run.sh exits 2 otherwise, so a
+# silent fallback here would pass a gate the real run fails); unset, the
+# default file is used when present.
 vault_pass="$HOME/.dib-vault-pass"
-if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
-    vault_pass=$VAULT_PASSWORD_FILE
+if [ -n "${VAULT_PASSWORD_FILE:-}" ] ; then
+    if [ -s "$VAULT_PASSWORD_FILE" ] && [ -r "$VAULT_PASSWORD_FILE" ] ; then
+        vault_pass=$VAULT_PASSWORD_FILE
+    else
+        fail "VAULT_PASSWORD_FILE=$VAULT_PASSWORD_FILE is not a readable, non-empty file"
+        vault_pass=
+    fi
 fi
-if [ -n "$vault_files" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
+if [ -n "$vault_files" ] && [ -n "$vault_pass" ] && [ -s "$vault_pass" ] && command -v ansible-vault > /dev/null 2>&1 ; then
     echo "== vault schema =="
     if python3 tests/check_vault_schema.py "$vault_pass" "$vault_dir" ; then
         echo "  ok   vault schemas (vsphere/openstack/aws/gcp/azure)"
@@ -171,13 +178,18 @@ else
 fi
 
 echo "== Python syntax =="
+python_checked=0
 while IFS= read -r script ; do
+    python_checked=$((python_checked + 1))
     if python3 -m py_compile "$script" ; then
         echo "  ok   $script"
     else
         fail "$script failed py_compile"
     fi
-done < <(find bin local tests -type f -name '*.py' 2> /dev/null)
+done < <(find bin local tests web -type f -name '*.py' -not -path '*/__pycache__/*' 2> /dev/null)
+if [ "$python_checked" -eq 0 ] ; then
+    fail "no Python files found to check"
+fi
 
 echo "== catalogs =="
 # append-migration-catalog.py / append-deployment-catalog.py are the
@@ -272,7 +284,13 @@ if python3 - << 'PYTHON' ; then
 import sys
 import unittest
 
-suite = unittest.defaultTestLoader.discover("tests", pattern="test_*.py")
+loader = unittest.defaultTestLoader
+suite = unittest.TestSuite([
+    loader.discover("tests", pattern="test_*.py"),
+    # web/tests is not a package; its modules import web from the
+    # repository root, which is on sys.path for this script.
+    loader.discover("web/tests", pattern="test_*.py", top_level_dir="web/tests"),
+])
 result = unittest.TextTestRunner().run(suite)
 if result.skipped:
     reasons = sorted({reason for _, reason in result.skipped})
@@ -281,7 +299,8 @@ sys.exit(0 if result.wasSuccessful() else 1)
 PYTHON
     echo "  ok   focused unit tests"
     # After the tests, which re-create bin/ and tests/ caches by importing.
-    rm -rf bin/__pycache__ local/__pycache__ tests/__pycache__
+    rm -rf bin/__pycache__ local/__pycache__ tests/__pycache__ \
+        web/__pycache__ web/tests/__pycache__
 else
     fail "focused unit tests failed"
 fi

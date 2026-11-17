@@ -366,6 +366,12 @@ while : ; do
         KEY_NAME=$(pick_os_value "Which SSH key pair should the instance use?" "$PROJECT" "--keypairs" "keypairs" "$KEY_NAME" "cloud" "SSH key pair name registered in OpenStack:") || abort
     fi
     NETWORK=$(pick_os_value "Which network should the instance attach to?" "$PROJECT" "--networks" "networks" "${OS_NETWORK:-${NETWORK:-}}" "Ext-Net" "OpenStack network name:") || abort
+    # A blank name under "Use an OpenStack key pair" would silently launch
+    # with no key; choosing "Do not attach a key pair" is the way to do that.
+    if [ "$key_mode" = key ] && [ -z "$KEY_NAME" ] ; then
+        bad "Enter a key pair name, or choose not to attach a key pair." || true
+        continue
+    fi
     [ -n "$FLAVOR" ] && [ -n "$NETWORK" ] && break
     bad "Flavor and network cannot be empty." || true
 done

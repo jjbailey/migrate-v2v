@@ -86,9 +86,11 @@ hashes, signed HttpOnly sessions, and CSRF tokens. Run `python3 web/app.py
 user add NAME` in the controller service again to add or reset an account;
 `user delete NAME` removes one.
 
-Jobs are stored in `ARTIFACT_ROOT/web-state/jobs.sqlite3` and processed one
-at a time. Job output is stored in mode `0600` log files there. A running job
-interrupted by a controller restart is marked **interrupted** and is never
+Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
+`WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not
+follow `ARTIFACT_ROOT`, so set both when the artifact root lives elsewhere.
+Job output is stored in mode `0600` log files there. A running job stopped
+by a controller shutdown or restart is marked **interrupted** and is never
 rerun automatically. Review its log and cloud state before submitting another
 operation. The site does not offer arbitrary shell arguments or a terminal.
 
@@ -108,13 +110,15 @@ export VAULT_PASSWORD_FILE="$HOME/.dib-vault-pass"
 python3 web/app.py user add operator
 ```
 
-Start Caddy and the web backend together:
+Start Caddy and the web backend together. If `local/run-caddy.sh` does not
+exist yet, copy the example first; `-n` keeps an existing script:
 
 ```sh
-cp examples/run-caddy-example.sh local/run-caddy.sh
+cp -n examples/run-caddy-example.sh local/run-caddy.sh
 ```
 
-Modify local/run-caddy.sh as required.
+Modify local/run-caddy.sh as required. To run both as services instead, see
+the systemd units in [examples/README.md](../examples/README.md#caddy-on-the-ansible-control-host).
 
 ```sh
 ./local/run-caddy.sh

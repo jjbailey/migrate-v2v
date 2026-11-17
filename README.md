@@ -1583,7 +1583,8 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   `AZURE_SSH_SOURCE_PREFIX` (the dialog asks when the VM gets a public IP) to
   choose the SSH source. Supply a CIDR or service tag;
   `*` explicitly allows SSH from anywhere. An existing NSG keeps its own
-  rules. Each VM gets its
+  rules, so the prefix is required only when a public-IP launch has to
+  create the NSG. Each VM gets its
   own NIC and, unless `AZURE_NO_PUBLIC_IP=true`, a static Standard public IP.
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.

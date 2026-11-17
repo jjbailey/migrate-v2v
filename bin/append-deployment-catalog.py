@@ -199,8 +199,14 @@ def main():
             if left_project and right_project:
                 return left_project == right_project
 
-            return not (left_account or right_account
-                        or left_project or right_project)
+            # A legacy row recorded before either field existed carries no
+            # scope at all. EC2 instance IDs are unique, so the same ID in the
+            # same region is the same instance: replace that row rather than
+            # leave a duplicate beside the scoped one. One side with only an
+            # account and the other with only a project stays ambiguous.
+            left_scoped = bool(left_account or left_project)
+            right_scoped = bool(right_account or right_project)
+            return not (left_scoped and right_scoped)
 
         # Keep deployment history. A target-specific resource ID identifies
         # the exact launch to replace on an idempotent catalog append.
