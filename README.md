@@ -370,6 +370,7 @@ chmod 600 "$HOME/.dib-vault-pass"
 ```bash
 ./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
 ./bin/azure-vault.sh      # /work/migrate-v2v/vaults/azure.yml
+./bin/caddy-vault.sh      # /work/migrate-v2v/vaults/caddy.yml
 ./bin/gcp-vault.sh        # /work/migrate-v2v/vaults/gcp.yml
 ./bin/openstack-vault.sh  # /work/migrate-v2v/vaults/openstack.yml
 ./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml

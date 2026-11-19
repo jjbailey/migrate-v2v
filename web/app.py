@@ -1147,6 +1147,46 @@ def add_user(name):
     save_users(entries)
     print(f"Saved local account {name}.")
 
+def bootstrap_user():
+    """Create the initial web account from caddy.yml, without replacing users."""
+    import fcntl
+
+    lock_path = STATE / "user-bootstrap.lock"
+    with open(lock_path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entries = users()
+        if entries:
+            print("A local web account already exists; bootstrap skipped.")
+            return
+
+        vault = VAULT_DIR / "caddy.yml"
+        if not vault.is_file():
+            raise SystemExit(f"Initial web account vault is missing: {vault}")
+        if not PASSFILE.is_file():
+            raise SystemExit(f"Vault password file is missing: {PASSFILE}")
+        try:
+            import yaml
+        except ImportError:
+            raise SystemExit("PyYAML is required to read the initial web account vault.")
+        try:
+            result = subprocess.run(
+                ["ansible-vault", "view", str(vault), "--vault-password-file", str(PASSFILE)],
+                input=b"", capture_output=True, timeout=30, check=True)
+            data = yaml.safe_load(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError, yaml.YAMLError):
+            raise SystemExit("Could not decrypt or parse the initial web account vault.")
+
+        if not isinstance(data, dict):
+            raise SystemExit("Initial web account vault must contain a YAML mapping.")
+        name = data.get("web_user")
+        password = data.get("web_password")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{2,31}", name):
+            raise SystemExit("caddy.yml web_user must be a valid 3–32 character username.")
+        if not isinstance(password, str) or len(password) < 12:
+            raise SystemExit("caddy.yml web_password must contain at least 12 characters.")
+        save_users({name: password_hash(password)})
+        print(f"Created initial local web account {name} from caddy.yml.")
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1154,13 +1194,17 @@ def main():
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
     user_cmd = sub.add_parser("user")
-    user_cmd.add_argument("action", choices=("add", "delete", "list"))
+    user_cmd.add_argument("action", choices=("add", "bootstrap", "delete", "list"))
     user_cmd.add_argument("name", nargs="?")
     args = parser.parse_args()
     init_state()
     if args.command == "user":
         if args.action == "list":
             print("\n".join(sorted(users())))
+        elif args.action == "bootstrap":
+            if args.name:
+                parser.error("user bootstrap does not take a name")
+            bootstrap_user()
         elif not args.name:
             parser.error("user name required")
         elif args.action == "add":

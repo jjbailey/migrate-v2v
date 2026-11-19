@@ -6,10 +6,10 @@ relative to that directory.
 
 ## Editing a Vault
 
-`bin/aws-vault.sh`, `bin/azure-vault.sh`, `bin/gcp-vault.sh`,
-`bin/openstack-vault.sh`, and `bin/vsphere-vault.sh` wrap `ansible-vault edit`/`create
---encrypt-vault-id=default` against the matching file below, creating it if it
-doesn't exist yet.
+`bin/aws-vault.sh`, `bin/azure-vault.sh`, `bin/caddy-vault.sh`,
+`bin/gcp-vault.sh`, `bin/openstack-vault.sh`, and `bin/vsphere-vault.sh` wrap
+`ansible-vault edit` and `ansible-vault create --encrypt-vault-id=default`
+against the matching file below, creating it if it doesn't exist yet.
 
 ```sh
 bin/aws-vault.sh
@@ -20,6 +20,29 @@ Set `VAULT` to point at a different file (e.g. a per-environment vault):
 ```sh
 VAULT=/work/migrate-v2v/vaults/aws-staging.yml bin/aws-vault.sh
 ```
+
+## Web Controller Bootstrap Account
+
+`caddy.yml` holds the initial website login for a fresh controller state. It
+does not configure a Caddy system account or a Caddy password. Create or edit
+it with:
+
+```sh
+bin/caddy-vault.sh
+```
+
+The encrypted YAML contains:
+
+```yaml
+web_user: operator
+web_password: "<replace-with-a-unique-password-of-at-least-12-characters>"
+```
+
+The Docker guide runs `python3 web/app.py user bootstrap` before starting the
+site. That command reads this vault only when no local website accounts exist,
+then saves a password hash in the persistent web state. Re-running bootstrap
+does not replace or reset an existing account. To change a password, use
+`user add NAME` interactively.
 
 ## Credentials for the bin/ Tools
 

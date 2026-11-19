@@ -42,10 +42,42 @@ dropped. Where the web forms take files, see
 
 ## Setup
 
-Install Docker Engine, Docker CLI, Buildx, and the Compose plugin if they are
-missing. On Ubuntu, use [Docker's official Engine installation guide](https://docs.docker.com/engine/install/ubuntu/).
-The examples below use `sudo docker`; access to the Docker socket is
-root-equivalent, including membership in the `docker` group.
+These instructions cover a new 64-bit Ubuntu 24.04 host. Docker Engine, the
+Docker CLI, Buildx, and the Compose plugin are installed from Docker's signed
+APT repository. For other supported Ubuntu releases or distributions, use the
+matching [official Docker Engine instructions](https://docs.docker.com/engine/install/).
+The examples use `sudo docker`; access to the Docker socket is root-equivalent,
+including membership in the `docker` group. This Compose deployment runs Caddy
+in a container, so it does not create a host `caddy` account or install Caddy
+on the host.
+
+Install Docker's packages:
+
+```sh
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+. /etc/os-release
+echo "Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: ${UBUNTU_CODENAME:-$VERSION_CODENAME}
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc" \
+  | sudo tee /etc/apt/sources.list.d/docker.sources >/dev/null
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+sudo systemctl enable --now docker
+```
+
+If installing on a host that already has container software, first check for
+the conflicting distribution packages listed in Docker's install guide. Remove
+only packages you have confirmed are installed and no longer needed. A fresh
+minimal Ubuntu host does not need this cleanup.
 
 The first image build needs several gigabytes for build layers, caches, and the
 runtime image. On a clean host with a small root filesystem and a larger
@@ -61,14 +93,42 @@ sudo containerd config default \
 sudo systemctl start containerd docker
 ```
 
-This is for a new Docker installation before it has image or container data.
-If Docker has already been used, copy its existing containerd data before
-changing the configured root.
+Verify the engine, Compose plugin, and storage location:
 
-1. Copy `web/.env.example` to `web/.env`. Set `HOST_UID` and `HOST_GID` to the
-   numeric results of `id -u` and `id -g`, set `ARTIFACT_ROOT_HOST`, and set
-   `VAULT_PASSWORD_FILE_HOST` to the absolute host path to the vault password
-   file. Keep `.env` private (`chmod 600 web/.env`).
+```sh
+sudo docker run --rm hello-world
+sudo docker compose version
+sudo docker info --format '{{.DockerRootDir}}'
+```
+
+This is for a new Docker installation before it has image or container data.
+It puts Docker's image and container data under `/work/docker` and containerd's
+data under `/work/containerd`; ensure `/work` has several gigabytes free. If
+Docker has already been used, stop it and copy its existing data before
+changing either configured root.
+
+1. Prepare the persistent artifact directory and Compose environment. Use the
+   account that will own the web state and artifacts; the container runs with
+   that account's numeric UID and GID. The vault directory must already contain
+   the encrypted vaults the controller will use. The vault password file must
+   be readable by that account.
+
+   ```sh
+   sudo install -d -o "$USER" -g "$(id -gn)" -m 0750 /work/migrate-v2v
+   mkdir -p /work/migrate-v2v/vaults
+   cp web/.env.example web/.env
+   chmod 600 web/.env
+   id -u
+   id -g
+   ```
+
+   Edit `web/.env`: set `HOST_UID` and `HOST_GID` to the numbers printed above,
+   set `ARTIFACT_ROOT_HOST` to `/work/migrate-v2v`, and set
+   `VAULT_PASSWORD_FILE_HOST` to the absolute path of the vault password file.
+   For access from another computer on the LAN, also set `WEB_ADDRESS` to this
+   host's LAN IP (for example, `192.168.1.119`); the LAN Compose override below
+   publishes HTTPS on that address. Otherwise leave it as `127.0.0.1` for
+   local-only access.
 
 2. Build the runtime image:
 
@@ -80,25 +140,71 @@ changing the configured root.
    license, then set `OVFTOOL_ACCEPT_LICENSE=1` in `web/.env`. The image does
    not include OVF Tool; the wrapper downloads the pinned version on demand.
 
-3. Create a local account:
+3. Bootstrap the initial web account from the encrypted `caddy.yml` vault in
+   `ARTIFACT_ROOT_HOST/vaults/` (see [Vault layouts](../doc/vaults.md#web-controller-bootstrap-account)).
+   It must contain a `web_user` and a `web_password` of at least 12 characters.
+   This creates an account only when the persistent account store is empty;
+   repeated runs leave existing accounts unchanged.
 
    ```sh
-   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm controller python3 web/app.py user add operator
+   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm --no-deps controller python3 web/app.py user bootstrap
    ```
 
-   Run the same command again to add or reset an account; use `user delete NAME`
-   to remove one and `user list` to show them.
+   The account is stored in the persistent web state directory and is separate
+   from the Linux account used to run Docker. To add or reset an account
+   interactively, run the same command with `user add NAME`; use `user delete
+NAME` to remove one and `user list` to show the account names.
 
-4. Start the site:
+   The account file is `${ARTIFACT_ROOT_HOST}/web-state/users.json`; it contains
+   password hashes, so a password cannot be read back from it. Run the same
+   `user add` command again to set a new password. The vault password file set
+   by `VAULT_PASSWORD_FILE_HOST` decrypts Ansible vaults and is not used for
+   website sign-in. Caddy has no separate website password file.
+
+4. Start the site with Caddy. For local-only access, run:
 
    ```sh
    sudo docker compose --env-file web/.env -f web/compose.yaml up -d
    ```
 
-5. Open `https://localhost:8443`. The Compose file's `https` service is a
-   Caddy container using the repository's [Caddyfile](Caddyfile) with a
-   per-install local certificate authority; trust that root on each client
-   that will open the site. See [Caddy in the Compose stack](caddy.md#caddy-in-the-compose-stack).
+   For access from another computer on the LAN, include the LAN override:
+
+   ```sh
+   sudo docker compose --env-file web/.env \
+     -f web/compose.yaml -f web/compose.lan.yaml up -d
+   ```
+
+5. Open `https://localhost:8443` for local-only access, or
+   `https://WEB_ADDRESS:8443` from a LAN client. The `https` service is a Caddy
+   container using the repository's [Caddyfile](Caddyfile) and a persistent,
+   per-install local certificate authority. Browsers will need to trust its
+   root certificate to remove the warning; the certificate is available at
+   `/data/caddy/pki/authorities/local/root.crt` inside the `https` container.
+   To copy the public root certificate to the current directory, run:
+
+   ```sh
+   sudo docker compose --env-file web/.env \
+     -f web/compose.yaml exec -T https \
+     cat /data/caddy/pki/authorities/local/root.crt > caddy-root.crt
+   ```
+
+   Import `caddy-root.crt` into the trust store of each client that will open
+   the site. Keep the Caddy data volume, which also contains its private CA
+   key, on the server. For LAN access, allow TCP port 8443 through any host or
+   network firewall.
+   See [Caddy in the Compose stack](caddy.md#caddy-in-the-compose-stack).
+
+Check service state and logs with:
+
+```sh
+sudo docker compose --env-file web/.env -f web/compose.yaml ps
+sudo docker compose --env-file web/.env -f web/compose.yaml logs --tail=100 controller https
+```
+
+Use the same Compose file options for `logs`, `exec`, and `down` that you used
+for `up`. `down` stops and removes the containers and private network, but
+keeps the artifact bind mount and Caddy's named certificate volumes. Do not add
+`--volumes` unless you intend to delete the Caddy CA and certificates.
 
 Migration and launch wrappers can also run directly in the same image, for
 example:
