@@ -415,7 +415,7 @@ def worker():
                     if not isinstance(values, dict):
                         raise ValueError("job values are not a JSON object")
                     env = {key: os.environ[key] for key in (
-                        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "DIB7_VENV_BIN",
+                        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "ANSIBLE_ASYNC_DIR", "DIB7_VENV_BIN",
                         "ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_LOCAL_TEMP", "WEB_INPUT_DIR",
                         "LIBGUESTFS_PATH", "OVFTOOL_ACCEPT_LICENSE", "OVFTOOL_INSTALL_DIR",
                         "OPENVDDK_INSTALL_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",

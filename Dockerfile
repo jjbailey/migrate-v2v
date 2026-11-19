@@ -148,6 +148,10 @@ RUN set -eux; \
 # non-root runtime user create its own configuration and local temporary dirs.
 RUN rm -rf /tmp/.config /tmp/.ansible
 
+# The async wrapper honors HOME; async_status resolves the container user's
+# passwd home. Pin both to the same writable cache directory.
+ENV ANSIBLE_ASYNC_DIR=/tmp/.ansible_async
+
 # Package the public project source and operational files into the runtime.
 # The root .dockerignore keeps credentials, local-only scripts, runtime data,
 # and development metadata out of the image.

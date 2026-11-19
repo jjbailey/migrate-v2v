@@ -704,6 +704,7 @@
             wait: true
             timeout: 1800
           register: launch_result
+          no_log: true
 
       rescue:
         # The pre-launch check found no server with this name, so one found now
