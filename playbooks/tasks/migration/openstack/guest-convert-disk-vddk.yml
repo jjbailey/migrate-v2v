@@ -1,0 +1,33 @@
+---
+# playbooks/tasks/migration/openstack/guest-convert-disk-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# One iteration of the guest-conversion stream loop: collect this disk's
+# conversion, then start the next disk's. The same one-ahead shape as
+# import-disk-vddk.yml, without the upload.
+
+- name: Wait for this disk's conversion to finish
+  ansible.builtin.async_status:
+    jid: "{{ openstack_convert_jobs[openstack_disk.index | string] }}"
+  register: openstack_convert_result
+  until: (openstack_convert_result.finished | default(1)) | bool
+  retries: "{{ openstack_convert_poll_retries | int }}"
+  delay: "{{ openstack_convert_poll_delay | int }}"
+  # async_status itself fails when the job failed, which would skip the next
+  # task and its qemu-img stderr; let that task report it.
+  failed_when: false
+
+- name: Fail if this disk's conversion failed
+  ansible.builtin.fail:
+    msg: >-
+      conversion failed for disk {{ openstack_disk.index }}:
+      {{ openstack_convert_result.stderr | default('no stderr captured') }}
+  when: openstack_convert_result.rc | default(1) != 0
+
+- name: Start the next disk's conversion
+  ansible.builtin.include_tasks: convert-disk-vddk.yml
+  vars:
+    openstack_convert_disk: "{{ openstack_pending_disks[openstack_pending_position + 1] }}"
+    openstack_convert_compress: false
+  when: openstack_pending_position + 1 < (openstack_pending_disks | length)
+

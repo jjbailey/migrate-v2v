@@ -33,49 +33,91 @@ dropping it. The dialog script is authoritative if wording or behavior differs.
 
 ## Runtime
 
-The web process uses only Python's standard library; reading
-Ansible Vaults and the migration catalog needs the repository's
-existing Python/Ansible dependencies. The actual migration and launch
-wrappers require the full runtime listed in [the container dependency
-plan](../doc/ubuntu-24.04-container-dependencies.md). That image has
-not yet been built in this repository. `compose.yaml` therefore requires
-`MIGRATE_V2V_RUNTIME_IMAGE` to name a prepared image with those tools and
-the Python environment on `PATH`. The VDDK kit and OVF Tool continue to
-install under the mounted artifact root.
+The pinned x86_64 project image is built from the repository-root
+[Dockerfile](../Dockerfile) by Compose. It includes the project scripts,
+playbooks, templates, web controller, and documentation, plus the runtime
+dependencies. It pins the Ubuntu base image digest and APT snapshot, installs
+the Python requirements and Ansible collections, builds the nbdkit VDDK plugin,
+and stores the fixed libguestfs appliance in a sparse-aware compressed archive.
+The controller unpacks it under `/tmp` at startup. The VDDK user kit and
+virtio-win ISO still install on demand under the mounted artifact root.
+Broadcom's OVF Tool is not included; standard export migrations download it on
+demand after the operator accepts its license. See the
+[runtime-image recipe](../doc/ubuntu-24.04-container-dependencies.md) for the
+versions and build inputs.
 
-The image must include `python3`, `ansible-vault`, PyYAML, and all tools
-needed by the selected workflows. Run with a UID/GID that can read the vault
-password file and write the artifact root. The repository itself is mounted
-read-only; artifacts, catalog, vaults, tools, and web state live under
-`/work/migrate-v2v`.
+To build or refresh the local image, run `docker compose --env-file web/.env
+-f web/compose.yaml build controller`. `MIGRATE_V2V_RUNTIME_IMAGE` can name a
+different tag for the image produced by this build. Run the service with a
+UID/GID that can read the vault password file and write the artifact root. The
+image carries the code, so it can run without mounting a source checkout.
+Artifacts, catalogs, vaults, tools, and web state live under
+`/work/migrate-v2v` and remain outside the image.
 
 Files selected in the web forms (SSH public keys, a vCenter CA bundle,
-or OpenStack cloud-init data) must be placed under `WEB_INPUT_DIR`, which
-defaults to `ARTIFACT_ROOT/web-inputs` (`/work/migrate-v2v/web-inputs` in
-Compose). The site resolves symlinks and rejects files outside that directory,
-including vault and web-state files. Do not put secrets in the input directory.
+OpenStack cloud-init data, or virtio-win driver files) must be placed under
+`WEB_INPUT_DIR`, which defaults to `ARTIFACT_ROOT/web-inputs`
+(`/work/migrate-v2v/web-inputs` in Compose). For an OpenStack datastore-direct
+migration with guest conversion enabled, the host play installs Ubuntu's
+`virt-v2v`, `libguestfs-tools`, and Windows `rhsrvany` packages if needed, then
+builds the fixed appliance under `ARTIFACT_ROOT/libguestfs-appliance`. The web
+image has those packages already and uses its baked appliance at
+`/tmp/libguestfs-appliance`. Windows conversions download Fedora's stable
+virtio-win ISO to `ARTIFACT_ROOT/web-inputs/virtio-win.iso` when missing; the
+form pre-fills that path. The supplied Compose service runs as the host UID
+with all capabilities dropped. The virtio-win field accepts an ISO file or an
+unpacked driver directory under `WEB_INPUT_DIR`. The site resolves symlinks
+and rejects input paths outside that directory, including vault and web-state
+files. Do not put secrets in the input directory.
 
 ## Setup
 
-1. Copy `web/.env.example` to `web/.env`, set the runtime image, host UID/GID,
-   artifact root, and absolute vault password file path. Keep `.env` private.
+1. Copy `web/.env.example` to `web/.env`, set the host UID/GID, artifact root,
+   and absolute vault password file path. Keep `.env` private.
 
-2. Create a local account:
+2. Build the runtime image:
+
+   ```sh
+   docker compose --env-file web/.env -f web/compose.yaml build controller
+   ```
+
+   For standard OVF/OVA exports, first review and accept Broadcom's OVF Tool
+   license, then set `OVFTOOL_ACCEPT_LICENSE=1` in `web/.env`. The image does
+   not include OVF Tool; the wrapper downloads the pinned version on demand.
+
+3. Create a local account:
 
    ```sh
    docker compose --env-file web/.env -f web/compose.yaml run --rm controller python3 web/app.py user add operator
    ```
 
-3. Start the site:
+4. Start the site:
 
    ```sh
    docker compose --env-file web/.env -f web/compose.yaml up -d
    ```
 
-4. Open `https://localhost:8443`. Caddy uses a per-install local certificate
+Migration and launch wrappers can also run directly in the same image, for
+example:
+
+```sh
+docker compose --env-file web/.env -f web/compose.yaml run --rm controller \
+  ./bin/launch-openstack-instance.sh ...
+```
+
+The build context is the repository root. `.dockerignore` leaves out local
+credentials, vaults, runtime data, private local scripts, and tests; those stay
+on the host or in the mounted artifact directory.
+
+5. Open `https://localhost:8443`. Caddy uses a per-install local certificate
    authority. Its root certificate is in the persistent `caddy-data` volume at
    `/data/caddy/pki/authorities/local/root.crt`; trust that root on each client
    that will open the site. Keep the CA private key in the volume private.
+
+On a Linux host with `/dev/kvm`, guest conversion can use hardware acceleration.
+Set `KVM_GID` in `web/.env` to the device's group ID (`stat -c '%g' /dev/kvm`),
+then add `-f web/compose.kvm.yaml` to the Compose commands. Without that device,
+libguestfs uses software emulation, which is slower.
 
 By default Compose publishes HTTPS on `127.0.0.1` only. To also serve this
 controller's own LAN IP, set `WEB_ADDRESS` in `web/.env` to that IP and

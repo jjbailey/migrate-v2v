@@ -36,6 +36,9 @@ F = {
     "VCENTER_CA_BUNDLE": Field("vCenter CA bundle path", "path",
                                help="Select an absolute file under WEB_INPUT_DIR."),
     "COMPRESS": Field("Compress QCOW2 images", "boolean", "false"),
+    "GUEST_CONVERT": Field("Convert guest for KVM", "boolean", "false"),
+    "VIRTIO_WIN": Field("virtio-win ISO or directory", "path",
+                         help="Optional override. If blank, the stable ISO is downloaded to WEB_INPUT_DIR for Windows guest conversion."),
     "INSTANCE_NAME": Field("Instance name", help="Blank derives the name from the source VM."),
     "AWS_SUBNET_ID": Field("Subnet ID", required=True),
     "AWS_SECURITY_GROUPS_JSON": Field("Security groups", "json", "[]", help="JSON array of names or IDs; [] uses the VPC default."),
@@ -105,9 +108,10 @@ def exported_fields(mode: str, cloud: str, method: str = "standard") -> tuple[st
         names.append(target.group(1))
         names = [n for n in names if n != "MIGRATE_TARGET_VAR"]
         if method != "vddk":
-            names = [n for n in names if n not in ("BACKEND", "DISCARD_RUN_ID", "VCENTER_CA_BUNDLE", "COMPRESS")]
+            names = [n for n in names if n not in ("BACKEND", "DISCARD_RUN_ID", "VCENTER_CA_BUNDLE",
+                                                  "COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
         elif cloud != "openstack":
-            names = [n for n in names if n != "COMPRESS"]
+            names = [n for n in names if n not in ("COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
     else:
         names = re.findall(r'"([A-Z_]+)=\$[A-Z_]+"', source)
         names += re.findall(r"printf 'export ([A-Z_]+)=", source)

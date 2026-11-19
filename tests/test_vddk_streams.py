@@ -11,6 +11,7 @@ stops only this run's servers.
 """
 
 import json
+import os
 import shutil
 import socket
 import subprocess
@@ -43,6 +44,16 @@ CONVERT_PLAY = """
     - ansible.builtin.copy:
         content: "{{{{ {{'rc': result.rc | default(1), 'stderr': result.stderr | default('')}} | to_json }}}}"
         dest: {out}
+"""
+
+GUEST_PLAY = """
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    openstack_convert_jobs: {{}}
+  tasks:
+    - ansible.builtin.include_tasks: {tasks}/guest-convert-vddk.yml
 """
 
 STOP_PLAY = """
@@ -84,12 +95,12 @@ class StreamTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
         shutil.rmtree(self.sockets, ignore_errors=True)
 
-    def playbook(self, text, **extra_vars):
+    def playbook(self, text, env=None, **extra_vars):
         play = self.tmp / "play.yml"
         play.write_text(text)
         variables = {"vddk_socket_dir": str(self.sockets), **extra_vars}
         return subprocess.run(["ansible-playbook", str(play), "-e", json.dumps(variables)],
-                              capture_output=True, text=True, check=False)
+                              capture_output=True, text=True, check=False, env=env)
 
     def convert(self, **overrides):
         out = self.tmp / "result.json"
@@ -233,6 +244,122 @@ class StreamTests(unittest.TestCase):
         # A fixed VHD is the raw data plus a 512-byte footer.
         self.assertEqual(vhd.stat().st_size, 2 * 1024 * 1024 + 512)
         self.assertFalse((self.run_dir / "disks" / "disk-0.vhd.tmp").exists())
+
+    # virt-v2v-in-place stand-in: records its argv and the environment it was
+    # given, and fails when told to by a file next to it.
+    FAKE_V2V = """#!/usr/bin/env python3
+import json, os, sys
+from pathlib import Path
+here = Path(__file__).resolve().parent
+(here / "v2v-call.json").write_text(json.dumps({
+    "argv": sys.argv[1:],
+    "virtio_win": os.environ.get("VIRTIO_WIN"),
+    "backend": os.environ.get("LIBGUESTFS_BACKEND")}))
+if (here / "v2v-fail").exists():
+    print("virt-v2v-in-place: error: no root device found", file=sys.stderr)
+    sys.exit(1)
+print("converted", sys.argv[1:])
+"""
+
+    def guest_convert(self, guest_id="debian12_64Guest", disks=2, virtio_win=None,
+                      fail=False, **overrides):
+        bin_dir = self.tmp / "fakebin"
+        bin_dir.mkdir(exist_ok=True)
+        fake = bin_dir / "virt-v2v-in-place"
+        fake.write_text(self.FAKE_V2V)
+        fake.chmod(0o755)
+        if fail:
+            (bin_dir / "v2v-fail").write_text("")
+        pending = []
+        for index in range(disks):
+            raw = self.tmp / f"disk{index}.raw"
+            raw.write_bytes(bytes([index + 1]) * 1024 * 1024 + bytes(range(256)) * 4096)
+            pending.append({"index": index, "path": str(raw)})
+        variables = {
+            "migration_run_dir": str(self.run_dir),
+            "openstack_staging_dir": str(self.run_dir / "disks"),
+            "openstack_pending_disks": pending,
+            "artifact_manifest": {"source_guest_id": guest_id, "disks": pending},
+            "openstack_guest_convert": True,
+            "openstack_guest_convert_args": ["--firstboot", "/tmp/first boot.sh"],
+            "openstack_virtio_win": virtio_win or str(self.tmp / "no-virtio-win.iso"),
+            "openstack_convert_args": [],
+            "openstack_convert_compress": False,
+            "openstack_convert_async_timeout": 120,
+            "openstack_convert_poll_retries": 60,
+            "openstack_convert_poll_delay": 1,
+            "vddk_local": True,
+            "vddk_backend_effective": "curl",
+            "vddk_nbdkit_bin": "nbdkit",
+            "vddk_libdir": "",
+            "vddk_thumbprint": "",
+            "vddk_transports": "nbdssl",
+            "vddk_ca_bundle": "",
+            "qemu_img_bin": "qemu-img",
+            "vcenter_hostname": "127.0.0.1:1",
+            "vcenter_username": "test",
+            "vcenter_password": "test",
+            "datacenter": "DC",
+            "validate_certs": False,
+            **overrides,
+        }
+        env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
+        env.pop("VIRTIO_WIN", None)
+        played = self.playbook(GUEST_PLAY.format(tasks=TASKS), env=env, **variables)
+        call = bin_dir / "v2v-call.json"
+        return played, (json.loads(call.read_text()) if call.exists() else None), pending
+
+    def test_guest_convert_runs_in_place_over_all_disks_in_order(self):
+        played, call, pending = self.guest_convert()
+        self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
+        disks = self.run_dir / "disks"
+        self.assertEqual(call["argv"], ["-i", "disk", str(disks / "disk-0.qcow2"), str(disks / "disk-1.qcow2"),
+                                        "--firstboot", "/tmp/first boot.sh"])
+        self.assertEqual(call["backend"], "direct")
+        # Only a Windows guest is given the driver location.
+        self.assertIsNone(call["virtio_win"])
+        marker = json.loads((self.run_dir / "guest-converted.json").read_text())
+        self.assertEqual(marker, {"guest_converted": True, "windows": False})
+        self.assertIn("converted", (self.run_dir / "virt-v2v-in-place.log").read_text())
+        for index, disk in enumerate(pending):
+            compared = subprocess.run(["qemu-img", "compare", "-f", "raw", "-F", "qcow2", disk["path"],
+                                       str(disks / f"disk-{index}.qcow2")],
+                                      capture_output=True, text=True, check=False)
+            self.assertEqual(compared.returncode, 0, compared.stdout + compared.stderr)
+
+    def test_guest_convert_never_compresses_before_the_in_place_pass(self):
+        # Compression is applied afterwards: the pass rewrites clusters.
+        played, call, _ = self.guest_convert(disks=1, openstack_convert_compress=True)
+        self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
+        qcow2 = self.run_dir / "disks" / "disk-0.qcow2"
+        info = json.loads(subprocess.run(["qemu-img", "info", "--output=json", str(qcow2)],
+                                         capture_output=True, text=True, check=True).stdout)
+        self.assertEqual(info["cluster-size"], 2 * 1024 * 1024)
+        self.assertFalse((self.run_dir / "disks" / "disk-0.qcow2.tmp").exists())
+
+    def test_guest_convert_windows_gets_virtio_win(self):
+        iso = self.tmp / "virtio-win.iso"
+        iso.write_bytes(b"iso")
+        played, call, _ = self.guest_convert(guest_id="windows2019srv_64Guest", disks=1, virtio_win=str(iso))
+        self.assertEqual(played.returncode, 0, played.stdout + played.stderr)
+        self.assertEqual(call["virtio_win"], str(iso))
+        marker = json.loads((self.run_dir / "guest-converted.json").read_text())
+        self.assertTrue(marker["windows"])
+
+    def test_guest_convert_refuses_windows_without_virtio_win(self):
+        played, call, _ = self.guest_convert(guest_id="windows9_64Guest", disks=1)
+        self.assertNotEqual(played.returncode, 0)
+        self.assertIn("virtio-win", played.stdout + played.stderr)
+        self.assertIsNone(call)
+        self.assertFalse((self.run_dir / "guest-converted.json").exists())
+
+    def test_guest_convert_failure_reports_the_log_and_leaves_no_marker(self):
+        played, call, _ = self.guest_convert(disks=1, fail=True)
+        self.assertNotEqual(played.returncode, 0)
+        output = played.stdout + played.stderr
+        self.assertIn("no root device found", output)
+        self.assertIn("virt-v2v-in-place.log", output)
+        self.assertFalse((self.run_dir / "guest-converted.json").exists())
 
     def start_nbdkit(self, socket, pidfile):
         process = subprocess.Popen(["nbdkit", "-f", "-r", "-U", str(socket), "--pidfile", str(pidfile),

@@ -1,0 +1,107 @@
+---
+# playbooks/tasks/migration/openstack/guest-convert-setup-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# GUEST_CONVERT prerequisites for the local controller. A host can install
+# packages and build the appliance here; an unprivileged container can reuse
+# packages and an appliance already provided by its image or shared artifact
+# root.
+
+- name: Get the controller user's numeric UID and GID
+  ansible.builtin.command:
+    argv: [id, -u]
+  register: guest_convert_uid
+  changed_when: false
+  when: openstack_guest_convert | bool
+
+- name: Get the controller user's primary group ID
+  ansible.builtin.command:
+    argv: [id, -g]
+  register: guest_convert_gid
+  changed_when: false
+  when: openstack_guest_convert | bool
+
+- name: Check whether guest conversion packages are installed
+  ansible.builtin.command:
+    argv:
+      - dpkg-query
+      - -W
+      - "-f=${Status}"
+      - "{{ item }}"
+  loop:
+    - virt-v2v
+    - libguestfs-tools
+  register: guest_convert_package_status
+  failed_when: false
+  changed_when: false
+  when: openstack_guest_convert | bool
+
+- name: Install guest conversion packages
+  ansible.builtin.apt:
+    name:
+      - virt-v2v
+      - libguestfs-tools
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: "{{ (guest_convert_uid.stdout | int) != 0 }}"
+  when:
+    - openstack_guest_convert | bool
+    - >-
+      guest_convert_package_status.results
+      | rejectattr('stdout', 'equalto', 'install ok installed')
+      | list | length > 0
+
+- name: Create the parent directory for the fixed libguestfs appliance
+  ansible.builtin.file:
+    path: "{{ openstack_libguestfs_path | dirname }}"
+    state: directory
+  when: openstack_guest_convert | bool
+
+- name: Check for the fixed libguestfs appliance kernel
+  ansible.builtin.stat:
+    path: "{{ openstack_libguestfs_path }}/kernel"
+  register: guest_convert_appliance_kernel
+  when: openstack_guest_convert | bool
+
+- name: Check for the fixed libguestfs appliance initrd
+  ansible.builtin.stat:
+    path: "{{ openstack_libguestfs_path }}/initrd"
+  register: guest_convert_appliance_initrd
+  when: openstack_guest_convert | bool
+
+- name: Check for the fixed libguestfs appliance root image
+  ansible.builtin.stat:
+    path: "{{ openstack_libguestfs_path }}/root"
+  register: guest_convert_appliance_root
+  when: openstack_guest_convert | bool
+
+- name: Build a fixed libguestfs appliance when one is missing
+  ansible.builtin.command:
+    argv:
+      - libguestfs-make-fixed-appliance
+      - "{{ openstack_libguestfs_path }}"
+  become: "{{ (guest_convert_uid.stdout | int) != 0 }}"
+  register: guest_convert_appliance_build
+  when:
+    - openstack_guest_convert | bool
+    - not (guest_convert_appliance_kernel.stat.exists
+           and guest_convert_appliance_initrd.stat.exists
+           and guest_convert_appliance_root.stat.exists)
+
+- name: Make the fixed libguestfs appliance readable by the controller user
+  ansible.builtin.file:
+    path: "{{ openstack_libguestfs_path }}"
+    state: directory
+    owner: "{{ guest_convert_uid.stdout }}"
+    group: "{{ guest_convert_gid.stdout }}"
+    recurse: true
+  become: "{{ (guest_convert_uid.stdout | int) != 0 }}"
+  when:
+    - openstack_guest_convert | bool
+    - >-
+      guest_convert_appliance_build is changed or not (
+      guest_convert_appliance_kernel.stat.readable | default(false) | bool and
+      guest_convert_appliance_initrd.stat.readable | default(false) | bool and
+      guest_convert_appliance_root.stat.readable | default(false) | bool)
+

@@ -15,6 +15,7 @@
 
   vars_files:
     - vars/migration-common.yml
+    - vars/gcp-common.yml
 
   vars:
     migration_target: gcp

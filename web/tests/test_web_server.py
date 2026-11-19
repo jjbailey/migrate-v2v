@@ -158,6 +158,18 @@ class LoginTests(IsolatedState):
         for flag in ("HttpOnly", "SameSite=Strict", "Secure", "Max-Age=600"):
             self.assertIn(flag, cookie)
 
+    def test_second_login_page_keeps_first_form_valid(self):
+        token, csrf = self.login_page_session()
+        second = self.request("GET", "/login", cookie=token)
+        self.assertEqual(second.status, 200)
+        self.assertIsNone(second.header("Set-Cookie"))
+        self.assertIn(f'value="{csrf}"', second.body)
+        response = self.request("POST", "/login",
+                                {"_csrf": csrf, "username": "nobody",
+                                 "password": "invalid"}, cookie=token)
+        self.assertEqual(response.status, 401)
+        self.assertNotIn("The form expired", response.body)
+
     def test_valid_login_issues_a_session(self):
         response = self.post_login("operator", PASSWORD)
         self.assertEqual(response.status, 303)

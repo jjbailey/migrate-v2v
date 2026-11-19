@@ -144,6 +144,14 @@
                    | default('', true), true) }}
   no_log: true
 
+# Still before the snapshot, so a Windows guest without virtio-win drivers is
+# refused before anything is created. Other targets never set the flag.
+- name: Check the guest conversion prerequisites
+  ansible.builtin.include_tasks: ../openstack/guest-convert-check-vddk.yml
+  when:
+    - migration_target == 'openstack'
+    - openstack_guest_convert | default(false) | bool
+
 - name: Mark the snapshot for best-effort cleanup
   ansible.builtin.set_fact:
     snapshot_cleanup_required: true

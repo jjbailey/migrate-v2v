@@ -23,3 +23,16 @@
 - name: Check nbdkit and choose the disk backend
   ansible.builtin.import_tasks: ../common/select-backend-vddk.yml
 
+- name: Set up guest conversion prerequisites
+  ansible.builtin.import_tasks: guest-convert-setup-vddk.yml
+  when: openstack_guest_convert | bool
+
+- name: Check virt-v2v-in-place for guest conversion
+  # Windows drivers (virtio-win) are checked once the source VM's guest OS is
+  # known, before the snapshot: openstack/guest-convert-check-vddk.yml.
+  ansible.builtin.command: virt-v2v-in-place --version
+  register: virt_v2v_in_place_check
+  failed_when: virt_v2v_in_place_check.rc != 0
+  changed_when: false
+  when: openstack_guest_convert | bool
+

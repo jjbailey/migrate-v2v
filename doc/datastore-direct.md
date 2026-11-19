@@ -67,22 +67,104 @@ about as long, the whole migration over a slow uplink dropped from about 35 to
 about 11 minutes, and an OVH instance booted from the compressed images. The
 cost is controller CPU, so leave it off on a fast link.
 
+### Guest conversion (virt-v2v-in-place)
+
+By default only the disk format changes (VMDK to QCOW2); the guest has to boot
+under KVM as it is. `GUEST_CONVERT=true` (`-e openstack_guest_convert=true`, off
+by default) adds libguestfs's `virt-v2v-in-place`, the same guest conversion
+that virt-v2v performs: it installs virtio drivers, removes VMware tools and
+drivers, and fixes the boot configuration. This is what a guest that lacks
+virtio in its initramfs, and every **Windows** guest, needs.
+
+```text
+stream and convert every disk → disks/disk-N.qcow2      (uncompressed)
+  → virt-v2v-in-place -i disk disk-0.qcow2 disk-1.qcow2 …  (boot order)
+  → [COMPRESS] qemu-img convert -c, per disk
+  → openstack.cloud.image, per disk, as usual
+```
+
+virt-v2v-in-place inspects the guest across all of its disks (`/etc/fstab`,
+`/boot`, the ESP), so the disks are converted together and **nothing is
+uploaded until all of them are converted**. Unlike the default path, the
+conversion of one disk does not overlap the upload of the previous one, and
+peak staging is the whole VM's QCOW2 files. `COMPRESS` still works: the
+compression runs after the in-place pass, because the pass rewrites clusters.
+
+- **Windows** needs the virtio-win drivers. When the source VM is Windows, the
+  play downloads the stable ISO published by the
+  [Fedora virtio-win project](https://github.com/virtio-win/virtio-win-pkg-scripts#downloads)
+  from its [stable ISO URL](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso)
+  if it is missing. It saves the ISO at
+  `$ARTIFACT_ROOT/web-inputs/virtio-win.iso` (normally
+  `/work/migrate-v2v/web-inputs/virtio-win.iso`), which is also the web form's
+  default; set `WEB_INPUT_DIR` to use another input directory. The web form and
+  command-line wrapper accept an ISO file or an unpacked driver directory. Set
+  `VIRTIO_WIN=/path/to/virtio-win.iso` or
+  `-e openstack_virtio_win=...` to use an existing ISO or directory instead.
+
+  The ISO download and driver-path checks happen before the snapshot. A missing
+  explicitly configured `VIRTIO_WIN` path still fails preflight. Windows
+  installs the drivers on its first boot after launch, so expect a reboot.
+  Launch the instance with a Windows-capable flavor; the images carry
+  `os_type=windows`.
+
+- The boot disk's Glance image gets `hw_disk_bus=virtio`, `hw_vif_model=virtio`,
+  `os_type` (`windows` or `linux`), and `migrate_v2v_guest_converted=true`, so
+  Nova presents the hardware the conversion assumed.
+- `-e openstack_guest_convert_args='["--firstboot", "script.sh"]'` (a list, or a
+  whitespace-separated string) is passed to `virt-v2v-in-place`, for example to
+  run a script on first boot.
+- A quiesced snapshot (`QUIESCE_SNAPSHOT`, the default) matters more here: a
+  crash-consistent NTFS or ext4 volume can fail to mount cleanly for the
+  conversion.
+- Requirements: with `GUEST_CONVERT=true`, the OpenStack play installs Ubuntu's
+  `virt-v2v` and `libguestfs-tools` packages if missing, then builds a fixed
+  libguestfs appliance under
+  `$ARTIFACT_ROOT/libguestfs-appliance`. The appliance lets the unprivileged
+  migration user run conversions without read access to `/boot/vmlinuz`.
+  Windows conversions also install `rhsrvany` and download missing drivers as
+  described above.
+  On a host, the first run needs sudo access to install system packages and
+  builds the appliance under the artifact root. The web runtime image includes
+  the packages and bundles its appliance as a sparse-aware compressed archive,
+  unpacked at `/tmp/libguestfs-appliance` on startup; Compose sets
+  `LIBGUESTFS_PATH` to that location by default. The artifact root must be
+  writable and shared when switching between host and container. Set
+  `LIBGUESTFS_PATH` to use another fixed appliance. The
+  preflight checks that `virt-v2v-in-place` runs. libguestfs uses
+  `LIBGUESTFS_BACKEND=direct`; without `/dev/kvm` it falls back to emulation,
+  which is much slower.
+- Resume: a marker file (`guest-converted.json`) in the run directory records a
+  finished conversion. Resuming a converted run requires `GUEST_CONVERT=true`
+  again. When some of the run's images are already in Glance, they are deleted
+  and every disk is converted again, since the disks must be converted together.
+  The `virt-v2v-in-place` output is saved as
+  `virt-v2v-in-place.log` in the run directory. Failed resumable runs retain
+  that log; a successful migration removes its derived run directory during
+  cleanup.
+- The Windows path has been exercised with `windows10-base`: its converted
+  image boots in OpenStack and has network connectivity. The automated tests
+  use a stand-in `virt-v2v-in-place`; a Linux guest that lacks virtio still
+  needs an end-to-end check.
+
 ## Usage
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
+GUEST_CONVERT=true VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # virtio and VMware tools
+GUEST_CONVERT=true VIRTIO_WIN=/iso/virtio-win.iso VM_NAME=my-win-vm ./bin/migrate-openstack-vm-vddk.sh
 BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backend
 ./bin/migrate-openstack-vddk-dialog.sh                           # guided front end
 ```
 
 The guided front end asks for the backend, whether to discard a failed run,
-an optional vCenter CA bundle, and QCOW2 compression.
+an optional vCenter CA bundle, QCOW2 compression, and guest conversion.
 
 The wrapper takes the same environment variables as `bin/migrate-openstack-vm.sh`
 (`VM_NAME`, `VSPHERE_TARGET_VCENTER`, `VCENTER_DATACENTER`, `OS_PROJECT_NAME`,
 `QUIESCE_SNAPSHOT`, `VALIDATE_CERTS`, `ARTIFACT_ROOT`), plus `BACKEND`,
-`COMPRESS`, `REQUIRE_CBT` (see below), `DISCARD_RUN_ID`, and
-`VCENTER_CA_BUNDLE`.
+`COMPRESS`, `GUEST_CONVERT` and `VIRTIO_WIN` (see above), `REQUIRE_CBT` (see
+below), `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`.
 Any Ansible arguments after the wrapper's own are passed through. The
 datastore-direct settings are named `vddk_<name>` and shared by both targets;
 the OpenStack playbook still accepts the older `openstack_vddk_<name>`
@@ -179,6 +261,16 @@ VMDK checks. Tested end to end with the `vddk` backend on the same two-disk
 Debian VM (UEFI, so a V2 image); resume, discard, and the `curl` backend have
 not been exercised against Azure.
 
+A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
+26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
+files were removed after import. A `Standard_B2s_v2` VM launched without a
+public IP, and its serial console reached the guest login prompt. Azure still
+reported `provisioningState=Creating` after 13 minutes, however, so the launch
+play was still waiting and no deployment catalog entry had been written. This
+confirms image import and guest boot, but not completed Azure provisioning;
+check the Azure guest setup requirement in the README before treating launch
+as validated.
+
 ## Requirements
 
 - On the control host: a Linux host (the stream bookkeeping reads `/proc` to
@@ -205,15 +297,22 @@ not been exercised against Azure.
 
 nbdkit's `vddk` plugin loads VixDiskLib at run time from
 `<libdir>/lib64/libvixDiskLib.so.8`. Ubuntu does not package the plugin; it
-builds from nbdkit's source without VixDiskLib present. Use the source of the
-nbdkit version already installed:
+builds from nbdkit's source without VixDiskLib present. On Ubuntu 24.04, enable
+the signed Ubuntu source packages and install the build dependencies for the
+installed nbdkit version. `build-dep` installs compiler and development
+packages, so this step needs several hundred MiB of additional disk space:
 
 ```bash
-v=$(nbdkit --version | awk '{print $2}')        # e.g. 1.36.3
-curl -fsSLO "https://download.libguestfs.org/nbdkit/${v%.*}-stable/nbdkit-$v.tar.gz"
-curl -fsSLO "https://download.libguestfs.org/nbdkit/${v%.*}-stable/nbdkit-$v.tar.gz.sig"
-gpg --verify "nbdkit-$v.tar.gz.sig" "nbdkit-$v.tar.gz"   # key F7774FB1AD074A7E8C8767EA91738F73E1B768A0
-tar -xzf "nbdkit-$v.tar.gz" && cd "nbdkit-$v"
+sudo sed -i 's/^Types: deb$/Types: deb deb-src/' /etc/apt/sources.list.d/ubuntu.sources
+sudo sed -i 's/^Components: main$/Components: main universe/' /etc/apt/sources.list.d/ubuntu.sources
+sudo apt-get update
+sudo apt-get install -y nbdkit nbdkit-plugin-dev pkg-config
+sudo apt-get build-dep -y nbdkit
+
+mkdir -p "$HOME/src/nbdkit-vddk" && cd "$HOME/src/nbdkit-vddk"
+apt-get source nbdkit
+src_dir=$(find . -mindepth 1 -maxdepth 1 -type d -name 'nbdkit-*' -print -quit)
+cd "$src_dir"
 ./configure --disable-perl --disable-python --disable-ocaml --disable-rust \
     --disable-ruby --disable-tcl --disable-lua --disable-golang
 for d in common/include common/replacements common/utils common/bitmap plugins/vddk ; do
@@ -282,20 +381,21 @@ implemented: they would also need the snapshot's change ID saved in the catalog.
 
 ## Files
 
-| File                                                                                                      | Role                                                                                   |
-| --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `playbooks/migrate-openstack-vm-vddk.yml`                                                                 | entry playbook and settings                                                            |
-| `bin/migrate-openstack-vm-vddk.sh`, `bin/migrate-openstack-vddk-dialog.sh`                                | wrapper and guided front end                                                           |
-| `bin/inspect-vm.py`                                                                                       | builds the disk manifest from `govc vm.info -json`; refuses unsupported disks          |
-| `bin/enable-cbt.py`                                                                                       | optional CBT helper                                                                    |
-| `playbooks/tasks/migration/common/prepare-source-manifest.yml`                                            | snapshot and manifest                                                                  |
-| `playbooks/tasks/migration/common/snapshot-ref-vddk.yml`                                                  | the snapshot's reference for VixDiskLib                                                |
-| `playbooks/tasks/migration/common/{preflight,resume,cleanup}-vddk.yml`                                    | copies of the OVF method's tasks without the OVF/clone assumptions                     |
-| `playbooks/tasks/migration/common/check-curl-disks-vddk.yml`                                              | the `curl` backend's disk checks, run before the snapshot and again on a `curl` resume |
-| `playbooks/tasks/migration/common/{select-backend,stop-streams}-vddk.yml`                                 | nbdkit and backend choice; stopping streams after a failure                            |
-| `playbooks/tasks/migration/openstack/{initialize,preflight,import,import-disk,convert-disk}-vddk.yml`     | OpenStack per-disk stream, convert, and upload                                         |
-| `playbooks/migrate-azure-vm-vddk.yml`, `bin/migrate-azure-vm-vddk.sh`, `bin/migrate-azure-vddk-dialog.sh` | Azure entry playbook, wrapper, and guided front end                                    |
-| `playbooks/tasks/migration/azure/{preflight,convert-disk,discard}-vddk.yml`                               | Azure preflight, per-disk stream to fixed VHD, and discard lookup                      |
+| File                                                                                                      | Role                                                                                    |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `playbooks/migrate-openstack-vm-vddk.yml`                                                                 | entry playbook and settings                                                             |
+| `bin/migrate-openstack-vm-vddk.sh`, `bin/migrate-openstack-vddk-dialog.sh`                                | wrapper and guided front end                                                            |
+| `bin/inspect-vm.py`                                                                                       | builds the disk manifest from `govc vm.info -json`; refuses unsupported disks           |
+| `bin/enable-cbt.py`                                                                                       | optional CBT helper                                                                     |
+| `playbooks/tasks/migration/common/prepare-source-manifest.yml`                                            | snapshot and manifest                                                                   |
+| `playbooks/tasks/migration/common/snapshot-ref-vddk.yml`                                                  | the snapshot's reference for VixDiskLib                                                 |
+| `playbooks/tasks/migration/common/{preflight,resume,cleanup}-vddk.yml`                                    | copies of the OVF method's tasks without the OVF/clone assumptions                      |
+| `playbooks/tasks/migration/common/check-curl-disks-vddk.yml`                                              | the `curl` backend's disk checks, run before the snapshot and again on a `curl` resume  |
+| `playbooks/tasks/migration/common/{select-backend,stop-streams}-vddk.yml`                                 | nbdkit and backend choice; stopping streams after a failure                             |
+| `playbooks/tasks/migration/openstack/{initialize,preflight,import,import-disk,convert-disk}-vddk.yml`     | OpenStack per-disk stream, convert, and upload                                          |
+| `playbooks/tasks/migration/openstack/guest-convert{,-disk,-check,-setup}-vddk.yml`                        | optional virt-v2v-in-place setup, pre-snapshot checks, disk conversion, and compression |
+| `playbooks/migrate-azure-vm-vddk.yml`, `bin/migrate-azure-vm-vddk.sh`, `bin/migrate-azure-vddk-dialog.sh` | Azure entry playbook, wrapper, and guided front end                                     |
+| `playbooks/tasks/migration/azure/{preflight,convert-disk,discard}-vddk.yml`                               | Azure preflight, per-disk stream to fixed VHD, and discard lookup                       |
 
 The `-vddk` task files are deliberate copies of their OVF counterparts, so each
 method can change without touching the other. A fix to the shared upload or

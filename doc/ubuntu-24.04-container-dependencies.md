@@ -1,26 +1,48 @@
-# Ubuntu 24.04 Container Dependency Plan
+# Ubuntu 24.04 Pinned Runtime Image
 
-This is the dependency plan for a future full migration runtime image. The
-[web UI](../web/README.md) now has Compose configuration, but it requires a
-prepared runtime image; this document is still preparation for that image.
+The project image is built from the repository-root [`Dockerfile`](../Dockerfile).
+Compose defaults to the local tag `migrate-v2v-runtime:ubuntu24.04-20261117`.
+Build or refresh it with `docker compose --env-file web/.env -f
+web/compose.yaml build controller` from the repository root. The recipe is
+x86_64-only and pins the Ubuntu base image digest, Ubuntu APT snapshot, Python
+requirements, Ansible collections, govc, AWS CLI, and Google Cloud CLI.
 
 ## Target
 
 - Ubuntu 24.04 LTS (`noble`), `amd64`.
-- Use a glibc-based image. The current OpenVDDK kit supports Linux x86-64 and
-  glibc 2.28 or newer; the user's Ubuntu 24.04 host meets that baseline. Recheck
-  this against the author's renamed release before adopting it.
-- The current host reports Ubuntu 24.04.5, Python 3.12.3, `nbdkit`
-  1.36.3-1ubuntu10, and `qemu-utils` 8.2.2. These are observations, not
-  selected image pins.
+- The base is the official Ubuntu 24.04 amd64 image pinned to
+  `sha256:a2d43bffc46670d7108bb3c0468c67c5557c4c92e83e1e34cbff1322ad1b94dc`.
+- Ubuntu packages come from the archive snapshot `20261117T000000Z`, including
+  the VDDK plugin build dependencies. Update the snapshot and digest together
+  after rebuilding and reviewing the image.
+- The minimal Ubuntu base has no CA bundle. The Dockerfile first installs
+  `ca-certificates` from Ubuntu's default HTTP archive (whose package metadata
+  is signed), then installs the matching snapshot version before using HTTPS
+  sources. This allows APT to verify the snapshot service's TLS certificate
+  without disabling certificate checks.
 
 ## Runtime Dependencies
 
-- **Python and Ansible:** `python3`, `python3-venv`; create one venv for
-  Ansible and the `python3` scripts. Applies to all workflows.
-- **CA trust and download tools:** `ca-certificates`, `curl`, `gnupg`.
+- **Python and Ansible:** `python3`, `python3-venv`; create one venv for the
+  repository's pinned Python requirements and Python scripts. Install pinned
+  Ansible collections into `/opt/ansible/collections`.
+- **CA trust and download tools:** `ca-certificates` and `curl`. GnuPG and
+  `unzip` are used to verify and install AWS CLI during the image build, then
+  removed from the final image.
 - **Disk conversion:** `qemu-utils` (`qemu-img`) for OpenStack and Azure.
 - **Datastore-direct:** `nbdkit` for OpenStack and Azure direct workflows.
+- **Guest conversion:** the image includes `virt-v2v`, `libguestfs-tools`, and
+  `rhsrvany`. It stores the fixed appliance as a sparse-aware xz archive and
+  unpacks it to `/tmp/libguestfs-appliance` at container startup. The build
+  removes supermin's duplicate appliance cache. Windows conversions download
+  the stable `virtio-win` ISO from the
+  [Fedora virtio-win project](https://github.com/virtio-win/virtio-win-pkg-scripts#downloads)
+  to `ARTIFACT_ROOT/web-inputs/virtio-win.iso` when it is missing.
+  The image build temporarily installs Ubuntu's virtual kernel so supermin can
+  construct the fixed appliance, archives the sparse raw root with GNU tar's
+  sparse-file support, removes the duplicate supermin cache, then removes the
+  kernel package. This avoids storing two 4 GiB logical appliance roots in the
+  image while keeping the raw format used by Ubuntu's libguestfs package.
 - **Certificate inspection:** `openssl` for vCenter preflight, especially
   datastore-direct.
 - **Shell commands:** `bash`, `coreutils`, `findutils`, `grep`, `sed`, and
@@ -28,9 +50,12 @@ prepared runtime image; this document is still preparation for that image.
 - **Guest staging over SSH:** `openssh-client` for `stage-v2v.yml`.
 - **AWS API and chunked uploads:** AWS CLI v2 for AWS migrations. AWS's Linux
   installer also requires `unzip`, `groff`, and `less`.
-- **Google API and chunked uploads:** `google-cloud-cli` for GCP migrations.
-- **vSphere API helper:** a pinned `govc` Linux release binary for all
-  migrations.
+- **Google API and chunked uploads:** the image includes `google-cloud-cli` for
+  GCP migrations. The GCP plays also install the pinned CLI on demand under
+  `ARTIFACT_ROOT/tools/` when it is absent, which supports container variants
+  that omit it.
+- **vSphere API helper:** `govc`, built from the pinned Go module version for
+  all migrations.
 - **Interactive menus:** `dialog` or `whiptail` for dialog wrappers only.
 
 Ubuntu's `nbdkit` package on the current host owns and supplies the curl
@@ -57,11 +82,15 @@ dependencies.
 
 - Install the pinned dependencies in [`requirements.txt`](../requirements.txt).
 - Install the pinned collections in [`requirements.yml`](../requirements.yml).
-- Install the Python SDK requirements shipped by `azure.azcollection` into
-  that same environment, using
-  [`requirements-azure-constraints.txt`](../requirements-azure-constraints.txt)
-  to pin the collection's range-only requirements to the active controller's
-  versions. The collection's exact requirements remain pinned by its own file.
+- For the container, install the reduced, pinned Azure SDK set in
+  [`requirements-container-azure.txt`](../requirements-container-azure.txt),
+  constrained by
+  [`requirements-azure-constraints.txt`](../requirements-azure-constraints.txt).
+  The upstream Azure collection's full requirements cover modules this project
+  does not use, so the container list tracks the imports in its common utility
+  and the Azure modules used by the shipped plays. Revisit it when either set
+  changes. The host `.dib7` environment and its full collection requirements are
+  unchanged.
 - Install collections in a fixed image path or the final runtime user's home,
   so the build user's Ansible collection directory is not accidentally used.
 
@@ -75,8 +104,10 @@ pins together; the repository documents the `community.vmware` and
 
 ## Versioned External Tools
 
-The active, fully patched controller reports `govc 0.33.0`, AWS CLI v2
-`2.35.21`, and Google Cloud CLI `592.0.0` (Ubuntu package `592.0.0-0`).
+The image pins `govc 0.33.0`, AWS CLI v2 `2.35.21`, and Google Cloud CLI
+`594.0.0` (Ubuntu package `594.0.0-0`). These versions match the repository's
+tested CLI contract except Google Cloud CLI, which is updated to the version
+available in the archive when this recipe was added.
 
 - **OVF Tool:** Keep it out of the image. The existing installer downloads the
   validated 5.1.0 package under `/work/migrate-v2v/tools/ovftool-5.1.0` after
@@ -87,30 +118,23 @@ The active, fully patched controller reports `govc 0.33.0`, AWS CLI v2
   published the renamed release yet, so its release name, archive, checksum,
   library SONAME, and any changed configuration interface remain open. Do not
   pin the current beta as the future container contract.
-- **`govc`:** Pin the installed version, `0.33.0`, and verify the selected
-  release binary's checksum. The [upstream installation guide][govc-install]
-  publishes Linux release binaries.
-- **AWS CLI v2:** Pin the installed version, `2.35.21`, using AWS's
-  version-selectable Linux installer and verify its checksum. See the
-  [AWS CLI v2 installation guide][aws-install].
-- **Google Cloud CLI:** Pin the installed version, `592.0.0` (Ubuntu package
-  `592.0.0-0`), from Google's APT repository. See [Google's Debian and Ubuntu
-  installation instructions][gcloud-install].
+- **`govc`:** Build `govc` from the pinned `v0.33.0` Go module. The Go module
+  checksum database verifies downloaded source.
+- **AWS CLI v2:** Install version `2.35.21` from the versioned Linux archive;
+  verify its PGP signature against the AWS CLI Team key pinned by fingerprint
+  in the Dockerfile. See the [AWS CLI v2 installation guide][aws-install].
+- **Google Cloud CLI:** The image installs exact package `594.0.0-0` from
+  Google's signed APT repository. The GCP plays share version `594.0.0` and
+  can install its SHA256-verified, versioned archive under the writable
+  artifact mount. See [Google's versioned archive guidance][gcloud-install].
 
 ## Datastore-Direct VDDK Plugin
 
-The image needs nbdkit's VDDK plugin when datastore-direct VDDK migrations are
-in scope. Build the plugin against the same Ubuntu 24.04 nbdkit release used at
-runtime, and install it in that release's plugin directory. The existing
-[manual build instructions](datastore-direct.md#installing-the-vddk-backend)
-download the matching nbdkit source and build the VDDK plugin. The exact
-build-only package list still needs to be confirmed from that procedure.
-
-Likely build-stage tools are `build-essential`, `pkg-config`, `curl`, `gnupg`,
-and `ca-certificates`. Keep compiler and source-fetch tools out of the final
-runtime image if a multi-stage build can copy the resulting plugin and its
-needed runtime libraries cleanly. Check the plugin's dynamic dependencies and
-run `nbdkit vddk --dump-plugin` in the finished image.
+The Dockerfile uses Ubuntu's signed source package and `apt-get build-dep` to
+build nbdkit's VDDK plugin in a separate stage, then copies the plugin into the
+matching runtime nbdkit plugin directory. The compiler and source build
+dependencies do not enter the final image. The OpenVDDK user kit remains a
+separate, checksum-verified on-demand install under the shared artifact root.
 
 OpenVDDK is a separate runtime library loaded by this plugin. It should not be
 compiled into or copied into the image. Once the renamed release is available,
@@ -120,25 +144,26 @@ if those change, the plugin or installer may need an update as well.
 ## Runtime Inputs
 
 - Mount `/work/migrate-v2v` read-write at the same container path. It stores
-  artifacts, catalogs, vaults, and the on-demand OVF Tool and VDDK libraries.
+  artifacts, catalogs, vaults, and on-demand tools. Project scripts, playbooks,
+  templates, and the web controller are included in the image. The fixed
+  libguestfs appliance is bundled as a compressed archive and unpacked under
+  `/tmp/libguestfs-appliance` at startup; set `LIBGUESTFS_PATH` to override it.
 - Mount the vault password file read-only at
   `/run/secrets/migrate-v2v-vault-password` and set `VAULT_PASSWORD_FILE` to
   that path. Do not place the password in the image or environment value.
 - Run with a UID/GID that can write the workspace and read the secret file.
+- For libguestfs hardware acceleration, optionally expose `/dev/kvm` with
+  `web/compose.kvm.yaml` and pass its group ID through `KVM_GID`. Without it,
+  libguestfs falls back to software emulation.
 - Allow network access to vCenter, the selected cloud APIs, and the ESXi hosts
   used by VDDK's NFC data path.
 
-## Decisions Still Open
-
-1. Wait for the renamed OpenVDDK release, then pin its exact archive and
-   checksum and validate its library ABI with nbdkit.
-2. Confirm the exact nbdkit plugin build dependencies.
-3. When the image is eventually built, pin the Ubuntu base digest and APT
-   package versions to make rebuilds repeatable.
-
-The Azure collection's direct SDK requirements are pinned using the current
-controller's versions. A complete hash-locked transitive Python dependency
-closure is optional extra hardening if byte-for-byte rebuilds are required.
+The project requirements and selected Azure SDK packages are version-pinned.
+Pip still resolves transitive packages at build time; a hash-locked Python
+dependency closure would make builds more reproducible.
+OVF Tool stays outside the image because its license requires separate
+acceptance. After accepting it, set `OVFTOOL_ACCEPT_LICENSE=1` in `web/.env` to
+allow a standard web migration to install it on demand.
 
 [govc-install]: https://github.com/vmware/govmomi/blob/main/govc/README.md
 [aws-install]: https://docs.aws.amazon.com/cli/latest/userguide/

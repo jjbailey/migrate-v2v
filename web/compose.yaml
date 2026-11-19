@@ -1,6 +1,10 @@
 services:
   controller:
-    image: ${MIGRATE_V2V_RUNTIME_IMAGE:?Set MIGRATE_V2V_RUNTIME_IMAGE to the prepared migration runtime image}
+    image: ${MIGRATE_V2V_RUNTIME_IMAGE:-migrate-v2v-runtime:ubuntu24.04-20261117}
+    platform: linux/amd64
+    build:
+      context: ..
+      dockerfile: Dockerfile
     init: true
     working_dir: /opt/migrate-v2v
     command: ["python3", "web/app.py", "serve", "--host", "0.0.0.0", "--port", "8080"]
@@ -10,14 +14,15 @@ services:
       - no-new-privileges:true
     environment:
       ARTIFACT_ROOT: /work/migrate-v2v
+      LIBGUESTFS_PATH: ${LIBGUESTFS_PATH:-/tmp/libguestfs-appliance}
       MIGRATE_V2V_VAULT_DIR: /work/migrate-v2v/vaults
       MIGRATE_V2V_CATALOG_DIR: /work/migrate-v2v/catalogs
       VAULT_PASSWORD_FILE: /run/secrets/migrate-v2v-vault-password
       WEB_STATE_DIR: /work/migrate-v2v/web-state
-      WEB_INPUT_DIR: /work/migrate-v2v/web-inputs
+      WEB_INPUT_DIR: ${WEB_INPUT_DIR:-/work/migrate-v2v/web-inputs}
       WEB_SECURE_COOKIE: "true"
+      OVFTOOL_ACCEPT_LICENSE: ${OVFTOOL_ACCEPT_LICENSE:-}
     volumes:
-      - ..:/opt/migrate-v2v:ro
       - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}:/work/migrate-v2v
       - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}/vaults:/work/migrate-v2v/vaults:ro
       - ${VAULT_PASSWORD_FILE_HOST:?Set VAULT_PASSWORD_FILE_HOST}:/run/secrets/migrate-v2v-vault-password:ro

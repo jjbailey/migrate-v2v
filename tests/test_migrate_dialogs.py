@@ -112,6 +112,8 @@ class MigrateDialogTests(unittest.TestCase):
                 self.assertIn(f"'{BIN / wrapper}'", command)
                 self.assertEqual("export COMPRESS='true'" in command,
                                  script == "migrate-openstack-vddk-dialog.sh")
+                self.assertEqual("export GUEST_CONVERT='false'" in command,
+                                 script == "migrate-openstack-vddk-dialog.sh")
                 files[0].unlink()
 
     def test_cancel_on_yesno_stops_before_command_generation(self):

@@ -7,37 +7,42 @@
 # this disk to Glance. Starting the next conversion before this upload is what
 # overlaps the two; see import.yml for why the lookahead is one disk deep.
 
-- name: Start this disk's conversion if nothing has started it yet
-  # Only the first pending disk lands here: every later disk was started by the
-  # lookahead in the previous iteration.
-  ansible.builtin.include_tasks: convert-disk-vddk.yml
-  vars:
-    openstack_convert_disk: "{{ openstack_disk }}"
-  when: (openstack_disk.index | string) not in openstack_convert_jobs
+# With guest conversion the disk was already streamed, converted, and staged by
+# guest-convert-vddk.yml; only the upload below remains.
+- name: Stream and convert this disk, overlapping the previous upload
+  when: not (openstack_guest_convert | bool)
+  block:
+    - name: Start this disk's conversion if nothing has started it yet
+      # Only the first pending disk lands here: every later disk was started by the
+      # lookahead in the previous iteration.
+      ansible.builtin.include_tasks: convert-disk-vddk.yml
+      vars:
+        openstack_convert_disk: "{{ openstack_disk }}"
+      when: (openstack_disk.index | string) not in openstack_convert_jobs
 
-- name: Wait for this disk's conversion to finish
-  ansible.builtin.async_status:
-    jid: "{{ openstack_convert_jobs[openstack_disk.index | string] }}"
-  register: openstack_convert_result
-  until: (openstack_convert_result.finished | default(1)) | bool
-  retries: "{{ openstack_convert_poll_retries | int }}"
-  delay: "{{ openstack_convert_poll_delay | int }}"
-  # async_status itself fails when the job failed, which would skip the next
-  # task and its qemu-img stderr; let that task report it.
-  failed_when: false
+    - name: Wait for this disk's conversion to finish
+      ansible.builtin.async_status:
+        jid: "{{ openstack_convert_jobs[openstack_disk.index | string] }}"
+      register: openstack_convert_result
+      until: (openstack_convert_result.finished | default(1)) | bool
+      retries: "{{ openstack_convert_poll_retries | int }}"
+      delay: "{{ openstack_convert_poll_delay | int }}"
+      # async_status itself fails when the job failed, which would skip the next
+      # task and its qemu-img stderr; let that task report it.
+      failed_when: false
 
-- name: Fail if this disk's conversion failed
-  ansible.builtin.fail:
-    msg: >-
-      conversion failed for disk {{ openstack_disk.index }}:
-      {{ openstack_convert_result.stderr | default('no stderr captured') }}
-  when: openstack_convert_result.rc | default(1) != 0
+    - name: Fail if this disk's conversion failed
+      ansible.builtin.fail:
+        msg: >-
+          conversion failed for disk {{ openstack_disk.index }}:
+          {{ openstack_convert_result.stderr | default('no stderr captured') }}
+      when: openstack_convert_result.rc | default(1) != 0
 
-- name: Start the next disk's conversion while this one uploads
-  ansible.builtin.include_tasks: convert-disk-vddk.yml
-  vars:
-    openstack_convert_disk: "{{ openstack_pending_disks[openstack_pending_position + 1] }}"
-  when: openstack_pending_position + 1 < (openstack_pending_disks | length)
+    - name: Start the next disk's conversion while this one uploads
+      ansible.builtin.include_tasks: convert-disk-vddk.yml
+      vars:
+        openstack_convert_disk: "{{ openstack_pending_disks[openstack_pending_position + 1] }}"
+      when: openstack_pending_position + 1 < (openstack_pending_disks | length)
 
 - name: Process this disk's upload
   block:
@@ -60,7 +65,16 @@
         state: present
         wait: true
         timeout: "{{ (openstack_import_poll_retries | int) * (openstack_import_poll_delay | int) }}"
-        properties: "{{ {'hw_firmware_type': openstack_boot_mode} if (openstack_disk.index | int == 0) else {} }}"
+        # Only the boot disk carries properties. A guest-converted boot disk
+        # also records the virtio hardware the conversion assumed.
+        properties: >-
+          {{ ({'hw_firmware_type': openstack_boot_mode}
+              | combine({'migrate_v2v_guest_converted': 'true',
+                         'hw_disk_bus': 'virtio',
+                         'hw_vif_model': 'virtio',
+                         'os_type': ('windows' if (openstack_guest_is_windows | default(false) | bool) else 'linux')}
+                        if (openstack_guest_convert | bool) else {}))
+             if (openstack_disk.index | int == 0) else {} }}
       register: disk_image_upload
       no_log: true
 

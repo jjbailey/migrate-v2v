@@ -11,6 +11,9 @@
   connection: local
   gather_facts: false
 
+  vars_files:
+    - vars/gcp-common.yml
+
   vars:
     vm_name: "my-vm"
     instance_name: ""
@@ -81,6 +84,9 @@
         - name: Select the GCP project for this run
           ansible.builtin.include_tasks: tasks/migration/gcp/select-project.yml
 
+        - name: Ensure the GCP Cloud CLI is available
+          ansible.builtin.include_tasks: tasks/migration/gcp/ensure-gcloud.yml
+
         - name: Derive a valid GCP instance name
           ansible.builtin.set_fact:
             gcp_instance_name: >-
@@ -146,8 +152,10 @@
 
         - name: Configure gcloud to use only the temporary service-account key
           ansible.builtin.set_fact:
-            gcp_gcloud_env:
-              CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: "{{ gcp_sa_key_file.path }}"
+            gcp_gcloud_env: >-
+              {{ (gcp_gcloud_env | default({})) | combine({
+                'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE': gcp_sa_key_file.path
+              }) }}
           no_log: true
 
         # Fail before anything is created if a pruned or mistyped image would

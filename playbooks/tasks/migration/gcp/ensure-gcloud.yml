@@ -1,0 +1,78 @@
+---
+# playbooks/tasks/migration/gcp/ensure-gcloud.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# The GCP CLI is self-contained. Keep its on-demand copy under the writable
+# artifact mount so this works on both an unprivileged host and in the
+# non-root controller container.
+- name: Set the GCP Cloud CLI install directory
+  ansible.builtin.set_fact:
+    gcp_cloud_cli_install_root: >-
+      {{ (artifact_root | default(lookup('ansible.builtin.env', 'ARTIFACT_ROOT') | default('/work/migrate-v2v', true)))
+         }}/tools/google-cloud-cli-{{ gcp_cloud_cli_version }}
+
+- name: Set the GCP Cloud CLI binary directory
+  ansible.builtin.set_fact:
+    gcp_cloud_cli_bin: "{{ gcp_cloud_cli_install_root }}/google-cloud-sdk/bin"
+
+- name: Add the cached GCP Cloud CLI directory to gcloud's PATH
+  ansible.builtin.set_fact:
+    gcp_gcloud_env: >-
+      {{ (gcp_gcloud_env | default({})) | combine({
+        'PATH': gcp_cloud_cli_bin ~ ':' ~
+          (lookup('ansible.builtin.env', 'PATH') | default('/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', true))
+      }) }}
+
+- name: Check whether gcloud is already available
+  ansible.builtin.command: gcloud --version
+  environment: "{{ gcp_gcloud_env }}"
+  register: gcp_cloud_cli_check
+  changed_when: false
+  failed_when: false
+
+- name: Create the shared tools directory for the GCP Cloud CLI
+  ansible.builtin.file:
+    path: "{{ gcp_cloud_cli_install_root }}"
+    state: directory
+    mode: "0755"
+  when: gcp_cloud_cli_check.rc != 0
+
+- name: Download and extract the pinned GCP Cloud CLI
+  when: gcp_cloud_cli_check.rc != 0
+  block:
+    - name: Create a temporary download directory for the GCP Cloud CLI
+      ansible.builtin.tempfile:
+        state: directory
+        path: "{{ gcp_cloud_cli_install_root }}"
+        prefix: .download-
+      register: gcp_cloud_cli_download_dir
+
+    - name: Download the pinned GCP Cloud CLI archive
+      ansible.builtin.get_url:
+        url: "https://storage.googleapis.com/cloud-sdk-release/google-cloud-cli-{{ gcp_cloud_cli_version }}-linux-x86_64.tar.gz"
+        dest: "{{ gcp_cloud_cli_download_dir.path }}/google-cloud-cli.tar.gz"
+        checksum: "sha256:{{ gcp_cloud_cli_sha256 }}"
+        mode: "0644"
+
+    - name: Extract the pinned GCP Cloud CLI
+      ansible.builtin.unarchive:
+        src: "{{ gcp_cloud_cli_download_dir.path }}/google-cloud-cli.tar.gz"
+        dest: "{{ gcp_cloud_cli_install_root }}"
+        remote_src: true
+        creates: "{{ gcp_cloud_cli_bin }}/gcloud"
+
+  always:
+    - name: Remove the temporary GCP Cloud CLI download directory
+      ansible.builtin.file:
+        path: "{{ gcp_cloud_cli_download_dir.path }}"
+        state: absent
+      when: gcp_cloud_cli_download_dir is defined
+
+- name: Verify the GCP Cloud CLI installation
+  ansible.builtin.command: gcloud --version
+  environment: "{{ gcp_gcloud_env }}"
+  register: gcp_cloud_cli_verify
+  changed_when: false
+  failed_when: gcp_cloud_cli_verify.rc != 0
+  when: gcp_cloud_cli_check.rc != 0
+

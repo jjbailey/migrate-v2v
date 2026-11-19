@@ -113,7 +113,8 @@ the same path so artifacts remain available for resume.
 
 - Network access from the control host to vCenter and the selected cloud APIs.
 - Ansible, the `amazon.aws`, `azure.azcollection`, `community.vmware`, and
-  `openstack.cloud` collections; `govc`, `gcloud`, the AWS CLI (`aws`),
+  `openstack.cloud` collections; `govc`, `gcloud` (installed on demand by the
+  GCP plays if missing), the AWS CLI (`aws`),
   `qemu-img`, and the Python AWS/vSphere libraries. The `gcloud` and `aws`
   CLIs stage the large disk artifacts because both upload in parallel chunks
   and resume a failed part, which the collections' upload modules do not.
@@ -160,11 +161,63 @@ the same path so artifacts remain available for resume.
 
 ### One-time Setup
 
-Install the required host tools, then verify them:
+Ubuntu 24.04 marks its system Python as externally managed. Keep Ansible and
+the `bin/` Python scripts together in a virtual environment; running the
+global `python3 -m pip install` command fails on a fresh Ubuntu installation.
+Install the base host packages and create the environment:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv
+python3 -m venv "$HOME/.dib7"
+export DIB7_VENV_BIN="$HOME/.dib7/bin"
+export PATH="$DIB7_VENV_BIN:$PATH"
+python -m pip install -r requirements.txt
 ansible-galaxy collection install -r requirements.yml
-python3 -m pip install -r requirements.txt      # into python3 on PATH and Ansible's Python
+```
+
+Keep the `PATH` and `DIB7_VENV_BIN` exports in your shell profile, or run them
+in each shell before using the wrappers. Install Azure's collection SDK into
+the same environment only when using Azure:
+
+```bash
+python -m pip install \
+  -r "$HOME/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt" \
+  -c requirements-azure-constraints.txt
+```
+
+Target-specific Ubuntu packages are:
+
+```bash
+sudo apt-get install -y qemu-utils       # OpenStack or Azure
+sudo apt-get install -y nbdkit           # datastore-direct OpenStack or Azure
+sudo apt-get install -y dialog           # interactive dialogs (or install whiptail)
+```
+
+The pinned `govc` used by the project image can be built from its Go module on
+the host. Go's checksum database verifies the downloaded module source:
+
+```bash
+sudo apt-get install -y golang-go
+GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go install github.com/vmware/govmomi/govc@v0.33.0
+sudo install -D -m 0755 "$HOME/go/bin/govc" /usr/local/bin/govc
+```
+
+AWS migrations also need the AWS CLI v2; install it from
+[AWS's official guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+The GCP migration and launch plays install the pinned Google Cloud CLI from a
+SHA256-verified versioned archive when `gcloud` is missing. The install is
+stored under `ARTIFACT_ROOT/tools/` (default `/work/migrate-v2v/tools/`) and
+needs no root access. The container image also includes the same pinned CLI.
+
+The AWS and GCP CLIs are not needed for other destinations. Review Broadcom's
+OVF Tool terms before using the installer for a standard export migration.
+
+Then verify the tools for the workflows you use:
+
+```bash
+ansible-galaxy collection list
 ansible --version
 govc version
 ./bin/install-ovftool.py                        # optional; prompts to accept Broadcom's terms
@@ -173,7 +226,6 @@ qemu-img --version                              # OpenStack migrations
 nbdkit --version                                # datastore-direct OpenStack migrations
 ./bin/install-openvddk.py                       # optional; auto-installed by datastore-direct preflight
 nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
-gcloud --version                                # GCP migrations
 aws --version                                   # AWS migrations
 az --version                                    # optional; Azure inspection only
 command -v dialog || command -v whiptail        # interactive dialogs only
@@ -703,7 +755,10 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 - The images are generalized, so Azure provisions the VM: cloud-init with the
   Azure datasource creates `AZURE_ADMIN_USERNAME` (default `azureuser`) with
   an SSH key, which every launch needs. A guest without it fails with
-  `OSProvisioningTimedOut`.
+  `OSProvisioningTimedOut`. The VM can reach `PowerState/running` while Azure
+  still reports `provisioningState=Creating`; the launch task waits for Azure's
+  provisioning state before it records the deployment. Migration does not
+  install or configure cloud-init in the source guest.
 - Like the AWS and OpenStack key pairs, the key is an Azure SSH public key
   resource, `AZURE_SSH_KEY_NAME` (default `cloud`), in the vault's resource
   group. A missing key stops the launch before anything is created. Register
@@ -783,7 +838,23 @@ file, empty space included, which matters most for large thin disks), needs
 flat disks with no existing snapshots, and cannot read a powered-on VM on VMFS,
 whose disks ESXi locks. On a slow upload
 link, `COMPRESS=true` compresses the QCOW2 images as they are written, which
-cut the upload by more than half in testing.
+cut the upload by more than half in testing. `GUEST_CONVERT=true` runs
+`virt-v2v-in-place` on the disks first (virtio drivers, VMware tools removal),
+which Windows guests need (`VIRTIO_WIN=<virtio-win ISO or directory>`); it
+converts every disk before uploading any. See
+[doc/datastore-direct.md](doc/datastore-direct.md#guest-conversion-virt-v2v-in-place).
+When `GUEST_CONVERT=true`, the OpenStack play installs Ubuntu's `virt-v2v` and
+`libguestfs-tools` packages if needed, then builds a fixed libguestfs appliance
+under `$ARTIFACT_ROOT/libguestfs-appliance`. A Windows conversion also installs
+`rhsrvany` and downloads Fedora's stable virtio-win ISO on demand to
+`$ARTIFACT_ROOT/web-inputs/virtio-win.iso`; set `VIRTIO_WIN` to use an existing
+ISO or unpacked driver directory instead. The host needs sudo for missing
+system packages. The supplied project image includes the migration and launch
+code and required runtime packages; Compose runs it as the host UID without
+package-install privileges. Keep the artifact root writable and shared with
+the container for outputs and downloaded tools. The container unpacks its
+compressed libguestfs appliance under `/tmp` at startup; a host run builds its
+appliance under the artifact root.
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
@@ -1051,6 +1122,12 @@ by default (`gcp_replace_existing_image=true`).
 Imports for a multi-disk VM run concurrently, so total import time is
 bounded by the slowest disk instead of the sum of them.
 
+A clean Ubuntu 24.04.5 controller migrated a one-disk, 40 GiB UEFI Ubuntu
+26.04.1 VM to GCP. The 1.65 GiB stream-optimized VMDK uploaded to the configured
+Cloud Storage bucket at 3.5 MiB/s; M2VM OS adaptation and image creation
+succeeded, and the controller removed the staging object, local export,
+snapshot, and clone after cataloging the image.
+
 #### GCP Launch
 
 `playbooks/launch-gcp-instance.yml` launches a Compute Engine instance from
@@ -1073,6 +1150,11 @@ inherited key; `gcloud compute ssh` and the Console's temporary-key flow
 depend on that agent. A launch retry reuses an instance only when its metadata
 identifies the same VM and migration and its disks come from the selected
 images. Launch accepts `gcp_disk_type` and network and tag options.
+Set `GCP_NO_ADDRESS=true` to create an instance without an external IP. The
+clean-controller test launched `gcp-controller-test-ubuntu26041` as an
+`e2-standard-2` in `us-central1-a` this way; its private IP was `10.128.0.17`,
+and the serial console reached the Ubuntu login prompt. SSH was not tested from
+the controller because the instance has no external IP.
 
 #### GCP SSH Access
 
@@ -1192,7 +1274,9 @@ What each kind asks:
   for the transfer backend (`BACKEND`, default auto), whether to discard a
   failed run (`DISCARD_RUN_ID`), and an optional vCenter CA bundle
   (`VCENTER_CA_BUNDLE`). The OpenStack one also asks whether to compress the
-  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set).
+  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set)
+  and whether to run `virt-v2v-in-place` on the guest (`GUEST_CONVERT`, default
+  no; with an optional `VIRTIO_WIN` path for Windows).
 - **Launch dialogs** pick the target project the same way and offer the
   migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
@@ -1769,7 +1853,7 @@ operations are performed. Run it before submitting changes.
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
 - [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
-  Dependency plan for the migration runtime image used by the web controller
+  Pinned runtime-image recipe for the web controller
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides

@@ -1,0 +1,8 @@
+---
+# playbooks/vars/gcp-common.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Keep the on-demand controller install in sync with the pinned container CLI.
+gcp_cloud_cli_version: "594.0.0"
+gcp_cloud_cli_sha256: "8cf5b2d7987e7aac008264fecda7c083423227ecfb26878707bd20c6219d7dab"
+
