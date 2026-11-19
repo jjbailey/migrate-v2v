@@ -528,6 +528,9 @@ be written with braces (`${PROJECT_HOME}/web`, not `$PROJECT_HOME/web`).
 8443 unless `CADDY_HOSTS` is set. To reach the site from other machines, add
 every address clients will use to the unit, for example
 `Environment="CADDY_HOSTS=localhost:8443, 127.0.0.1:8443, 192.0.2.10:8443"`.
+For clients opening an IP-literal URL, also set
+`CADDY_DEFAULT_SNI=192.0.2.10`; IP-literal URLs omit SNI, and Caddy requires
+the HTTP Host to match this default name.
 Serve the site over HTTPS only: the login cookie is `Secure`, so a plain
 `http://` site cannot sign anyone in. Use a `redir` to the HTTPS address if
 you want port 80 to answer.

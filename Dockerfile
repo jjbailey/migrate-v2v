@@ -6,6 +6,7 @@ ARG UBUNTU_SNAPSHOT=20261117T000000Z
 ARG GOVC_VERSION=0.33.0
 ARG AWS_CLI_VERSION=2.35.21
 ARG GOOGLE_CLOUD_CLI_VERSION=594.0.0
+ARG GOOGLE_CLOUD_CLI_SHA256=1f7233537c26bba94a3ea3f9085a60396745eaf44b21b8454fc6fdd15bb6fcde
 
 # The minimal Ubuntu base has no system CA bundle. Bootstrap trust through
 # Ubuntu's signed default archive (HTTP transport, signed package indexes),
@@ -62,6 +63,7 @@ FROM ca-bootstrap AS runtime
 ARG UBUNTU_SNAPSHOT
 ARG AWS_CLI_VERSION
 ARG GOOGLE_CLOUD_CLI_VERSION
+ARG GOOGLE_CLOUD_CLI_SHA256
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     HOME=/tmp \
@@ -78,8 +80,6 @@ COPY --from=govc-builder /out/ /
 COPY --from=vddk-plugin-builder /out/ /
 COPY requirements.txt requirements.yml requirements-azure-constraints.txt requirements-container-azure.txt /tmp/migrate-v2v/
 
-# Keep the Ubuntu indexes from the pinned snapshot while adding Google's
-# separately signed package source for the exact Cloud CLI version.
 # Archive the sparse raw appliance and discard supermin's duplicate cache.
 RUN set -eux; \
     sed -i 's/^Components: main$/Components: main universe/' /etc/apt/sources.list.d/ubuntu.sources; \
@@ -91,18 +91,13 @@ RUN set -eux; \
       bash coreutils curl dialog findutils gawk gnupg grep groff \
       libguestfs-tools less linux-image-virtual nbdkit openssh-client openssl procps python3 \
       python3-venv qemu-utils rhsrvany sed tar unzip util-linux virt-v2v xz-utils; \
-    mkdir -p /usr/share/keyrings; \
-    curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg \
-      | gpg --dearmor -o /usr/share/keyrings/google-cloud.gpg; \
-    chmod 0644 /usr/share/keyrings/google-cloud.gpg; \
-    printf '%s\n' 'deb [arch=amd64 signed-by=/usr/share/keyrings/google-cloud.gpg] https://packages.cloud.google.com/apt cloud-sdk main' \
-      > /etc/apt/sources.list.d/google-cloud-sdk.list; \
-    apt-get update \
-      -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/google-cloud-sdk.list \
-      -o Dir::Etc::sourceparts=- \
-      -o APT::Get::List-Cleanup=0; \
-    CLOUDSDK_SKIP_PY_COMPILATION=1 apt-get -S "${UBUNTU_SNAPSHOT}" install -y --no-install-recommends \
-      "google-cloud-cli=${GOOGLE_CLOUD_CLI_VERSION}-0"; \
+    curl -fsSLo /tmp/google-cloud-cli.tar.gz \
+      "https://storage.googleapis.com/cloud-sdk-release/google-cloud-cli-${GOOGLE_CLOUD_CLI_VERSION}-linux-x86_64.tar.gz"; \
+    echo "${GOOGLE_CLOUD_CLI_SHA256}  /tmp/google-cloud-cli.tar.gz" | sha256sum --check --status; \
+    mkdir -p /opt/google-cloud-cli; \
+    tar --extract --gzip --file /tmp/google-cloud-cli.tar.gz --directory /opt/google-cloud-cli; \
+    ln -s /opt/google-cloud-cli/google-cloud-sdk/bin/gcloud /usr/local/bin/gcloud; \
+    rm /tmp/google-cloud-cli.tar.gz; \
     mkdir -m 0700 /tmp/aws-gnupg; \
     aws_key_fingerprint="$(gpg --homedir /tmp/aws-gnupg --show-keys --with-colons --fingerprint /tmp/aws-cli-signing-key.asc | awk -F: '$1 == "fpr" { print $10; exit }')"; \
     test "${aws_key_fingerprint}" = FB5DB77FD5C118B80511ADA8A6310ACC4672475C; \
@@ -148,6 +143,10 @@ RUN set -eux; \
     fi; \
     test -s /opt/libguestfs-appliance.tar.xz; \
     rm -rf /tmp/migrate-v2v /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /var/cache/apt/archives/partial/*
+
+# gcloud and Ansible run during the root build with HOME=/tmp. Let the
+# non-root runtime user create its own configuration and local temporary dirs.
+RUN rm -rf /tmp/.config /tmp/.ansible
 
 # Package the public project source and operational files into the runtime.
 # The root .dockerignore keeps credentials, local-only scripts, runtime data,

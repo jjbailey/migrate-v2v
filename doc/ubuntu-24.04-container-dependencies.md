@@ -105,9 +105,9 @@ pins together; the repository documents the `community.vmware` and
 ## Versioned External Tools
 
 The image pins `govc 0.33.0`, AWS CLI v2 `2.35.21`, and Google Cloud CLI
-`594.0.0` (Ubuntu package `594.0.0-0`). These versions match the repository's
-tested CLI contract except Google Cloud CLI, which is updated to the version
-available in the archive when this recipe was added.
+`594.0.0`. These versions match the repository's tested CLI contract except
+Google Cloud CLI, which is updated to the version available in the archive
+when this recipe was added.
 
 - **OVF Tool:** Keep it out of the image. The existing installer downloads the
   validated 5.1.0 package under `/work/migrate-v2v/tools/ovftool-5.1.0` after
@@ -123,10 +123,10 @@ available in the archive when this recipe was added.
 - **AWS CLI v2:** Install version `2.35.21` from the versioned Linux archive;
   verify its PGP signature against the AWS CLI Team key pinned by fingerprint
   in the Dockerfile. See the [AWS CLI v2 installation guide][aws-install].
-- **Google Cloud CLI:** The image installs exact package `594.0.0-0` from
-  Google's signed APT repository. The GCP plays share version `594.0.0` and
-  can install its SHA256-verified, versioned archive under the writable
-  artifact mount. See [Google's versioned archive guidance][gcloud-install].
+- **Google Cloud CLI:** The image and GCP plays use version `594.0.0` from
+  Google's versioned archive, checked against its pinned SHA256. The play
+  stores its copy under the writable artifact mount. See [Google's versioned
+  archive guidance][gcloud-install].
 
 ## Datastore-Direct VDDK Plugin
 

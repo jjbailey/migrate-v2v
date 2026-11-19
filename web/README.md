@@ -36,7 +36,8 @@ dropping it. The dialog script is authoritative if wording or behavior differs.
 The pinned x86_64 project image is built from the repository-root
 [Dockerfile](../Dockerfile) by Compose. It includes the project scripts,
 playbooks, templates, web controller, and documentation, plus the runtime
-dependencies. It pins the Ubuntu base image digest and APT snapshot, installs
+dependencies, including Google Cloud CLI 594.0.0 for GCP migrations. It pins
+the Ubuntu base image digest and APT snapshot, installs
 the Python requirements and Ansible collections, builds the nbdkit VDDK plugin,
 and stores the fixed libguestfs appliance in a sparse-aware compressed archive.
 The controller unpacks it under `/tmp` at startup. The VDDK user kit and
@@ -46,11 +47,11 @@ demand after the operator accepts its license. See the
 [runtime-image recipe](../doc/ubuntu-24.04-container-dependencies.md) for the
 versions and build inputs.
 
-To build or refresh the local image, run `docker compose --env-file web/.env
--f web/compose.yaml build controller`. `MIGRATE_V2V_RUNTIME_IMAGE` can name a
-different tag for the image produced by this build. Run the service with a
-UID/GID that can read the vault password file and write the artifact root. The
-image carries the code, so it can run without mounting a source checkout.
+To build or refresh the local image, run `sudo docker compose --env-file
+web/.env -f web/compose.yaml build controller`. `MIGRATE_V2V_RUNTIME_IMAGE` can
+name a different tag for the image produced by this build. Run the service
+with a UID/GID that can read the vault password file and write the artifact
+root. The image carries the code, so it can run without mounting a source checkout.
 Artifacts, catalogs, vaults, tools, and web state live under
 `/work/migrate-v2v` and remain outside the image.
 
@@ -72,13 +73,38 @@ files. Do not put secrets in the input directory.
 
 ## Setup
 
-1. Copy `web/.env.example` to `web/.env`, set the host UID/GID, artifact root,
-   and absolute vault password file path. Keep `.env` private.
+Install Docker Engine, Docker CLI, Buildx, and the Compose plugin if they are
+missing. On Ubuntu, use [Docker's official Engine installation guide](https://docs.docker.com/engine/install/ubuntu/).
+The examples below use `sudo docker`; access to the Docker socket is
+root-equivalent, including membership in the `docker` group.
+
+The first image build needs several gigabytes for build layers, caches, and the
+runtime image. On a clean host with a small root filesystem and a larger
+`/work`, configure both Docker and containerd storage roots before building:
+
+```sh
+sudo systemctl stop docker.socket docker.service containerd.service
+sudo install -d -m 0755 /etc/docker /etc/containerd /work/docker /work/containerd
+printf '%s\n' '{"data-root":"/work/docker"}' | sudo tee /etc/docker/daemon.json
+sudo containerd config default \
+  | sed "s#root = '/var/lib/containerd'#root = '/work/containerd'#" \
+  | sudo tee /etc/containerd/config.toml >/dev/null
+sudo systemctl start containerd docker
+```
+
+This is for a new Docker installation before it has image or container data.
+If Docker has already been used, copy its existing containerd data before
+changing the configured root.
+
+1. Copy `web/.env.example` to `web/.env`. Set `HOST_UID` and `HOST_GID` to the
+   numeric results of `id -u` and `id -g`, set the artifact root, and set the
+   absolute host path to the vault password file. Keep `.env` private (`chmod
+600 web/.env`).
 
 2. Build the runtime image:
 
    ```sh
-   docker compose --env-file web/.env -f web/compose.yaml build controller
+   sudo docker compose --env-file web/.env -f web/compose.yaml build controller
    ```
 
    For standard OVF/OVA exports, first review and accept Broadcom's OVF Tool
@@ -88,20 +114,20 @@ files. Do not put secrets in the input directory.
 3. Create a local account:
 
    ```sh
-   docker compose --env-file web/.env -f web/compose.yaml run --rm controller python3 web/app.py user add operator
+   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm controller python3 web/app.py user add operator
    ```
 
 4. Start the site:
 
    ```sh
-   docker compose --env-file web/.env -f web/compose.yaml up -d
+   sudo docker compose --env-file web/.env -f web/compose.yaml up -d
    ```
 
 Migration and launch wrappers can also run directly in the same image, for
 example:
 
 ```sh
-docker compose --env-file web/.env -f web/compose.yaml run --rm controller \
+sudo docker compose --env-file web/.env -f web/compose.yaml run --rm controller \
   ./bin/launch-openstack-instance.sh ...
 ```
 
@@ -124,12 +150,14 @@ controller's own LAN IP, set `WEB_ADDRESS` in `web/.env` to that IP and
 start with both files:
 
 ```sh
-docker compose --env-file web/.env -f web/compose.yaml -f web/compose.lan.yaml up -d
+sudo docker compose --env-file web/.env -f web/compose.yaml -f web/compose.lan.yaml up -d
 ```
 
 Then open `https://CONTROLLER_IP:8443`. The configured IP must belong to
-this controller. The controller HTTP process has no published port; Caddy is
-the sole entry point. The site's local accounts use salted scrypt password
+this controller. Caddy uses it as the default TLS server name for clients
+connecting by IP, which do not send SNI; the HTTP Host must still match. The
+controller HTTP process has no published port; Caddy is the sole entry point.
+The site's local accounts use salted scrypt password
 hashes, signed HttpOnly sessions, and CSRF tokens. Run `python3 web/app.py
 user add NAME` in the controller service again to add or reset an account;
 `user delete NAME` removes one.
@@ -175,7 +203,9 @@ the systemd units in [examples/README.md](../examples/README.md#caddy-on-the-ans
 The script binds Caddy on all IPv4 and IPv6 interfaces and includes every
 IP assigned to the host when it starts. Open `https://localhost:8443` or
 `https://<controller-ip>:8443`. If the host's addresses change, restart the
-script so Caddy can issue certificates for the new addresses. Caddy must be
+script so Caddy can issue certificates for the new addresses. The script uses
+the first host address as Caddy's default TLS name for clients connecting by
+IP; Caddy checks that the HTTP Host matches. Caddy must be
 installed separately; it is not bundled in the repository. Its local CA may
 need to be trusted by each client browser. For temporary local development
 without Caddy, set `WEB_SECURE_COOKIE=false`, start `python3 web/app.py

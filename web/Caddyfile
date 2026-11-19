@@ -1,5 +1,8 @@
 {
 	auto_https disable_redirects
+	# IP-literal URLs do not send SNI. Use the configured address as the
+	# certificate name for those clients; Caddy still checks the HTTP Host.
+	default_sni {$CADDY_DEFAULT_SNI:localhost}
 	# Use hard request/response deadlines for compatibility with the Caddy 2.6
 	# binary used by local/run-caddy.sh; idle timeout options are newer.
 	servers {
