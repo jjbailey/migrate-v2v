@@ -10,6 +10,8 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
@@ -108,7 +110,7 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
         if entry.get("gcp_project") != project_id:
             continue
         image_names = [entry.get("gcp_boot_image_name"),
-                       *entry.get("gcp_data_image_names", [])]
+                       *(entry.get("gcp_data_image_names") or [])]
         if not image_names or any(not isinstance(name, str) or not name.strip() for name in image_names):
             raise ValueError(
                 f"GCP migration {entry.get('clone_name', '<unknown>')} has invalid GCP image names")

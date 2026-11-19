@@ -31,7 +31,11 @@ if '--inputbox' in args:
         value = os.environ.get('TEST_TARGET', 'target one')
     print(value, file=sys.stderr, end='')
 elif '--radiolist' in args:
-    print(os.environ.get('TEST_CERTS', 'true'), file=sys.stderr, end='')
+    prompt = args[args.index('--radiolist') + 1]
+    if 'VDDK transport backend' in prompt:
+        print('auto', file=sys.stderr, end='')
+    else:
+        print(os.environ.get('TEST_CERTS', 'true'), file=sys.stderr, end='')
 elif '--yesno' in args:
     prompt = args[args.index('--yesno') + 1]
     if os.environ.get('TEST_CANCEL') and 'Quiesce' in prompt:
@@ -114,6 +118,9 @@ class MigrateDialogTests(unittest.TestCase):
                                  script == "migrate-openstack-vddk-dialog.sh")
                 self.assertEqual("export GUEST_CONVERT='false'" in command,
                                  script == "migrate-openstack-vddk-dialog.sh")
+                if script.endswith("-vddk-dialog.sh"):
+                    self.assertIn("export BACKEND='auto'", command)
+                    self.assertIn("export DISCARD_RUN_ID=''", command)
                 files[0].unlink()
 
     def test_cancel_on_yesno_stops_before_command_generation(self):

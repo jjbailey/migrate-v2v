@@ -68,7 +68,7 @@
         # Only the boot disk carries properties. A guest-converted boot disk
         # also records the virtio hardware the conversion assumed.
         properties: >-
-          {{ ({'hw_firmware_type': openstack_boot_mode}
+          {{ ({'hw_firmware_type': (openstack_boot_mode | default('') | length > 0) | ternary(openstack_boot_mode, 'uefi' if (artifact_manifest.source_firmware | default('bios')) == 'efi' else 'bios')}
               | combine({'migrate_v2v_guest_converted': 'true',
                          'hw_disk_bus': 'virtio',
                          'hw_vif_model': 'virtio',

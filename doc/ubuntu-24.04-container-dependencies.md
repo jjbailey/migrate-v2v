@@ -113,11 +113,11 @@ when this recipe was added.
   validated 5.1.0 package under `/work/migrate-v2v/tools/ovftool-5.1.0` after
   license acceptance. Preserve the external download and persistent install
   model.
-- **OpenVDDK successor:** Keep its user kit out of the image and install it
-  under the shared `/work/migrate-v2v/tools/` mount. The author has not
-  published the renamed release yet, so its release name, archive, checksum,
-  library SONAME, and any changed configuration interface remain open. Do not
-  pin the current beta as the future container contract.
+- **OpenVDDK:** Keep its user kit out of the image and install it under the
+  shared `/work/migrate-v2v/tools/` mount with `bin/install-openvddk.py`, which
+  pins release 0.7.4 and verifies its SHA-256. A future renamed or newer
+  release would need its archive, checksum, library SONAME, and any changed
+  configuration interface re-checked before the pin moves.
 - **`govc`:** Build `govc` from the pinned `v0.33.0` Go module. The Go module
   checksum database verifies downloaded source.
 - **AWS CLI v2:** Install version `2.35.21` from the versioned Linux archive;
@@ -137,7 +137,7 @@ dependencies do not enter the final image. The OpenVDDK user kit remains a
 separate, checksum-verified on-demand install under the shared artifact root.
 
 OpenVDDK is a separate runtime library loaded by this plugin. It should not be
-compiled into or copied into the image. Once the renamed release is available,
+compiled into or copied into the image. If the pinned kit changes,
 check that its library still exports the VixDiskLib ABI and expected SONAME;
 if those change, the plugin or installer may need an update as well.
 

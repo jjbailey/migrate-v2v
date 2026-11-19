@@ -59,7 +59,7 @@
         state: present
         wait: true
         timeout: "{{ (openstack_import_poll_retries | int) * (openstack_import_poll_delay | int) }}"
-        properties: "{{ {'hw_firmware_type': openstack_boot_mode} if (openstack_disk.index | int == 0) else {} }}"
+        properties: "{{ {'hw_firmware_type': (openstack_boot_mode | default('') | length > 0) | ternary(openstack_boot_mode, 'uefi' if (artifact_manifest.source_firmware | default('bios')) == 'efi' else 'bios')} if (openstack_disk.index | int == 0) else {} }}"
       register: disk_image_upload
       no_log: true
 

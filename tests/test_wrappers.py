@@ -34,6 +34,11 @@ class WrapperTestCase(unittest.TestCase):
         stub = stub_bin / "ansible-playbook"
         stub.write_text(STUB)
         stub.chmod(0o755)
+        # The standard migrate wrappers need ovftool on PATH or they try to
+        # download it (ansible-run.sh), which a unit test must never do.
+        ovftool = stub_bin / "ovftool"
+        ovftool.write_text("#!/bin/sh\nexit 0\n")
+        ovftool.chmod(0o755)
         self.argv_file = self.tmp / "argv.json"
         # An empty HOME has no ~/.dib-vault-pass, so ansible-run.sh
         # appends --ask-vault-pass, which the stub ignores.

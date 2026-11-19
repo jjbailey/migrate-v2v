@@ -118,7 +118,7 @@ def inspect_vm(info):
     controllers = {
         device["key"]: device["busNumber"]
         for device in devices
-        if "key" in device and device.get("busNumber") is not None
+        if isinstance(device, dict) and "key" in device and device.get("busNumber") is not None
     }
 
     disks = []

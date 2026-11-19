@@ -38,6 +38,8 @@ from vault_common import default_vault_path, read_vault  # noqa: E402
 AWS_ENVIRONMENT = ("AWS_PROFILE", "AWS_ACCESS_KEY_ID", "AWS_WEB_IDENTITY_TOKEN_FILE")
 
 def select_vault_entry(vault, requested):
+    if not Path(vault).exists():
+        raise SystemExit(f"no vault at {vault}; use --vault or export credentials")
     data = read_vault(vault)
     projects = {str(key): value for key, value in (
         data.get("aws_projects") or {}).items()}
@@ -267,7 +269,8 @@ def main():
     if args.list_subnets:
         try:
             subnets = gather_subnets(client)
-        except botocore.exceptions.ClientError as error:
+        except (botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError) as error:
             raise SystemExit(f"could not list subnets: {error}")
         if args.as_json:
             json.dump({"project": key, "region": region,
@@ -282,7 +285,8 @@ def main():
     if args.list_keypairs:
         try:
             pairs = gather_keypairs(client)
-        except botocore.exceptions.ClientError as error:
+        except (botocore.exceptions.ClientError,
+                botocore.exceptions.BotoCoreError) as error:
             raise SystemExit(f"could not list keypairs: {error}")
         if args.as_json:
             json.dump({"project": key, "region": region,
@@ -306,7 +310,8 @@ def main():
 
     try:
         groups = gather_security_groups(client, vpc_id or None)
-    except botocore.exceptions.ClientError as error:
+    except (botocore.exceptions.ClientError,
+            botocore.exceptions.BotoCoreError) as error:
         raise SystemExit(f"could not list security groups: {error}")
 
     if args.as_json:

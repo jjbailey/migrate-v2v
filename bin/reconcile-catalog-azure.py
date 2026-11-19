@@ -11,12 +11,15 @@ import argparse
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 from azure.core.exceptions import AzureError, ResourceNotFoundError
 from azure.identity import ClientSecretCredential, DefaultAzureCredential
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.core.tools import parse_resource_id
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from catalog_common import (default_catalog_path, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
@@ -115,7 +118,8 @@ def same_subscription(entry, subscription):
 
 def resource_ids(entry):
     """The boot image, then the data snapshots (or, on older rows, images)."""
-    data = entry.get("azure_data_snapshot_ids", entry.get("azure_data_image_ids", []))
+    data = (entry.get("azure_data_snapshot_ids")
+            or entry.get("azure_data_image_ids") or [])
     return [entry.get("azure_boot_image_id"), *data]
 
 def find_missing_resources(client, subscription, migration_catalog):

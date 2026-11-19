@@ -103,5 +103,8 @@ def main(tool, platform, project, parser_options=None, entry_filter=None,
     try:
         run(tool, platform, project, parser_options, entry_filter,
             fallback_filter)
-    except (OSError, ValueError, json.JSONDecodeError, KeyError) as error:
+    except KeyError as error:
+        raise SystemExit(
+            f"{tool}: a matching catalog row is missing the field {error}")
+    except (OSError, ValueError, json.JSONDecodeError) as error:
         raise SystemExit(f"{tool}: {error}")

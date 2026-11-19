@@ -23,8 +23,9 @@ venv/
 /output/
 /tools/
 /secrets/
-.env
-.env.*
+**/.env
+**/.env.*
+!web/.env.example
 
 # Local migration outputs and tool archives must not become image layers.
 VMware-ovftool-*.zip

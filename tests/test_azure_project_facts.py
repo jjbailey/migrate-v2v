@@ -58,8 +58,13 @@ class FingerprintTests(unittest.TestCase):
 class VaultSelectionTests(unittest.TestCase):
     def select(self, projects, requested):
         with mock.patch.object(facts, "read_vault",
-                               return_value={"azure_projects": projects}):
+                               return_value={"azure_projects": projects}), \
+                mock.patch.object(facts.Path, "exists", return_value=True):
             return facts.select_vault_entry("vault.yml", requested)
+
+    def test_missing_vault_is_reported_as_missing(self):
+        with self.assertRaisesRegex(SystemExit, "no vault at"):
+            facts.select_vault_entry("/nonexistent/azure.yml", None)
 
     def test_matches_key_or_subscription_id(self):
         projects = {"a": ENTRY, "b": {**ENTRY, "subscription_id": "sub-b"}}

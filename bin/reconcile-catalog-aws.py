@@ -7,7 +7,10 @@
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)

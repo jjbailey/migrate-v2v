@@ -673,7 +673,8 @@ AWS uses `assign_public_ip` on the EC2 network interface (enabled by default
 in the playbook). `bin/launch-aws-instance.sh` passes `AWS_KEY_NAME` as the EC2
 key pair and defaults it to `cloud`, which must exist in the region. Set it to
 the key pair you use, or set `AWS_KEY_NAME=` to omit one. The playbook's
-`key_name` has no default. Launch also accepts `extra_tags`.
+`key_name` has no default. The wrapper also reads `AWS_TARGET_PROJECT` (vault
+project or account) and `AWS_INSTANCE_TYPE`. Launch also accepts `extra_tags`.
 
 ### Azure
 
@@ -1150,6 +1151,8 @@ inherited key; `gcloud compute ssh` and the Console's temporary-key flow
 depend on that agent. A launch retry reuses an instance only when its metadata
 identifies the same VM and migration and its disks come from the selected
 images. Launch accepts `gcp_disk_type` and network and tag options.
+The wrapper reads `GCP_TARGET_PROJECT`, `GCP_SUBNETWORK` and `GCP_TAGS_JSON` (a
+JSON array of network tags).
 Set `GCP_NO_ADDRESS=true` to create an instance without an external IP. The
 clean-controller test launched `gcp-controller-test-ubuntu26041` as an
 `e2-standard-2` in `us-central1-a` this way; its private IP was `10.128.0.17`,
@@ -1234,8 +1237,8 @@ the same as the playbooks, and accept `ARTIFACT_ROOT` to override it (see
 playbook runner, vault handling, and verbosity applied consistently.
 
 The interactive `bin/*-dialog.sh` front ends build these wrapper commands for
-you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command examples (OpenStack networking matrix, AWS, GCP,
-migrate, and reconcile) are collected in
+you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command examples (OpenStack networking matrix and migrate,
+OpenStack reconcile, AWS, GCP, and Caddy; there are no Azure examples) are collected in
 [examples/README.md](examples/README.md).
 
 ### Interactive Dialogs
@@ -1384,7 +1387,8 @@ Every launch names the instance after the source VM by default; set
 it. Catalog lookup still uses the source `VM_NAME`. Successful migrations
 delete their staging object.
 
-OpenStack supports `openstack_boot_mode`, `openstack_nics`,
+OpenStack supports `openstack_boot_mode` (`uefi` or `bios`; defaults to the
+source VM's firmware), `openstack_nics`,
 `openstack_preserve_mac`, `openstack_mac_addresses`, `openstack_fixed_ips`,
 and `openstack_auto_ip`; pass `openstack_volume_type` and
 `openstack_availability_zone` with `-e`. When supplying multiple image IDs
@@ -1423,7 +1427,8 @@ default user (`debian`, `ubuntu`, `fedora`, `rocky`, `almalinux`, `centos` for
 CentOS 7, `cloud-user` for RHEL, `ec2-user` for Amazon Linux). An unknown
 guest, or a migration recorded before this field existed, gets `root@`, which
 migrated images also give the key to; `-e launch_ssh_user=<user>` picks the
-user outright. The
+user outright, and `-e launch_ssh_private_key=<path>` sets the key in the printed
+command (default `~/.ssh/cloud`; empty omits `-i`). The
 datastore manifest adds `source_vm_name`, `boot_order_source` (`bootOptions`
 when the VM's configured boot order named a disk, otherwise `controller`), and
 `transfer_backend` (which backend read the disks, so a resume reuses it).
@@ -1788,16 +1793,19 @@ migrate-v2v/
 │   ├── list-image-catalog.py    # Browse migrated images across all target platforms
 │   ├── lookup-migration-*.py    # Migration catalog lookups
 │   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
-│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for Azure migration
+│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for datastore-direct Azure migration
 │   ├── migrate-azure-vm-vddk.sh # Datastore-direct Azure migration wrapper
 │   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
-│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for OpenStack migration
+│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for datastore-direct OpenStack migration
 │   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
 │   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
+│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py  # Shared helpers
+│   ├── exec-with-stdin-env.sh   # Passes secrets to a child process on stdin
 │   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
-│   └── *-vault.sh               # Vault management scripts
+│   └── edit-vault.sh            # Vault editor
+├── Dockerfile, container-entrypoint.sh, .dockerignore  # Controller container image
 ├── doc/                         # Documentation, workflow diagram, presentation
 ├── examples/                    # Launch matrix, cloud-init data, Caddy and systemd units
 ├── playbooks/                   # Ansible playbooks
@@ -1809,6 +1817,8 @@ migrate-v2v/
 │   ├── tasks/migration/         # Per-target task pipelines (aws, azure, gcp, openstack, common)
 │   ├── templates/               # Files installed on guests
 │   └── vars/                    # Shared variables
+├── local/                       # Site-specific wrappers and helpers (not part of the public tree)
+├── requirements*.txt            # Pinned Python packages (container Azure constraints included)
 ├── requirements.yml             # Pinned Ansible collections
 ├── tests/                       # Static validation gate and catalog tests
 └── web/                         # Controller web UI (see web/README.md)
@@ -1817,10 +1827,13 @@ migrate-v2v/
     ├── forms.py                 # Form fields derived from the bin/*-dialog.sh exports
     ├── dialog-checksums.json    # Dialog hashes; a changed dialog needs form review
     ├── Caddyfile                # HTTPS reverse proxy config
-    ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address)
+    ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address, compose.kvm.yaml /dev/kvm)
+    ├── .env.example             # Compose settings template
     ├── icons/, static/          # Cloud icons and the stylesheet
     └── tests/                   # Web unit tests
 ```
+
+The tree shows the main files, not every one.
 
 The migration playbooks are thin target entry points. Shared vSphere
 preflight, snapshot, clone, export, manifest inspection, catalog append, and
@@ -1839,9 +1852,11 @@ tests/validate.sh
 It checks playbook and shell syntax, shellcheck warnings in `bin/` and in the
 shell templates under `playbooks/templates/`, file references in the Markdown
 docs, vault headers, Python compilation, YAML, catalog structure, and the pinned
-Ansible collection versions. It is a static/structure gate rather than a cloud
-integration test. Focused unit tests exercise catalog helper behavior and the
-datastore-direct disk manifest (`bin/inspect-vm.py`), but no vSphere or cloud
+Ansible collection versions, the installed Python requirements, and the vault
+schema. It also runs every unit test in `tests/test_*.py` and `web/tests`
+(wrappers, dialogs, catalog tools, per-cloud facts and launch guards, vault
+credentials, datastore-direct streams, and the web controller). It is a
+static/structure gate rather than a cloud integration test: no vSphere or cloud
 operations are performed. Run it before submitting changes.
 
 ### Documentation

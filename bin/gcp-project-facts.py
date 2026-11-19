@@ -32,6 +32,8 @@ COMPUTE_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
 COMPUTE_API = "https://compute.googleapis.com/compute/v1/projects"
 
 def select_vault_entry(vault, requested):
+    if not Path(vault).exists():
+        raise SystemExit(f"no vault at {vault}; use --vault or export credentials")
     data = read_vault(vault)
     projects = {str(key): value for key, value in (
         data.get("gcp_projects") or {}).items()}

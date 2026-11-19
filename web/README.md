@@ -97,7 +97,7 @@ If Docker has already been used, copy its existing containerd data before
 changing the configured root.
 
 1. Copy `web/.env.example` to `web/.env`. Set `HOST_UID` and `HOST_GID` to the
-   numeric results of `id -u` and `id -g`, set the artifact root, and set the
+   numeric results of `id -u` and `id -g`, set `ARTIFACT_ROOT_HOST`, and set `VAULT_PASSWORD_FILE_HOST` to the
    absolute host path to the vault password file. Keep `.env` private (`chmod
 600 web/.env`).
 
@@ -160,7 +160,7 @@ controller HTTP process has no published port; Caddy is the sole entry point.
 The site's local accounts use salted scrypt password
 hashes, signed HttpOnly sessions, and CSRF tokens. Run `python3 web/app.py
 user add NAME` in the controller service again to add or reset an account;
-`user delete NAME` removes one.
+`user delete NAME` removes one, and `user list` shows the accounts.
 
 Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
 `WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not

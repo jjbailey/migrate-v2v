@@ -281,16 +281,18 @@ echo "== unit tests =="
 # still lets the run succeed, but say so: "ok" alone would read as though
 # every test ran.
 if python3 - << 'PYTHON' ; then
+import os
 import sys
 import unittest
 
 loader = unittest.defaultTestLoader
-suite = unittest.TestSuite([
-    loader.discover("tests", pattern="test_*.py"),
-    # web/tests is not a package; its modules import web from the
-    # repository root, which is on sys.path for this script.
-    loader.discover("web/tests", pattern="test_*.py", top_level_dir="web/tests"),
-])
+suite = unittest.TestSuite([loader.discover("tests", pattern="test_*.py")])
+# web/tests is not a package; its modules import web from the repository
+# root, which is on sys.path for this script. A public checkout may not ship
+# web/, as the file checks above also allow.
+if os.path.isdir("web/tests"):
+    suite.addTests(loader.discover("web/tests", pattern="test_*.py",
+                                   top_level_dir="web/tests"))
 result = unittest.TextTestRunner().run(suite)
 if result.skipped:
     reasons = sorted({reason for _, reason in result.skipped})

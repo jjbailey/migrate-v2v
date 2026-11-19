@@ -75,7 +75,7 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 - **Migratekit:** Requires VMware VDDK 8.0.2, downloaded separately from
   Broadcom and accepted under its EULA. ([README: installing VDDK][mk-vddk])
 - **migrate-v2v:** The standard export path requires OVF Tool 5.1.0, which is
-  not redistributed. Datastore-direct supports OpenVDDK 8.0.3, an independent
+  not redistributed. Datastore-direct supports OpenVDDK 0.7.4 (library 8.0.3), an independent
   read-only replacement. `bin/install-openvddk.py` installs the pinned kit on
   demand; it is not bundled in the repository or container image. A properly
   licensed VMware VDDK can also be used.

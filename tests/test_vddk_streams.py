@@ -268,6 +268,11 @@ print("converted", sys.argv[1:])
         fake = bin_dir / "virt-v2v-in-place"
         fake.write_text(self.FAKE_V2V)
         fake.chmod(0o755)
+        # Windows guests check for the rhsrvany package; report it installed so
+        # the test never tries to apt-install anything.
+        dpkg_query = bin_dir / "dpkg-query"
+        dpkg_query.write_text("#!/bin/sh\nprintf 'install ok installed'\n")
+        dpkg_query.chmod(0o755)
         if fail:
             (bin_dir / "v2v-fail").write_text("")
         pending = []
@@ -281,7 +286,10 @@ print("converted", sys.argv[1:])
             "openstack_pending_disks": pending,
             "artifact_manifest": {"source_guest_id": guest_id, "disks": pending},
             "openstack_guest_convert": True,
+            # Registered by guest-convert-setup-vddk.yml in preflight.
+            "guest_convert_uid": {"stdout": "0"},
             "openstack_guest_convert_args": ["--firstboot", "/tmp/first boot.sh"],
+            "openstack_virtio_win_default_path": str(self.tmp / "default-virtio-win.iso"),
             "openstack_virtio_win": virtio_win or str(self.tmp / "no-virtio-win.iso"),
             "openstack_convert_args": [],
             "openstack_convert_compress": False,

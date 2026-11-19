@@ -264,8 +264,8 @@ not been exercised against Azure.
 A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
 26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
 files were removed after import. A `Standard_B2s_v2` VM launched without a
-public IP, and its serial console reached the guest login prompt. Azure still
-reported `provisioningState=Creating` after 13 minutes, however, so the launch
+public IP, and its serial console reached the guest login prompt. At the time of that test,
+Azure still reported `provisioningState=Creating` after 13 minutes, so the launch
 play was still waiting and no deployment catalog entry had been written. This
 confirms image import and guest boot, but not completed Azure provisioning;
 check the Azure guest setup requirement in the README before treating launch
@@ -393,7 +393,7 @@ implemented: they would also need the snapshot's change ID saved in the catalog.
 | `playbooks/tasks/migration/common/check-curl-disks-vddk.yml`                                              | the `curl` backend's disk checks, run before the snapshot and again on a `curl` resume  |
 | `playbooks/tasks/migration/common/{select-backend,stop-streams}-vddk.yml`                                 | nbdkit and backend choice; stopping streams after a failure                             |
 | `playbooks/tasks/migration/openstack/{initialize,preflight,import,import-disk,convert-disk}-vddk.yml`     | OpenStack per-disk stream, convert, and upload                                          |
-| `playbooks/tasks/migration/openstack/guest-convert{,-disk,-check,-setup}-vddk.yml`                        | optional virt-v2v-in-place setup, pre-snapshot checks, disk conversion, and compression |
+| `playbooks/tasks/migration/openstack/guest-convert*-vddk.yml`                                             | optional virt-v2v-in-place setup, pre-snapshot checks, disk conversion, and compression |
 | `playbooks/migrate-azure-vm-vddk.yml`, `bin/migrate-azure-vm-vddk.sh`, `bin/migrate-azure-vddk-dialog.sh` | Azure entry playbook, wrapper, and guided front end                                     |
 | `playbooks/tasks/migration/azure/{preflight,convert-disk,discard}-vddk.yml`                               | Azure preflight, per-disk stream to fixed VHD, and discard lookup                       |
 

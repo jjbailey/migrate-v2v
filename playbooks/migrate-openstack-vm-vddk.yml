@@ -22,7 +22,9 @@
     migration_target: openstack
     export_format: datastore
     qemu_img_bin: qemu-img
-    openstack_boot_mode: uefi
+    # Empty follows the source VM's firmware (efi -> uefi, else bios);
+    # set uefi or bios to override.
+    openstack_boot_mode: ""
     resume_run_id: ""
     # Discard a failed run instead of resuming it: removes its retained
     # snapshot, its run directory, and any images it uploaded. Nothing else runs.

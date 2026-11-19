@@ -417,7 +417,9 @@ def worker():
                     env = {key: os.environ[key] for key in (
                         "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "DIB7_VENV_BIN",
                         "ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_LOCAL_TEMP", "WEB_INPUT_DIR",
-                        "LIBGUESTFS_PATH", "OVFTOOL_ACCEPT_LICENSE") if key in os.environ}
+                        "LIBGUESTFS_PATH", "OVFTOOL_ACCEPT_LICENSE", "OVFTOOL_INSTALL_DIR",
+                        "OPENVDDK_INSTALL_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                        "https_proxy", "http_proxy", "no_proxy") if key in os.environ}
                     env.update({"ARTIFACT_ROOT": str(ARTIFACT_ROOT),
                                 "MIGRATE_V2V_VAULT_DIR": str(VAULT_DIR),
                                 "MIGRATE_V2V_CATALOG_DIR": str(CATALOG_DIR),
