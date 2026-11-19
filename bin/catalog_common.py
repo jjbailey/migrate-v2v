@@ -43,7 +43,7 @@ def parse_timestamp(value):
     return parsed if parsed.tzinfo is not None else None
 
 def timestamp_sort_key(value):
-    """Chronological sort key for an ISO-8601 string; unparseable sorts first.
+    """Chronological sort key for an ISO-8601 string; unparsable sorts first.
 
     Offsets other than Z are legal, so comparing the raw strings can put an
     older row ahead of a newer one.

@@ -506,7 +506,9 @@ source ~/my-project-a-openrc.sh
 
 Caddy can be run on the ansible control host as a reverse proxy / TLS
 terminator in front of the migration web app. The `examples/` directory
-provides example systemd unit files and a test script:
+provides example systemd unit files and a test script. See
+[web/caddy.md](../web/caddy.md) for the Caddyfile variables, TLS names and
+certificate trust, which apply wherever Caddy runs:
 
 - `caddy.service.example` — runs Caddy from the repository's
   `web/Caddyfile`. Suitable when you manage the config file directly.

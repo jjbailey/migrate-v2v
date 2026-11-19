@@ -317,6 +317,18 @@ print("converted", sys.argv[1:])
         call = bin_dir / "v2v-call.json"
         return played, (json.loads(call.read_text()) if call.exists() else None), pending
 
+    def test_windows_guest_is_refused_without_guest_convert(self):
+        play = ("- hosts: localhost\n  connection: local\n  gather_facts: false\n  tasks:\n"
+                f"    - ansible.builtin.include_tasks: {TASKS}/guest-convert-required-vddk.yml\n")
+        for guest_id, ok in (("windows9_64Guest", False), ("windows2019srv_64Guest", False),
+                             ("winNetStandardGuest", False), ("debian12_64Guest", True), ("", True)):
+            with self.subTest(guest_id=guest_id):
+                played = self.playbook(play, vm_name="vm", source_guest_id=guest_id)
+                self.assertEqual(played.returncode == 0, ok, played.stdout + played.stderr)
+                if not ok:
+                    self.assertIn("GUEST_CONVERT=true", played.stdout + played.stderr)
+                    self.assertIn("migrate-openstack-vm-vddk.sh", played.stdout + played.stderr)
+
     def test_guest_convert_runs_in_place_over_all_disks_in_order(self):
         played, call, pending = self.guest_convert()
         self.assertEqual(played.returncode, 0, played.stdout + played.stderr)

@@ -45,7 +45,7 @@ the [curl backend's VMFS limitation](doc/datastore-direct.md).
 Run the playbooks on the Linux **control host** (or in the controller's
 container). Guest preparation runs on the **source vSphere VM** before
 migration; launch networking and SSH settings apply to the **destination
-cloud and guest**. The [web controller](web/README.md) has its own setup guide.
+cloud and guest**. The [web controller](web/README.md) has its own guides, for [Docker](web/docker.md) and [Caddy HTTPS](web/caddy.md).
 
 ## Prepare the Control Host
 
@@ -841,7 +841,8 @@ whose disks ESXi locks. On a slow upload
 link, `COMPRESS=true` compresses the QCOW2 images as they are written, which
 cut the upload by more than half in testing. `GUEST_CONVERT=true` runs
 `virt-v2v-in-place` on the disks first (virtio drivers, VMware tools removal),
-which Windows guests need (`VIRTIO_WIN=<virtio-win ISO or directory>`); it
+which Windows guests need (`VIRTIO_WIN=<virtio-win ISO or directory>`; see
+[doc/windows.md](doc/windows.md)); it
 converts every disk before uploading any. See
 [doc/datastore-direct.md](doc/datastore-direct.md#guest-conversion-virt-v2v-in-place).
 When `GUEST_CONVERT=true`, the OpenStack play installs Ubuntu's `virt-v2v` and
@@ -883,17 +884,16 @@ stage-v2v playbook installs a one-time, boot-time reconfigure script to do this.
 bin/stage-v2v.sh -c vcenter.example.com -H my-vm [-a address] [-u ssh_username] [-k ssh_private_key_file]
 ```
 
-The VM is looked up in vCenter using the credentials in the vSphere vault. The same vault entry can
-also supply the guest SSH login (`ssh_username`, `ssh_password`,
-`ssh_private_key_file`); see [doc/vaults.md](doc/vaults.md#vsphere-vault).
-Windows guests are detected and skipped, as are VMs that are not CentOS or not
-reachable over SSH. `-a` gives an address for VMs whose vCenter name is not in
-DNS. On CentOS, `playbooks/templates/stage-v2v.sh.j2` is installed as
-`/etc/init.d/stage-v2v.sh` and enabled with `chkconfig`. On first boot on
-OpenStack it switches the NIC to DHCP, restarts networking, and disables itself.
-If the NIC's ifcfg file is missing or cannot be rewritten, it still disables
-itself, leaves networking alone, and exits non-zero, so it never retries on
-every boot.
+The VM is looked up in vCenter using the credentials in the vSphere vault. The same
+vault entry can also supply the guest SSH login (`ssh_username`, `ssh_password`,
+`ssh_private_key_file`); see [doc/vaults.md](doc/vaults.md#vsphere-vault). Windows
+guests are detected and skipped, as are VMs that are not CentOS or not reachable
+over SSH. `-a` gives an address for VMs whose vCenter name is not in DNS. On CentOS,
+`playbooks/templates/stage-v2v.sh.j2` is installed as `/etc/init.d/stage-v2v.sh`
+and enabled with `chkconfig`. On first boot on OpenStack it switches the NIC to DHCP,
+restarts networking, and disables itself. If the NIC's ifcfg file is missing or cannot
+be rewritten, it still disables itself, leaves networking alone, and exits non-zero,
+so it never retries on every boot.
 
 Multi-disk VMs overlap their slow steps rather than running them end to end.
 GCP starts every M2VM image import before waiting on any of them, so total
@@ -986,19 +986,19 @@ at 80% used (`--warn-percent N` changes that), `FULL` at its limit, and
 
 For interactive access to a launched OpenStack VM, provide an OpenStack
 keypair and a security group that permits TCP/22. `openstack_auto_ip`
-(passed through to `openstack.cloud.server: auto_ip`) asks the cloud to
-give the server a public address however it does that (typically by
-allocating and attaching a floating IP). It defaults to `false` in the playbook (private/network address only);
-the wrapper defaults it to `true`, and exposes the setting as
-`OS_AUTO_IP`. The guest image must have cloud-init
+(passed through to `openstack.cloud.server: auto_ip`) asks the cloud to give
+the server a public address however it does that (typically by allocating
+and attaching a floating IP). It defaults to `false` in the playbook
+(private/network address only); the wrapper defaults it to `true`, and
+exposes the setting as `OS_AUTO_IP`. The guest image must have cloud-init
 (or another image-initialization agent) installed and enabled for Nova's
 keypair injection to add the public key; otherwise use credentials already
-present in the source VM. The launch wrapper reads `OS_FLAVOR`,
-`OS_KEY_NAME`, `OS_SECURITY_GROUPS_JSON`, and
-the explicit ID variables above. `OS_KEY_NAME` defaults to a keypair named
-`cloud`, which must exist for the authenticated OpenStack user; set it to the
-keypair you use. Set it to an empty value to omit keypair injection. In that
-case, the image or user-data must already provide a way to access the guest.
+present in the source VM. The launch wrapper reads `OS_FLAVOR`, `OS_KEY_NAME`,
+`OS_SECURITY_GROUPS_JSON`, and the explicit ID variables above. `OS_KEY_NAME`
+defaults to a keypair named `cloud`, which must exist for the authenticated
+OpenStack user; set it to the keypair you use. Set it to an empty value to
+omit keypair injection. In that case, the image or user-data must already
+provide a way to access the guest.
 
 For a guided launch, run `./bin/launch-openstack-dialog.sh`. It collects
 the same common wrapper settings, shows the generated shell command, and can
@@ -1228,17 +1228,19 @@ an interactive prompt:
   -e vm_name=my-vm -e datacenter=Datacenter
 ```
 
-The `bin/` platform wrappers combine their environment-variable settings with
-any Ansible arguments supplied on the command line; for example,
-`./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project`.
-Migration wrappers default their artifact root to `/work/migrate-v2v`,
-the same as the playbooks, and accept `ARTIFACT_ROOT` to override it (see
-[Artifact Root](#artifact-root)). The wrappers are useful when you want the
-playbook runner, vault handling, and verbosity applied consistently.
+The `bin/` platform wrappers combine their environment-variable
+settings with any Ansible arguments supplied on the command line;
+for example, `./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e
+openstack_target_project=my-project`. Migration wrappers default their
+artifact root to `/work/migrate-v2v`, the same as the playbooks, and accept
+`ARTIFACT_ROOT` to override it (see [Artifact Root](#artifact-root)). The
+wrappers are useful when you want the playbook runner, vault handling,
+and verbosity applied consistently.
 
 The interactive `bin/*-dialog.sh` front ends build these wrapper commands for
-you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command examples (OpenStack networking matrix and migrate,
-OpenStack reconcile, AWS, GCP, and Caddy; there are no Azure examples) are collected in
+you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command
+examples (OpenStack networking matrix and migrate, OpenStack reconcile,
+AWS, GCP, and Caddy; there are no Azure examples) are collected in
 [examples/README.md](examples/README.md).
 
 ### Interactive Dialogs
@@ -1325,19 +1327,20 @@ examples are collected in
 
 ### Resume and Discard
 
-After an Azure, OpenStack, or GCP OVF run fails, the package, manifest, and
-referenced VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
-its OVA in S3 according to its existing flow.
+After an Azure, OpenStack, or GCP OVF run fails, the package, manifest,
+and referenced VMDKs are retained for resume. Azure also retains staged VHD
+blobs. AWS retains its OVA in S3 according to its existing flow.
 
-The OVF descriptor, checksum file, and large VMDKs stay in the run-directory
-root; `disks/` contains only transient QCOW2 conversion files. Resume and
-cleanup use the complete run directory. A run directory you supply with
-`migration_run_dir` is never deleted by the playbook, even after success or
-`discard_failed_artifacts=true`; only the default `<root>/<target>/<vm>/<run-id>`
-directory is removed, so delete an override directory yourself when finished. Per-disk QCOW2 files are removed after
+The OVF descriptor, checksum file, and large VMDKs stay in the
+run-directory root; `disks/` contains only transient QCOW2 conversion
+files. Resume and cleanup use the complete run directory. A run directory
+you supply with `migration_run_dir` is never deleted by the playbook,
+even after success or `discard_failed_artifacts=true`; only the default
+`<root>/<target>/<vm>/<run-id>` directory is removed, so delete an override
+directory yourself when finished. Per-disk QCOW2 files are removed after
 each upload or failed per-disk attempt; the OVF package and manifest remain
-available for resume unless `discard_failed_artifacts=true` is set. The playbook prints the run ID; resume
-it later with:
+available for resume unless `discard_failed_artifacts=true` is set. The
+playbook prints the run ID; resume it later with:
 
 ```bash
 ./bin/run-playbook.sh playbooks/migrate-openstack-vm.yml \
@@ -1553,34 +1556,33 @@ the prior server and its ports were removed; ports already attached to a
 server cannot be reused, and their MACs remain reserved until the ports are
 deleted.
 
-Every successful AWS, Azure, OpenStack, or GCP launch appends one record to
-`/work/migrate-v2v/catalogs/deployment-catalog.json` via
-`bin/append-deployment-catalog.py`.
-AWS records contain `vm_name`, `target_platform`, `ami_id`, the
-`import_task_id` it came from, `instance_id`, `instance_type`, the selected
-vault project key, `aws_region`, `vpc_subnet_id`, `status`, and `launched_at`;
-they also record `aws_account_id` when known. Azure records contain the VM name,
-subscription, resource group, location, size, boot image ID, attached data-disk
-names, private and public IPs, source migration ID, `status`, and `launched_at`.
-OpenStack records contain `vm_name`, `target_platform`,
-`openstack_server_id`, the ordered image IDs,
-project (key), optional project ID and region, flavor, network and
-per-NIC `openstack_network_ids`, the port-backed `openstack_nics` entries,
-explicit `openstack_port_ids` when ports were pre-created, attached
-data-volume IDs, `status`, and `launched_at`. Pre-created ports are not
-deleted automatically when a server is later deleted; remove them
-explicitly when their MACs or fixed IPs must be reused.
-`bin/reconcile-catalog-openstack.py` reports remaining port IDs as orphans
-when it removes a deployment whose server is already gone. GCP records contain the instance name, project, zone, machine
+Every successful AWS, Azure, OpenStack, or GCP launch appends one
+record to `/work/migrate-v2v/catalogs/deployment-catalog.json` via
+`bin/append-deployment-catalog.py`. AWS records contain `vm_name`,
+`target_platform`, `ami_id`, the `import_task_id` it came from, `instance_id`,
+`instance_type`, the selected vault project key, `aws_region`, `vpc_subnet_id`,
+`status`, and `launched_at`; they also record `aws_account_id` when
+known. Azure records contain the VM name, subscription, resource group,
+location, size, boot image ID, attached data-disk names, private and public
+IPs, source migration ID, `status`, and `launched_at`. OpenStack records
+contain `vm_name`, `target_platform`, `openstack_server_id`, the ordered image
+IDs, project (key), optional project ID and region, flavor, network and per-NIC
+`openstack_network_ids`, the port-backed `openstack_nics` entries, explicit
+`openstack_port_ids` when ports were pre-created, attached data-volume IDs,
+`status`, and `launched_at`. Pre-created ports are not deleted automatically
+when a server is later deleted; remove them explicitly when their MACs or
+fixed IPs must be reused. `bin/reconcile-catalog-openstack.py` reports
+remaining port IDs as orphans when it removes a deployment whose server is
+already gone. GCP records contain the instance name, project, zone, machine
 type, boot image, attached data-disk names, status, and `launched_at`.
 Deployment `status` is recorded as each cloud reports it, so its casing is
 per platform: OpenStack `ACTIVE`, AWS `running`, Azure and GCP `RUNNING`.
 Only the lowercase `retired` left by older reconciliation runs is shared.
 Compare `status` case-insensitively when filtering across platforms.
 Same accumulate-not-supersede reasoning as the migration catalog - the same
-AMI or image can legitimately be launched more than once, so history is kept
-rather than overwritten; only an exact rerun against the same target resource
-identity replaces its own prior entry.
+AMI or image can legitimately be launched more than once, so history is
+kept rather than overwritten; only an exact rerun against the same target
+resource identity replaces its own prior entry.
 
 ### Catalog Reconciliation
 
@@ -1639,9 +1641,10 @@ login:
 ```
 
 Entries for other projects are left untouched. When the credentials come
-from Google's defaults, the ambient default project from Application Default Credentials (gcloud
-config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run is refused only when the
-credentials themselves carry a different project, as a service account key does.
+from Google's defaults, the ambient default project from Application Default
+Credentials (gcloud config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run
+is refused only when the credentials themselves carry a different project,
+as a service account key does.
 
 #### OpenStack Catalog Reconciliation
 
@@ -1649,10 +1652,10 @@ Reconcile OpenStack migration images and deployments against the live cloud
 when resources may have been removed outside this repository. The script uses
 resource UUIDs from both catalogs and removes the exact entries whose resources
 are missing. A shared clone name or server ID does not remove any other row.
-It never deletes cloud resources, but removed rows are not kept anywhere: if
-your catalogs are committed to Git, its history holds the previous state;
-otherwise copy the catalog files first. It also removes OpenStack entries already marked
-`retired` by an older reconciliation run. Use `--dry-run` first:
+It never deletes cloud resources, but removed rows are not kept anywhere:
+if your catalogs are committed to Git, its history holds the previous state;
+otherwise copy the catalog files first. It also removes OpenStack entries
+already marked `retired` by an older reconciliation run. Use `--dry-run` first:
 
 ```bash
 ./bin/reconcile-catalog-openstack.py \
@@ -1827,6 +1830,7 @@ migrate-v2v/
     ├── forms.py                 # Form fields derived from the bin/*-dialog.sh exports
     ├── dialog-checksums.json    # Dialog hashes; a changed dialog needs form review
     ├── Caddyfile                # HTTPS reverse proxy config
+    ├── caddy.md, docker.md      # Guides: Caddy HTTPS; Docker Compose deployment
     ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address, compose.kvm.yaml /dev/kvm)
     ├── .env.example             # Compose settings template
     ├── icons/, static/          # Cloud icons and the stylesheet
@@ -1862,6 +1866,9 @@ operations are performed. Run it before submitting changes.
 ### Documentation
 
 - [web/README.md](web/README.md) - controller website, local accounts, and job queue
+- [doc/windows.md](doc/windows.md) - Windows guests: OpenStack guest conversion and virtio-win drivers
+- [web/docker.md](web/docker.md) - running the controller in Docker Compose
+- [web/caddy.md](web/caddy.md) - HTTPS with Caddy, in the container or on the control host
 - [doc/vaults.md](doc/vaults.md) - vault file layouts in one place
 - [doc/workflow.md](doc/workflow.md) - illustrated migration workflow
   ([SVG](doc/workflow.svg))

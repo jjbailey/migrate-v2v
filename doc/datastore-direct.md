@@ -90,7 +90,8 @@ conversion of one disk does not overlap the upload of the previous one, and
 peak staging is the whole VM's QCOW2 files. `COMPRESS` still works: the
 compression runs after the in-place pass, because the pass rewrites clusters.
 
-- **Windows** needs the virtio-win drivers. When the source VM is Windows, the
+- **Windows** needs the virtio-win drivers (see [windows.md](windows.md) for the
+  full picture). When the source VM is Windows, the
   play downloads the stable ISO published by the
   [Fedora virtio-win project](https://github.com/virtio-win/virtio-win-pkg-scripts#downloads)
   from its [stable ISO URL](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso)

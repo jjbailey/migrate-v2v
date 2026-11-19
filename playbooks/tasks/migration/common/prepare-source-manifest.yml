@@ -144,8 +144,15 @@
                    | default('', true), true) }}
   no_log: true
 
-# Still before the snapshot, so a Windows guest without virtio-win drivers is
-# refused before anything is created. Other targets never set the flag.
+# Still before the snapshot, so a Windows guest without virtio-win drivers (or
+# without conversion at all) is refused before anything is created. Other
+# targets never set the flag.
+- name: Require guest conversion for a Windows guest
+  ansible.builtin.include_tasks: ../openstack/guest-convert-required-vddk.yml
+  when:
+    - migration_target == 'openstack'
+    - not (openstack_guest_convert | default(false) | bool)
+
 - name: Check the guest conversion prerequisites
   ansible.builtin.include_tasks: ../openstack/guest-convert-check-vddk.yml
   when:
