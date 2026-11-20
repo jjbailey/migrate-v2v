@@ -598,7 +598,10 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
         elif name == "VM_NAME" and mode == "launch":
             options = [(v, v) for v in catalog_vms(cloud)]
         elif meta.kind == "boolean":
-            options = [("true", "Yes"), ("false", "No")]
+            if name in ("AZURE_NO_PUBLIC_IP", "GCP_NO_ADDRESS"):
+                options = [("false", "Yes"), ("true", "No")]
+            else:
+                options = [("true", "Yes"), ("false", "No")]
         elif meta.kind == "choice":
             options = [(v, v or "Vault default") for v in meta.choices]
         suggested = choices.get(name, [])

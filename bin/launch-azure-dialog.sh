@@ -74,9 +74,15 @@ if ! yesno "Use the shared launch network?\n\n  VNet..: $AZURE_VNET_NAME\n  Subn
     AZURE_SUBNET_NAME=$(input_required "Subnet name:" "$AZURE_SUBNET_NAME" "The subnet name cannot be empty.") || abort
     AZURE_NSG_NAME=$(input_required "Network security group name:" "$AZURE_NSG_NAME" "The network security group name cannot be empty.") || abort
 fi
-public_ip_default=no
-[ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=yes
-if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE_NO_PUBLIC_IP=true; else AZURE_NO_PUBLIC_IP=false; fi
+public_ip_default=yes
+[ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=no
+if yesno "Public IP?" "$public_ip_default" ; then
+    AZURE_NO_PUBLIC_IP=false
+    public_ip=yes
+else
+    AZURE_NO_PUBLIC_IP=true
+    public_ip=no
+fi
 
 # The NSG's SSH rule is only created when the NSG is missing, and only matters
 # when the VM is reachable from outside, so ask only for a public IP.
@@ -133,7 +139,7 @@ say "Launch summary for $VM_NAME
   VM size......: $AZURE_VM_SIZE
   VNet / subnet: $AZURE_VNET_NAME / $AZURE_SUBNET_NAME
   NSG..........: $AZURE_NSG_NAME
-  No public IP.: $AZURE_NO_PUBLIC_IP
+  Public IP....: $public_ip
   SSH source...: ${AZURE_SSH_SOURCE_PREFIX:-n/a (no public IP)}
   Admin user...: $AZURE_ADMIN_USERNAME
   SSH key......: $AZURE_SSH_KEY_NAME" 17

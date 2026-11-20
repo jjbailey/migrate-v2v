@@ -137,9 +137,15 @@ while : ; do
 done
 tags=$(input "Network tags, comma-separated (optional):" "") || abort
 GCP_TAGS_JSON=$(json_list "$tags")
-address_default=no
-[ "${GCP_NO_ADDRESS:-false}" = true ] && address_default=yes
-if yesno "Launch without an external IP address?" "$address_default" ; then GCP_NO_ADDRESS=true; else GCP_NO_ADDRESS=false; fi
+address_default=yes
+[ "${GCP_NO_ADDRESS:-false}" = true ] && address_default=no
+if yesno "External IP?" "$address_default" ; then
+    GCP_NO_ADDRESS=false
+    external_ip=yes
+else
+    GCP_NO_ADDRESS=true
+    external_ip=no
+fi
 
 GCP_SSH_KEY_FILE=${GCP_SSH_KEY_FILE:-}
 GCP_SSH_USER=${GCP_SSH_USER:-cloudinit}
@@ -168,7 +174,7 @@ say "Launch summary for $VM_NAME
   Network......: $GCP_NETWORK
   Subnetwork...: ${GCP_SUBNETWORK:-default}
   Tags.........: $GCP_TAGS_JSON
-  No address...: $GCP_NO_ADDRESS
+  External IP..: $external_ip
   Extra SSH key: ${GCP_SSH_KEY_FILE:-none}" 17
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-gcp.XXXXXX")
