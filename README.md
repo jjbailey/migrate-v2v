@@ -1630,9 +1630,12 @@ blocked by Entra ID security defaults does not matter:
 #### GCP Project Reconciliation
 
 GCP migration and deployment catalog entries are scoped by `gcp_project`.
-When more than one project is present, pass the project ID explicitly.
-Credentials come from `--credentials-file`, else an exported
-`GOOGLE_APPLICATION_CREDENTIALS`, else the GCP vault entry whose key,
+If the catalogs contain one project, reconciliation selects it automatically.
+For catalogs spanning projects, it selects a unique matching project from the
+GCP vault (the same single-entry default used by the playbooks), or the active
+Google default project when that identifies a catalog project. Otherwise,
+pass `--project-id`. Credentials come from `--credentials-file`, else an
+exported `GOOGLE_APPLICATION_CREDENTIALS`, else the GCP vault entry whose key,
 `gcp_project`, or `project_id` matches, else the gcloud application-default
 login:
 
@@ -1640,11 +1643,10 @@ login:
 ./bin/reconcile-catalog-gcp.py --project-id my-project-a --dry-run
 ```
 
-Entries for other projects are left untouched. When the credentials come
-from Google's defaults, the ambient default project from Application Default
-Credentials (gcloud config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run
-is refused only when the credentials themselves carry a different project,
-as a service account key does.
+Entries for other projects are left untouched. Set `GOOGLE_CLOUD_PROJECT`
+when you want the ambient Google default to select a project from a
+multi-project catalog. If the default does not identify any catalog project,
+the run asks for `--project-id` rather than guessing.
 
 #### OpenStack Catalog Reconciliation
 
