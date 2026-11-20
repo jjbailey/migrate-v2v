@@ -29,6 +29,9 @@
     # Discard a failed run instead of resuming it: removes its retained
     # snapshot, its run directory, and any images it uploaded. Nothing else runs.
     discard_run_id: ""
+    # The web recovery panel binds this to a run ID from a saved failed job;
+    # in that flow, an already-clean run is a successful no-op.
+    discard_allow_empty: false
     artifact_root: "/work/migrate-v2v"
     openstack_import_poll_retries: 240
     openstack_import_poll_delay: 15

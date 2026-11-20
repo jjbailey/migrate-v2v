@@ -392,6 +392,215 @@ def enqueue(user, mode, cloud, method, values):
             (user, mode, cloud, method, values["VM_NAME"], values[target_key(cloud)], json.dumps(values)))
         return cur.lastrowid
 
+def recovery_metadata(row):
+    try:
+        values = json.loads(row["values_json"])
+        return values if isinstance(values, dict) else {}
+    except (KeyError, TypeError, ValueError):
+        return {}
+
+def recovery_log(row):
+    path = STATE / f"job-{int(row['id'])}.log"
+    try:
+        with open(path, "rb") as stream:
+            stream.seek(max(0, stream.seek(0, 2) - 200000))
+            return stream.read().decode(errors="replace")
+    except (OSError, TypeError, ValueError):
+        return ""
+
+def recovery_hinted_run_ids(row):
+    log = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", recovery_log(row))
+    resume_ids = re.findall(r"-e(?:\s|\\n)+resume_run_id=([0-9]{1,20})\b", log, re.IGNORECASE)
+    discard_ids = re.findall(r"-e(?:\s|\\n)+discard_run_id=([0-9]{1,20})\b", log, re.IGNORECASE)
+    return {"resume_run_id": resume_ids[-1] if resume_ids else "",
+            "discard_run_id": discard_ids[-1] if discard_ids else ""}
+
+def recovery_run_key(row, run_id):
+    return (row["cloud"], row["target"], row["vm"], row["method"], run_id)
+
+def resolved_discard_runs(conn):
+    """Find runs a web discard later confirmed had no remaining artifacts."""
+    rows = conn.execute(
+        "SELECT * FROM jobs WHERE mode='migrate' AND status IN (?, ?, ?)",
+        TERMINAL_JOB_STATUSES,
+    ).fetchall()
+    resolved = {}
+    for row in rows:
+        metadata = recovery_metadata(row)
+        run_id = metadata.get("_recovery_run_id", "")
+        if metadata.get("_recovery_action") != "discard" or not re.fullmatch(r"[0-9]{1,20}", str(run_id)):
+            continue
+        log = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", recovery_log(row))
+        if not re.search(
+                rf"(?:Nothing to discard for run|No resources remain for run)\s+{re.escape(str(run_id))}\b",
+                log, re.IGNORECASE):
+            continue
+        key = recovery_run_key(row, str(run_id))
+        resolved.setdefault(key, {
+            "run_id": str(run_id),
+            "job_id": int(row["id"]),
+            "source_job_id": metadata.get("_recovery_source_job_id"),
+            "row": row,
+        })
+    return resolved
+
+def recovery_actions(row, resolved_runs=None):
+    """Return run IDs explicitly advertised as resumable or discardable."""
+    actions = {"resume_run_id": "", "discard_run_id": ""}
+    if row["mode"] != "migrate" or row["status"] not in ("failed", "interrupted"):
+        return actions
+    if recovery_metadata(row).get("_recovery_completed_by"):
+        return actions
+
+    hinted = recovery_hinted_run_ids(row)
+    resume_id = hinted["resume_run_id"]
+    discard_id = hinted["discard_run_id"]
+    if resolved_runs and any(
+            run_id and recovery_run_key(row, run_id) in resolved_runs
+            for run_id in {resume_id, discard_id}):
+        return actions
+    if resume_id and discard_id and resume_id != discard_id:
+        return actions
+    if row["cloud"] in ("azure", "gcp", "openstack") and resume_id:
+        actions["resume_run_id"] = resume_id
+    if row["method"] == "vddk" and row["cloud"] in ("azure", "openstack") and discard_id:
+        actions["discard_run_id"] = discard_id
+    return actions
+
+def recovery_group_actions(conn, row):
+    """Combine actions reported by failed attempts for the same retained run."""
+    resolved_runs = resolved_discard_runs(conn)
+    actions = recovery_actions(row, resolved_runs)
+    run_id = actions["resume_run_id"] or actions["discard_run_id"]
+    if not run_id:
+        return actions
+    rows = conn.execute(
+        """SELECT * FROM jobs WHERE mode='migrate' AND cloud=? AND vm=? AND target=?
+           AND method=? AND status IN ('failed','interrupted')""",
+        (row["cloud"], row["vm"], row["target"], row["method"]),
+    ).fetchall()
+    for candidate in rows:
+        candidate_actions = recovery_actions(candidate, resolved_runs)
+        for name, value in candidate_actions.items():
+            if value == run_id:
+                actions[name] = value
+    return actions
+
+def recovery_jobs():
+    """List failed migrations, grouping retries of the same retained run."""
+    with db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM jobs WHERE mode='migrate' AND status IN ('failed','interrupted') ORDER BY id DESC"
+        ).fetchall()
+        resolved_runs = resolved_discard_runs(conn)
+        pending_rows = conn.execute(
+            "SELECT id,values_json FROM jobs WHERE status IN ('queued','running')"
+        ).fetchall()
+
+    pending_by_run = {}
+    for pending_row in pending_rows:
+        pending_values = recovery_metadata(pending_row)
+        run_id = pending_values.get("_recovery_run_id")
+        if run_id:
+            pending_by_run[run_id] = pending_row["id"]
+
+    grouped = {}
+    inactive = []
+    rows_by_id = {int(row["id"]): row for row in rows}
+    for row in rows:
+        metadata = recovery_metadata(row)
+        hinted = recovery_hinted_run_ids(row)
+        possible_run_ids = {hinted["resume_run_id"], hinted["discard_run_id"],
+                            str(metadata.get("_recovery_run_id", ""))}
+        resolution = next((resolved_runs[recovery_run_key(row, run_id)]
+                           for run_id in possible_run_ids
+                           if run_id and recovery_run_key(row, run_id) in resolved_runs), None)
+        if resolution:
+            continue
+        actions = recovery_actions(row, resolved_runs)
+        run_id = actions["resume_run_id"] or actions["discard_run_id"]
+        if run_id:
+            key = (row["cloud"], row["target"], row["vm"], row["method"], run_id)
+            if key not in grouped:
+                grouped[key] = {"row": row, "actions": actions,
+                                "pending_job_id": pending_by_run.get(run_id)}
+            else:
+                # A retry can report fewer actions than the original failure.
+                # Keep the newest job's inputs while retaining every action
+                # still advertised for this same run ID.
+                current = grouped[key]["actions"]
+                for name, value in actions.items():
+                    if value == run_id:
+                        current[name] = value
+        else:
+            inactive.append({"row": row, "actions": actions})
+    for key, resolution in resolved_runs.items():
+        source_id = resolution.get("source_job_id")
+        display_row = rows_by_id.get(int(source_id)) if str(source_id or "").isdigit() else None
+        if display_row is None:
+            display_row = rows_by_id.get(resolution["job_id"], resolution["row"])
+        inactive.append({"row": display_row,
+                         "actions": {"resume_run_id": "", "discard_run_id": ""},
+                         "resolved_run_id": resolution["run_id"],
+                         "no_resources_job_id": resolution["job_id"]})
+
+    active = list(grouped.values())
+    active.sort(key=lambda item: int(item["row"]["id"]), reverse=True)
+    inactive.sort(key=lambda item: int(item["row"]["id"]), reverse=True)
+    return active + inactive
+
+def queue_recovery(user, job_id, action):
+    if action not in ("resume", "discard"):
+        raise ValueError("Unknown recovery action.")
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            raise ValueError("That failed job no longer exists.")
+        actions = recovery_group_actions(conn, row)
+        field = "resume_run_id" if action == "resume" else "discard_run_id"
+        run_id = actions[field]
+        if not run_id:
+            raise ValueError("That run is no longer available for this action.")
+
+        # One recovery operation per retained run may be queued or running at
+        # a time, even if older failed jobs refer to the same run ID.
+        pending = conn.execute(
+            "SELECT id,values_json FROM jobs WHERE status IN ('queued','running')"
+        ).fetchall()
+        for pending_row in pending:
+            pending_values = recovery_metadata(pending_row)
+            if pending_values.get("_recovery_run_id") == run_id:
+                raise ValueError(f"A recovery action for run {run_id} is already queued or running as job #{pending_row['id']}.")
+
+        values = recovery_metadata(row)
+        if not values.get("VM_NAME") or not values.get(target_key(row["cloud"])):
+            raise ValueError("The original job is missing its migration inputs.")
+        values["DISCARD_RUN_ID"] = ""
+        values["_recovery_action"] = action
+        values["_recovery_run_id"] = run_id
+        values["_recovery_source_job_id"] = int(job_id)
+        cur = conn.execute("""INSERT INTO jobs
+            (created,user,mode,cloud,method,vm,target,status,values_json)
+            VALUES (datetime('now'),?,?,?,?,?,?, 'queued',?)""",
+            (user, row["mode"], row["cloud"], row["method"], row["vm"], row["target"], json.dumps(values)))
+        return cur.lastrowid
+
+def mark_recovery_complete(conn, source_job_id, recovery_job_id):
+    """Mark the failed run and any failed retries in its chain as resolved."""
+    seen = set()
+    current = source_job_id
+    while current and current not in seen:
+        seen.add(current)
+        row = conn.execute("SELECT values_json FROM jobs WHERE id=?", (current,)).fetchone()
+        if not row:
+            break
+        values = recovery_metadata(row)
+        parent = values.get("_recovery_source_job_id")
+        values["_recovery_completed_by"] = recovery_job_id
+        conn.execute("UPDATE jobs SET values_json=? WHERE id=?", (json.dumps(values), current))
+        current = parent
+
 def worker():
     global ACTIVE_PROCESS
     while not STOP_EVENT.is_set():
@@ -415,6 +624,7 @@ def worker():
         code = 1
         error_text = None
         stopped = False
+        recovery_source_job_id = None
         try:
             with open(log_path, "wb", buffering=0) as log:
                 os.chmod(log_path, 0o600)
@@ -423,6 +633,9 @@ def worker():
                     values = json.loads(row["values_json"])
                     if not isinstance(values, dict):
                         raise ValueError("job values are not a JSON object")
+                    recovery_action = values.pop("_recovery_action", "")
+                    recovery_run_id = values.pop("_recovery_run_id", "")
+                    recovery_source_job_id = values.pop("_recovery_source_job_id", None)
                     env = {key: os.environ[key] for key in (
                         "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "ANSIBLE_ASYNC_DIR", "DIB7_VENV_BIN",
                         "ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_LOCAL_TEMP", "WEB_INPUT_DIR",
@@ -436,6 +649,21 @@ def worker():
                                 "PYTHONUNBUFFERED": "1"})
                     env.update(values)
                     command = [str(wrapper_path(row["mode"], row["cloud"], row["method"]))]
+                    if recovery_action:
+                        if (recovery_action not in ("resume", "discard")
+                                or not isinstance(recovery_run_id, str)
+                                or not re.fullmatch(r"[0-9]{1,20}", recovery_run_id)
+                                or not isinstance(recovery_source_job_id, int)):
+                            raise ValueError("invalid queued recovery action")
+                        extra_vars = ({"resume_run_id": recovery_run_id}
+                                      if recovery_action == "resume" else
+                                      {"discard_run_id": recovery_run_id,
+                                       "discard_allow_empty": True})
+                        command.extend(("-e", json.dumps(extra_vars)))
+                        log.write(
+                            f"Queued {recovery_action} of failed run {recovery_run_id} "
+                            f"from job #{recovery_source_job_id}\n".encode()
+                        )
                     # Check for shutdown under the same lock stop_active_process
                     # takes: otherwise a SIGTERM between the check and Popen
                     # finds no active process, and the job starts orphaned.
@@ -474,6 +702,8 @@ def worker():
                     conn.execute(
                         "UPDATE jobs SET status=?, finished=datetime('now'), exit_code=?, log_path=? WHERE id=?",
                         (status, code, str(log_path), row["id"]))
+                    if status == "completed" and recovery_source_job_id:
+                        mark_recovery_complete(conn, recovery_source_job_id, row["id"])
             except Exception as error:
                 sys.stderr.write(f"web worker: could not save job {row['id']} status: {error}\n")
 
@@ -782,6 +1012,8 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError:
                 cleared, log_errors = None, 0
             return self.send(200, maintenance_jobs(user, csrf, cleared, log_errors))
+        if path == "/maintenance/failed":
+            return self.send(200, maintenance_failed_jobs(user, csrf))
         # At most 18 digits: SQLite integers are 64-bit, and a longer id would
         # raise OverflowError in the query rather than simply not match.
         match = re.fullmatch(r"/jobs/(\d{1,18})", path)
@@ -873,6 +1105,17 @@ class Handler(BaseHTTPRequestHandler):
                     self.user(), self.csrf(), error="Check the confirmation box to clear finished jobs."))
             cleared, log_errors = clear_finished_jobs()
             return self.redirect(f"/maintenance/jobs?cleared={cleared}&log_errors={log_errors}")
+        match = re.fullmatch(r"/maintenance/failed/(\d{1,18})/(resume|discard)", path)
+        if match:
+            job_id, action = int(match.group(1)), match.group(2)
+            if action == "discard" and posted.get("confirm_discard") != "yes":
+                return self.send(400, maintenance_failed_jobs(
+                    self.user(), self.csrf(), error="Confirm that the retained run should be discarded."))
+            try:
+                recovery_job_id = queue_recovery(self.user(), job_id, action)
+            except ValueError as error:
+                return self.send(400, maintenance_failed_jobs(self.user(), self.csrf(), error=str(error)))
+            return self.redirect(f"/jobs/{recovery_job_id}")
         match = re.fullmatch(r"/new/(migrate|launch)/(aws|azure|gcp|openstack)/(standard|vddk)", path)
         if match:
             mode, cloud, method = match.groups()
@@ -903,17 +1146,87 @@ def maintenance_home(user, token):
     counts = job_status_counts()
     finished = sum(counts.get(status, 0) for status in TERMINAL_JOB_STATUSES)
     active = counts.get("queued", 0) + counts.get("running", 0)
+    recovery_count = sum(
+        bool((item["actions"]["resume_run_id"] or item["actions"]["discard_run_id"])
+             and not item.get("pending_job_id"))
+        for item in recovery_jobs()
+    )
     body = f'''<div class="page-heading"><div><div class="eyebrow">CONTROLLER</div><h1>Maintenance</h1>
-<p>Review the catalogs or clear finished jobs from this controller.</p></div></div>
+<p>Review the catalogs, recover failed runs, or clear finished jobs.</p></div></div>
 <div class="maintenance-grid">
 <article class="maintenance-card panel"><div class="eyebrow">CATALOGS</div><h2>Migration and launch records</h2>
 <p>View concise provider summaries for printing, or inspect the complete catalog JSON.</p>
 <a class="button" href="/maintenance/catalog">Open printable catalog</a></article>
+<article class="maintenance-card panel"><div class="eyebrow">MIGRATION RECOVERY</div><h2>Manage failed jobs</h2>
+<p>{recovery_count} failed migration run{"s" if recovery_count != 1 else ""} have a resume or discard action available.</p>
+<a class="button" href="/maintenance/failed">Review failed jobs</a></article>
 <article class="maintenance-card panel"><div class="eyebrow">JOB QUEUE</div><h2>Clear finished jobs</h2>
-<p>{finished} finished; {active} queued or running. Finished job records and their output logs can be removed.</p>
+<p>{finished} finished; {active} queued or running. Recovery-ready failed runs stay available until handled.</p>
 <a class="button" href="/maintenance/jobs">Manage job queue</a></article>
 </div>'''
     return page("Maintenance", body, user, token)
+
+def maintenance_failed_jobs(user, token, error=""):
+    items = recovery_jobs()
+    rows = []
+    for item in items:
+        row = item["row"]
+        actions = item["actions"]
+        resume_id = actions["resume_run_id"]
+        discard_id = actions["discard_run_id"]
+        hinted = recovery_hinted_run_ids(row)
+        run_ids = sorted({value for value in (*hinted.values(), resume_id, discard_id) if value})
+        if item.get("resolved_run_id"):
+            run_cell = esc(item["resolved_run_id"])
+        elif run_ids:
+            run_cell = ", ".join(esc(value) for value in run_ids)
+        else:
+            run_cell = "Not found in job output"
+
+        if item.get("resolved_run_id"):
+            no_resources_job_id = item["no_resources_job_id"]
+            action_html = (
+                f'<span class="recovery-unavailable">Job '
+                f'<a href="/jobs/{no_resources_job_id}">#{no_resources_job_id}</a> '
+                'confirmed no artifacts remain; no discard is needed.</span>'
+            )
+        elif item.get("pending_job_id"):
+            action_html = f'<span class="recovery-pending">Recovery queued or running as <a href="/jobs/{item["pending_job_id"]}">job #{item["pending_job_id"]}</a>.</span>'
+        else:
+            controls = []
+            if resume_id:
+                controls.append(f'''<form method="post" action="/maintenance/failed/{row['id']}/resume">{csrf_input(token)}
+<button class="button" type="submit">Queue resume</button></form>''')
+            if discard_id:
+                controls.append(f'''<form method="post" action="/maintenance/failed/{row['id']}/discard">{csrf_input(token)}
+<label class="confirm-row"><input type="checkbox" name="confirm_discard" value="yes" required> Discard run {esc(discard_id)}</label>
+<button class="button danger-button" type="submit">Queue discard</button></form>''')
+            if controls:
+                action_html = ''.join(controls)
+            elif row["cloud"] == "aws":
+                action_html = '<span class="recovery-unavailable">AWS migrations do not support run recovery.</span>'
+            else:
+                action_html = '<span class="recovery-unavailable">No supported resume or discard action was identified.</span>'
+
+        metadata = recovery_metadata(row)
+        resolved_by = metadata.get("_recovery_completed_by")
+        if resolved_by:
+            action_html = f'<span class="recovery-pending">Recovery completed by <a href="/jobs/{esc(resolved_by)}">job #{esc(resolved_by)}</a>.</span>'
+        rows.append(f'''<tr><td><a href="/jobs/{row['id']}">#{row['id']}</a></td>
+<td>{esc(cloud_name(row['cloud']))} / {esc(row['method'])}</td><td>{esc(row['vm'])}</td>
+<td><span class="badge {esc(row['status'])}">{esc(row['status'])}</span></td>
+<td class="recovery-run-id">{run_cell}</td><td class="recovery-actions">{action_html}</td></tr>''')
+
+    notice = f'<div class="alert">{esc(error)}</div>' if error else ''
+    table = (f'''<div class="table-wrap panel"><table><thead><tr><th>Job</th><th>Destination / method</th><th>VM</th>
+<th>Status</th><th>Run ID</th><th>Actions</th></tr></thead><tbody>{''.join(rows)}</tbody></table></div>'''
+             if rows else '<div class="panel empty">No failed or interrupted migration jobs to review.</div>')
+    body = f'''<div class="page-heading"><div><div class="eyebrow">MAINTENANCE / MIGRATION RECOVERY</div><h1>Manage failed jobs</h1>
+<p>This panel lists failed or interrupted migrations. Resume retained runs or discard them when the playbook offers that action; run IDs are read from saved job output.</p></div>
+<a class="back" href="/maintenance">← Maintenance</a></div>
+{notice}<div class="notice recovery-note">Resume is available for retained Azure, GCP, and OpenStack migration runs. Discard is available for datastore-direct Azure and OpenStack runs. Launch jobs are not listed; AWS migrations and failures without a retained run ID have no recovery action. Clearing finished jobs preserves runs with pending recovery actions.</div>
+{table}'''
+    return page("Manage failed jobs", body, user, token)
 
 def load_catalog_document(filename, list_key):
     path = CATALOG_DIR / filename
@@ -1118,29 +1431,42 @@ def clear_finished_jobs():
     placeholders = ",".join("?" for _ in statuses)
     with db() as conn:
         conn.execute("BEGIN IMMEDIATE")
+        resolved_runs = resolved_discard_runs(conn)
         rows = conn.execute(
-            f"SELECT id FROM jobs WHERE status IN ({placeholders})", statuses
+            f"SELECT * FROM jobs WHERE status IN ({placeholders})", statuses
         ).fetchall()
-        conn.execute(f"DELETE FROM jobs WHERE status IN ({placeholders})", statuses)
+        clear_rows = [row for row in rows
+                      if not any(recovery_actions(row, resolved_runs).values())]
+        clear_ids = [row["id"] for row in clear_rows]
+        if clear_ids:
+            clear_placeholders = ",".join("?" for _ in clear_ids)
+            conn.execute(f"DELETE FROM jobs WHERE id IN ({clear_placeholders})", clear_ids)
 
     log_errors = 0
-    for row in rows:
+    for row in clear_rows:
         log_path = STATE / f"job-{row['id']}.log"
         try:
             log_path.unlink(missing_ok=True)
         except OSError:
             log_errors += 1
-    return len(rows), log_errors
+    return len(clear_rows), log_errors
 
 def maintenance_jobs(user, token, cleared=None, log_errors=0, error=""):
     counts = job_status_counts()
     finished = sum(counts.get(status, 0) for status in TERMINAL_JOB_STATUSES)
     active = counts.get("queued", 0) + counts.get("running", 0)
+    with db() as conn:
+        failed_rows = conn.execute(
+            "SELECT * FROM jobs WHERE mode='migrate' AND status IN ('failed','interrupted')"
+        ).fetchall()
+        resolved_runs = resolved_discard_runs(conn)
+    preserved = sum(any(recovery_actions(row, resolved_runs).values()) for row in failed_rows)
+    clearable = finished - preserved
     notice = ''
     if cleared is not None and cleared > 0:
         notice += f'<div class="notice">Removed {cleared} finished job{"s" if cleared != 1 else ""}.</div>'
     elif cleared == 0:
-        notice += '<div class="notice">There were no finished jobs to remove.</div>'
+        notice += '<div class="notice">There were no clearable finished jobs to remove. Runs with pending recovery actions remain available.</div>'
     if log_errors:
         notice += f'<div class="alert">{log_errors} job output log{ "s" if log_errors != 1 else ""} could not be deleted.</div>'
     if error:
@@ -1149,18 +1475,18 @@ def maintenance_jobs(user, token, cleared=None, log_errors=0, error=""):
         f'<tr><th>{esc(status.title())}</th><td>{counts.get(status, 0)}</td></tr>'
         for status in ("queued", "running", *TERMINAL_JOB_STATUSES)
     )
-    disabled = " disabled" if finished == 0 else ""
+    disabled = " disabled" if clearable == 0 else ""
     body = f'''<div class="page-heading"><div><div class="eyebrow">MAINTENANCE / JOB QUEUE</div><h1>Manage job queue</h1>
-<p>Remove finished job records and output logs. Queued and running jobs are never cleared.</p></div>
+<p>Remove clearable finished job records and output logs. Queued, running, and migration jobs with pending recovery actions are retained.</p></div>
 <a class="back" href="/maintenance">← Maintenance</a></div>
 {notice}<div class="maintenance-grid queue-grid"><section class="panel queue-summary"><h2>Current jobs</h2>
 <div class="table-wrap"><table><tbody>{status_rows}</tbody></table></div>
-<p>{active} queued or running; {finished} finished.</p></section>
+<p>{active} queued or running; {finished} finished; {preserved} retained for migration recovery.</p></section>
 <section class="panel queue-clear"><h2>Clear finished jobs</h2>
-<p>This removes all completed, failed, and interrupted job records and their saved output logs.</p>
+<p>This removes {clearable} completed or nonrecoverable job records and their saved output logs. Runs with resume or discard actions stay available.</p>
 <form method="post" action="/maintenance/jobs/clear">{csrf_input(token)}
-<label class="confirm-row"><input type="checkbox" name="confirm" value="yes" required> I understand this removes finished job history.</label>
-<button class="button" type="submit"{disabled}>Clear {finished} finished job{ "s" if finished != 1 else ""}</button></form></section></div>'''
+<label class="confirm-row"><input type="checkbox" name="confirm" value="yes" required> I understand this removes clearable finished job history.</label>
+<button class="button" type="submit"{disabled}>Clear {clearable} finished job{ "s" if clearable != 1 else ""}</button></form></section></div>'''
     return page("Manage job queue", body, user, token)
 
 def add_user(name):

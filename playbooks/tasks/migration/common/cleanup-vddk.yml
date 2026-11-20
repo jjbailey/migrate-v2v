@@ -221,6 +221,18 @@
     - migration_discard_only | default(false) | bool
     - discard_lookup_complete | default(false) | bool
     - not (discard_found_anything | bool)
+    - not (discard_allow_empty | default(false) | bool)
+
+- name: Report a discard that found the run already clean
+  ansible.builtin.debug:
+    msg: >-
+      No resources remain for run {{ migration_run_id }} of VM '{{ vm_name }}';
+      treating it as already clean.
+  when:
+    - migration_discard_only | default(false) | bool
+    - discard_lookup_complete | default(false) | bool
+    - not (discard_found_anything | bool)
+    - discard_allow_empty | default(false) | bool
 
 - name: Fail a discard that left artifacts behind
   ansible.builtin.fail:

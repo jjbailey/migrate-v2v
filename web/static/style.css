@@ -128,6 +128,16 @@ main{padding:30px 18px 70px}
 .confirm-row{display:flex;align-items:flex-start;gap:10px;color:#d6e1e2;font-size:13px;line-height:1.4}
 .confirm-row input{accent-color:#087e82;margin:3px 0 0}
 .button:disabled{opacity:.45;cursor:not-allowed}
+.recovery-note{margin-top:-8px}
+.recovery-run-id{font:12px/1.5 'DejaVu Sans Mono',monospace}
+.recovery-actions{white-space:normal!important;min-width:230px}
+.recovery-actions form{display:flex;flex-direction:column;align-items:flex-start;gap:9px;margin:0 0 12px}
+.recovery-actions form:last-child{margin-bottom:0}
+.recovery-actions .button{white-space:nowrap}
+.recovery-actions .confirm-row{white-space:normal}
+.recovery-pending,.recovery-unavailable{display:block;max-width:280px;white-space:normal;color:#9eb5ba}
+.danger-button{background:#ad695b;color:#fff}
+.danger-button:hover{background:#c97b69;color:#fff}
 .provider-section{margin:30px 0 42px}
 .provider-heading{display:flex;justify-content:space-between;align-items:baseline;gap:20px;border-bottom:1px solid #42636a;margin-bottom:20px;padding-bottom:10px}
 .catalog-actions{display:flex;align-items:center;gap:18px}

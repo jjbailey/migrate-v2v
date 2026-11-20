@@ -85,7 +85,14 @@ operation. The site does not offer arbitrary shell arguments or a terminal.
 The **Maintenance** page shows concise migration and launch catalog entries
 grouped by cloud provider in a print-friendly view, with a separate option
 to inspect both catalog files as raw JSON. It can also clear finished job
-records and their output logs; queued and running jobs are retained.
+records and their output logs; queued, running, and failed or interrupted
+migration jobs with pending recovery actions are retained. **Manage failed jobs**
+reads retained run IDs from job output and queues resume actions for Azure, GCP,
+and OpenStack migrations, or discard actions for Azure and OpenStack
+datastore-direct runs.
+The action is created as a new queued job, preserving the original job and its
+log. Runs without an explicit resume or discard hint in the saved output are
+shown without an action.
 
 ## Files selected in the forms
 
