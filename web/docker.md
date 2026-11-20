@@ -20,7 +20,9 @@ and stores the fixed libguestfs appliance in a sparse-aware compressed archive.
 The controller unpacks it under `/tmp` at startup. The VDDK user kit and
 virtio-win ISO still install on demand under the mounted artifact root.
 Broadcom's OVF Tool is not included; standard export migrations download it on
-demand after the operator accepts its license. See the
+demand. Broadcom's page states that downloading, installing, or using it means
+agreeing to its terms, and this project defaults acceptance to true when an
+operator runs these workflows. See the
 [runtime-image recipe](../doc/ubuntu-24.04-container-dependencies.md) for the
 versions and build inputs.
 
@@ -136,9 +138,10 @@ changing either configured root.
    sudo docker compose --env-file web/.env -f web/compose.yaml build controller
    ```
 
-   For standard OVF/OVA exports, first review and accept Broadcom's OVF Tool
-   license, then set `OVFTOOL_ACCEPT_LICENSE=1` in `web/.env`. The image does
-   not include OVF Tool; the wrapper downloads the pinned version on demand.
+   For standard OVF/OVA exports, the image does not include OVF Tool; the
+   wrapper downloads the pinned version on demand. `OVFTOOL_ACCEPT_LICENSE`
+   defaults to `1` because Broadcom's page treats downloading, installing, or
+   using the tool as agreement to its terms.
 
 3. Bootstrap the initial web account from the encrypted `caddy.yml` vault in
    `ARTIFACT_ROOT_HOST/vaults/` (see [Vault layouts](../doc/vaults.md#web-controller-bootstrap-account)).

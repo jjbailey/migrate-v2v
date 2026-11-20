@@ -61,16 +61,15 @@ the same path so artifacts remain available for resume.
   Broadcom currently publishes 9.1.1, but newer releases are not part of the
   validated toolchain yet. Run `./bin/install-ovftool.py` to download the
   tested package from Broadcom and install it under
-  `/work/migrate-v2v/tools/ovftool-5.1.0`. The script prompts you to accept
-  Broadcom's terms before downloading. Standard migration wrappers invoke the
-  installer automatically when `ovftool` is not on `PATH`. The standard
+  `/work/migrate-v2v/tools/ovftool-5.1.0`. Standard migration wrappers invoke
+  the installer automatically when `ovftool` is not on `PATH`. The standard
   migration playbooks do the same in preflight, including when run directly
   with `ansible-playbook`; the datastore-direct VDDK workflows do not need it.
-  Set `OVFTOOL_INSTALL_DIR` to change the install location. A direct
-  `ansible-playbook` run cannot answer the installer's license prompt, so
-  review Broadcom's
-  [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
-  and set `OVFTOOL_ACCEPT_LICENSE=1` to confirm acceptance for that invocation.
+  Broadcom states that downloading, installing, or using OVF Tool means
+  agreeing to its terms; this project defaults `OVFTOOL_ACCEPT_LICENSE` to `1`
+  when an operator runs these workflows. Review Broadcom's
+  [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0).
+  Set `OVFTOOL_INSTALL_DIR` to change the install location.
   If the portal requires sign-in or its download endpoint changes, download
   the Linux ZIP from that page and set `OVFTOOL_ARCHIVE` to its path. The
   installer verifies Broadcom's published checksum and never stores the ZIP in
@@ -220,7 +219,7 @@ Then verify the tools for the workflows you use:
 ansible-galaxy collection list
 ansible --version
 govc version
-./bin/install-ovftool.py                        # optional; prompts to accept Broadcom's terms
+./bin/install-ovftool.py                        # optional; downloads OVF Tool under Broadcom's terms
 ovftool --version
 qemu-img --version                              # OpenStack migrations
 nbdkit --version                                # datastore-direct OpenStack migrations

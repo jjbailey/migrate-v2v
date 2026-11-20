@@ -110,9 +110,11 @@ Google Cloud CLI, which is updated to the version available in the archive
 when this recipe was added.
 
 - **OVF Tool:** Keep it out of the image. The existing installer downloads the
-  validated 5.1.0 package under `/work/migrate-v2v/tools/ovftool-5.1.0` after
-  license acceptance. Preserve the external download and persistent install
-  model.
+  validated 5.1.0 package under `/work/migrate-v2v/tools/ovftool-5.1.0` on the
+  first standard export migration. Broadcom states that downloading,
+  installing, or using the tool means agreeing to its terms; the project
+  defaults `OVFTOOL_ACCEPT_LICENSE` to `1` when the operator runs these
+  workflows. Preserve the external download and persistent install model.
 - **OpenVDDK:** Keep its user kit out of the image and install it under the
   shared `/work/migrate-v2v/tools/` mount with `bin/install-openvddk.py`, which
   pins release 0.7.4 and verifies its SHA-256. A future renamed or newer
@@ -161,9 +163,10 @@ if those change, the plugin or installer may need an update as well.
 The project requirements and selected Azure SDK packages are version-pinned.
 Pip still resolves transitive packages at build time; a hash-locked Python
 dependency closure would make builds more reproducible.
-OVF Tool stays outside the image because its license requires separate
-acceptance. After accepting it, set `OVFTOOL_ACCEPT_LICENSE=1` in `web/.env` to
-allow a standard web migration to install it on demand.
+OVF Tool stays outside the image because Broadcom does not permit bundling it
+for redistribution. Standard web migrations download it on demand and default
+`OVFTOOL_ACCEPT_LICENSE` to `1`, consistent with Broadcom's statement that
+downloading, installing, or using the tool means agreeing to its terms.
 
 [govc-install]: https://github.com/vmware/govmomi/blob/main/govc/README.md
 [aws-install]: https://docs.aws.amazon.com/cli/latest/userguide/

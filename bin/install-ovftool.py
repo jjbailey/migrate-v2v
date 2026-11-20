@@ -52,7 +52,10 @@ def install_dir():
     ).expanduser().resolve()
 
 def require_license_acceptance():
-    accepted = os.environ.get("OVFTOOL_ACCEPT_LICENSE", "").strip().lower()
+    # Broadcom's OVF Tool page states that downloading, installing, or using
+    # the software constitutes agreement. Invoking this installer is treated
+    # as the operator's acceptance unless explicitly disabled.
+    accepted = os.environ.get("OVFTOOL_ACCEPT_LICENSE", "1").strip().lower()
     if accepted in {"1", "yes", "true", "accepted"}:
         return
 

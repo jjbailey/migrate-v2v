@@ -21,7 +21,7 @@ services:
       WEB_STATE_DIR: /work/migrate-v2v/web-state
       WEB_INPUT_DIR: ${WEB_INPUT_DIR:-/work/migrate-v2v/web-inputs}
       WEB_SECURE_COOKIE: "true"
-      OVFTOOL_ACCEPT_LICENSE: ${OVFTOOL_ACCEPT_LICENSE:-}
+      OVFTOOL_ACCEPT_LICENSE: ${OVFTOOL_ACCEPT_LICENSE:-1}
     volumes:
       - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}:/work/migrate-v2v
       - ${ARTIFACT_ROOT_HOST:?Set ARTIFACT_ROOT_HOST}/vaults:/work/migrate-v2v/vaults:ro
