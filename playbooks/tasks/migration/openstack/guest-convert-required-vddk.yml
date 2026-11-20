@@ -1,0 +1,21 @@
+---
+# playbooks/tasks/migration/openstack/guest-convert-required-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Refuses a Windows guest when guest conversion is off or unavailable. Windows
+# has no virtio drivers, so an unconverted disk would be uploaded and then fail
+# to boot on KVM. Run before the snapshot, with source_guest_id set, from
+# common/prepare-source-manifest.yml (datastore-direct, conversion off) and
+# common/export-ova.yml (standard OVF path, which cannot convert).
+# See doc/windows.md.
+
+- name: Refuse a Windows guest without guest conversion
+  ansible.builtin.fail:
+    msg: >-
+      '{{ vm_name }}' is a Windows guest ({{ source_guest_id }}), which needs
+      guest conversion to install the virtio drivers; without it the migrated
+      image will not boot on OpenStack. Use the datastore-direct migration
+      (bin/migrate-openstack-vm-vddk.sh or migrate-openstack-vddk-dialog.sh)
+      with GUEST_CONVERT=true. See doc/windows.md.
+  when: (source_guest_id | default('')) is match('(?i)^win')
+

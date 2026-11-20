@@ -157,7 +157,7 @@
       - name: allow-ssh
         protocol: Tcp
         destination_port_range: 22
-        source_address_prefix: "{{ azure_ssh_source_prefix }}"
+        source_address_prefix: "{{ azure_ssh_source_prefix or 'VirtualNetwork' }}"
         access: Allow
         priority: 1000
         direction: Inbound

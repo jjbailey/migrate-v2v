@@ -24,6 +24,8 @@
 # web/Caddyfile serves only localhost, 127.0.0.1 and [::1] on :8443 unless
 # CADDY_HOSTS is set. To serve LAN clients, list every address they will use,
 # e.g. Environment="CADDY_HOSTS=localhost:8443, 127.0.0.1:8443, 192.0.2.10:8443"
+# and set CADDY_DEFAULT_SNI to the IP clients use in their URL. IP-literal
+# URLs omit SNI, so Caddy uses this name and checks that the HTTP Host matches.
 #
 # Write ${PROJECT_HOME} with braces: systemd expands a bare $VAR only when it
 # is a whole word, so $PROJECT_HOME/web/Caddyfile fails to start.
@@ -40,10 +42,9 @@ Requires=network-online.target
 
 [Service]
 Type=notify
-User=caddy
-Group=caddy
-Environment="PROJECT_HOME=/path/to/repo"
-# Environment="CADDY_HOSTS=localhost:8443, 127.0.0.1:8443, 192.0.2.10:8443"
+User=operator
+Group=operator
+Environment="PROJECT_HOME=/work/migrate-v2v"
 ExecStart=/usr/bin/caddy run --environ --config ${PROJECT_HOME}/web/Caddyfile
 ExecReload=/usr/bin/caddy reload --config ${PROJECT_HOME}/web/Caddyfile --force
 TimeoutStopSec=5s

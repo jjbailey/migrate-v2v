@@ -7,6 +7,10 @@
 # See doc/datastore-direct.md. Takes the same environment variables as
 # migrate-openstack-vm.sh, plus BACKEND (auto, vddk, or curl ; default auto),
 # COMPRESS (compress the QCOW2 for a slow upload link ; default false),
+# GUEST_CONVERT (run virt-v2v-in-place on the disks before upload: virtio
+# drivers, VMware tools removal, Windows support ; default false) and
+# VIRTIO_WIN (optional virtio-win ISO or directory override; otherwise the
+# stable ISO is downloaded on demand for Windows guests),
 # REQUIRE_CBT (default false), DISCARD_RUN_ID (remove a failed run's
 # snapshot, run directory, and uploaded images instead of migrating), and
 # VCENTER_CA_BUNDLE (PEM file of the CA that issued the vCenter certificate).
@@ -30,6 +34,8 @@ ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
 REQUIRE_CBT=${REQUIRE_CBT:-}
 BACKEND=${BACKEND:-}
 COMPRESS=${COMPRESS:-}
+GUEST_CONVERT=${GUEST_CONVERT:-}
+VIRTIO_WIN=${VIRTIO_WIN:-}
 DISCARD_RUN_ID=${DISCARD_RUN_ID:-}
 VCENTER_CA_BUNDLE=${VCENTER_CA_BUNDLE:-}
 
@@ -37,6 +43,7 @@ wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
 wrapper_require_bool REQUIRE_CBT "$REQUIRE_CBT"
 wrapper_require_bool COMPRESS "$COMPRESS"
+wrapper_require_bool GUEST_CONVERT "$GUEST_CONVERT"
 case "$DISCARD_RUN_ID" in
     "" | *[!0-9]*)
         [ -z "$DISCARD_RUN_ID" ] || wrapper_error "DISCARD_RUN_ID must be the digits-only ID of a failed run, not a flag (got '$DISCARD_RUN_ID')"
@@ -63,6 +70,8 @@ args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
 [ -n "$REQUIRE_CBT" ] && args+=(-e "$(wrapper_var vddk_require_cbt "$REQUIRE_CBT")")
 [ -n "$BACKEND" ] && args+=(-e "$(wrapper_var vddk_backend "$BACKEND")")
 [ -n "$COMPRESS" ] && args+=(-e "$(wrapper_var openstack_convert_compress "$COMPRESS")")
+[ -n "$GUEST_CONVERT" ] && args+=(-e "$(wrapper_var openstack_guest_convert "$GUEST_CONVERT")")
+[ -n "$VIRTIO_WIN" ] && args+=(-e "$(wrapper_var openstack_virtio_win "$VIRTIO_WIN")")
 [ -n "$DISCARD_RUN_ID" ] && args+=(-e "$(wrapper_var discard_run_id "$DISCARD_RUN_ID")")
 [ -n "$VCENTER_CA_BUNDLE" ] && args+=(-e "$(wrapper_var vddk_ca_bundle "$VCENTER_CA_BUNDLE")")
 

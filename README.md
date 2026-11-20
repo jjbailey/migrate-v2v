@@ -45,7 +45,7 @@ the [curl backend's VMFS limitation](doc/datastore-direct.md).
 Run the playbooks on the Linux **control host** (or in the controller's
 container). Guest preparation runs on the **source vSphere VM** before
 migration; launch networking and SSH settings apply to the **destination
-cloud and guest**. The [web controller](web/README.md) has its own setup guide.
+cloud and guest**. The [web controller](web/README.md) has its own guides, for [Docker](web/docker.md) and [Caddy HTTPS](web/caddy.md).
 
 ## Prepare the Control Host
 
@@ -61,16 +61,15 @@ the same path so artifacts remain available for resume.
   Broadcom currently publishes 9.1.1, but newer releases are not part of the
   validated toolchain yet. Run `./bin/install-ovftool.py` to download the
   tested package from Broadcom and install it under
-  `/work/migrate-v2v/tools/ovftool-5.1.0`. The script prompts you to accept
-  Broadcom's terms before downloading. Standard migration wrappers invoke the
-  installer automatically when `ovftool` is not on `PATH`. The standard
+  `/work/migrate-v2v/tools/ovftool-5.1.0`. Standard migration wrappers invoke
+  the installer automatically when `ovftool` is not on `PATH`. The standard
   migration playbooks do the same in preflight, including when run directly
   with `ansible-playbook`; the datastore-direct VDDK workflows do not need it.
-  Set `OVFTOOL_INSTALL_DIR` to change the install location. A direct
-  `ansible-playbook` run cannot answer the installer's license prompt, so
-  review Broadcom's
-  [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0)
-  and set `OVFTOOL_ACCEPT_LICENSE=1` to confirm acceptance for that invocation.
+  Broadcom states that downloading, installing, or using OVF Tool means
+  agreeing to its terms; this project defaults `OVFTOOL_ACCEPT_LICENSE` to `1`
+  when an operator runs these workflows. Review Broadcom's
+  [OVF Tool 5.1.0 download page](https://developer.broadcom.com/tools/open-virtualization-format-ovf-tool/5.1.0).
+  Set `OVFTOOL_INSTALL_DIR` to change the install location.
   If the portal requires sign-in or its download endpoint changes, download
   the Linux ZIP from that page and set `OVFTOOL_ARCHIVE` to its path. The
   installer verifies Broadcom's published checksum and never stores the ZIP in
@@ -113,7 +112,8 @@ the same path so artifacts remain available for resume.
 
 - Network access from the control host to vCenter and the selected cloud APIs.
 - Ansible, the `amazon.aws`, `azure.azcollection`, `community.vmware`, and
-  `openstack.cloud` collections; `govc`, `gcloud`, the AWS CLI (`aws`),
+  `openstack.cloud` collections; `govc`, `gcloud` (installed on demand by the
+  GCP plays if missing), the AWS CLI (`aws`),
   `qemu-img`, and the Python AWS/vSphere libraries. The `gcloud` and `aws`
   CLIs stage the large disk artifacts because both upload in parallel chunks
   and resume a failed part, which the collections' upload modules do not.
@@ -160,20 +160,71 @@ the same path so artifacts remain available for resume.
 
 ### One-time Setup
 
-Install the required host tools, then verify them:
+Ubuntu 24.04 marks its system Python as externally managed. Keep Ansible and
+the `bin/` Python scripts together in a virtual environment; running the
+global `python3 -m pip install` command fails on a fresh Ubuntu installation.
+Install the base host packages and create the environment:
 
 ```bash
+sudo apt-get update
+sudo apt-get install -y python3-venv
+python3 -m venv "$HOME/.dib7"
+export DIB7_VENV_BIN="$HOME/.dib7/bin"
+export PATH="$DIB7_VENV_BIN:$PATH"
+python -m pip install -r requirements.txt
 ansible-galaxy collection install -r requirements.yml
-python3 -m pip install -r requirements.txt      # into python3 on PATH and Ansible's Python
+```
+
+Keep the `PATH` and `DIB7_VENV_BIN` exports in your shell profile, or run them
+in each shell before using the wrappers. Install Azure's collection SDK into
+the same environment only when using Azure:
+
+```bash
+python -m pip install \
+  -r "$HOME/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt" \
+  -c requirements-azure-constraints.txt
+```
+
+Target-specific Ubuntu packages are:
+
+```bash
+sudo apt-get install -y qemu-utils       # OpenStack or Azure
+sudo apt-get install -y nbdkit           # datastore-direct OpenStack or Azure
+sudo apt-get install -y dialog           # interactive dialogs (or install whiptail)
+```
+
+The pinned `govc` used by the project image can be built from its Go module on
+the host. Go's checksum database verifies the downloaded module source:
+
+```bash
+sudo apt-get install -y golang-go
+GOTOOLCHAIN=local CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go install github.com/vmware/govmomi/govc@v0.33.0
+sudo install -D -m 0755 "$HOME/go/bin/govc" /usr/local/bin/govc
+```
+
+AWS migrations also need the AWS CLI v2; install it from
+[AWS's official guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html).
+The GCP migration and launch plays install the pinned Google Cloud CLI from a
+SHA256-verified versioned archive when `gcloud` is missing. The install is
+stored under `ARTIFACT_ROOT/tools/` (default `/work/migrate-v2v/tools/`) and
+needs no root access. The container image also includes the same pinned CLI.
+
+The AWS and GCP CLIs are not needed for other destinations. Review Broadcom's
+OVF Tool terms before using the installer for a standard export migration.
+
+Then verify the tools for the workflows you use:
+
+```bash
+ansible-galaxy collection list
 ansible --version
 govc version
-./bin/install-ovftool.py                        # optional; prompts to accept Broadcom's terms
+./bin/install-ovftool.py                        # optional; downloads OVF Tool under Broadcom's terms
 ovftool --version
 qemu-img --version                              # OpenStack migrations
 nbdkit --version                                # datastore-direct OpenStack migrations
 ./bin/install-openvddk.py                       # optional; auto-installed by datastore-direct preflight
 nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
-gcloud --version                                # GCP migrations
 aws --version                                   # AWS migrations
 az --version                                    # optional; Azure inspection only
 command -v dialog || command -v whiptail        # interactive dialogs only
@@ -318,6 +369,7 @@ chmod 600 "$HOME/.dib-vault-pass"
 ```bash
 ./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
 ./bin/azure-vault.sh      # /work/migrate-v2v/vaults/azure.yml
+./bin/caddy-vault.sh      # /work/migrate-v2v/vaults/caddy.yml
 ./bin/gcp-vault.sh        # /work/migrate-v2v/vaults/gcp.yml
 ./bin/openstack-vault.sh  # /work/migrate-v2v/vaults/openstack.yml
 ./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml
@@ -621,7 +673,8 @@ AWS uses `assign_public_ip` on the EC2 network interface (enabled by default
 in the playbook). `bin/launch-aws-instance.sh` passes `AWS_KEY_NAME` as the EC2
 key pair and defaults it to `cloud`, which must exist in the region. Set it to
 the key pair you use, or set `AWS_KEY_NAME=` to omit one. The playbook's
-`key_name` has no default. Launch also accepts `extra_tags`.
+`key_name` has no default. The wrapper also reads `AWS_TARGET_PROJECT` (vault
+project or account) and `AWS_INSTANCE_TYPE`. Launch also accepts `extra_tags`.
 
 ### Azure
 
@@ -703,7 +756,10 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
 - The images are generalized, so Azure provisions the VM: cloud-init with the
   Azure datasource creates `AZURE_ADMIN_USERNAME` (default `azureuser`) with
   an SSH key, which every launch needs. A guest without it fails with
-  `OSProvisioningTimedOut`.
+  `OSProvisioningTimedOut`. The VM can reach `PowerState/running` while Azure
+  still reports `provisioningState=Creating`; the launch task waits for Azure's
+  provisioning state before it records the deployment. Migration does not
+  install or configure cloud-init in the source guest.
 - Like the AWS and OpenStack key pairs, the key is an Azure SSH public key
   resource, `AZURE_SSH_KEY_NAME` (default `cloud`), in the vault's resource
   group. A missing key stops the launch before anything is created. Register
@@ -783,7 +839,24 @@ file, empty space included, which matters most for large thin disks), needs
 flat disks with no existing snapshots, and cannot read a powered-on VM on VMFS,
 whose disks ESXi locks. On a slow upload
 link, `COMPRESS=true` compresses the QCOW2 images as they are written, which
-cut the upload by more than half in testing.
+cut the upload by more than half in testing. `GUEST_CONVERT=true` runs
+`virt-v2v-in-place` on the disks first (virtio drivers, VMware tools removal),
+which Windows guests need (`VIRTIO_WIN=<virtio-win ISO or directory>`; see
+[doc/windows.md](doc/windows.md)); it
+converts every disk before uploading any. See
+[doc/datastore-direct.md](doc/datastore-direct.md#guest-conversion-virt-v2v-in-place).
+When `GUEST_CONVERT=true`, the OpenStack play installs Ubuntu's `virt-v2v` and
+`libguestfs-tools` packages if needed, then builds a fixed libguestfs appliance
+under `$ARTIFACT_ROOT/libguestfs-appliance`. A Windows conversion also installs
+`rhsrvany` and downloads Fedora's stable virtio-win ISO on demand to
+`$ARTIFACT_ROOT/web-inputs/virtio-win.iso`; set `VIRTIO_WIN` to use an existing
+ISO or unpacked driver directory instead. The host needs sudo for missing
+system packages. The supplied project image includes the migration and launch
+code and required runtime packages; Compose runs it as the host UID without
+package-install privileges. Keep the artifact root writable and shared with
+the container for outputs and downloaded tools. The container unpacks its
+compressed libguestfs appliance under `/tmp` at startup; a host run builds its
+appliance under the artifact root.
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
@@ -811,17 +884,16 @@ stage-v2v playbook installs a one-time, boot-time reconfigure script to do this.
 bin/stage-v2v.sh -c vcenter.example.com -H my-vm [-a address] [-u ssh_username] [-k ssh_private_key_file]
 ```
 
-The VM is looked up in vCenter using the credentials in the vSphere vault. The same vault entry can
-also supply the guest SSH login (`ssh_username`, `ssh_password`,
-`ssh_private_key_file`); see [doc/vaults.md](doc/vaults.md#vsphere-vault).
-Windows guests are detected and skipped, as are VMs that are not CentOS or not
-reachable over SSH. `-a` gives an address for VMs whose vCenter name is not in
-DNS. On CentOS, `playbooks/templates/stage-v2v.sh.j2` is installed as
-`/etc/init.d/stage-v2v.sh` and enabled with `chkconfig`. On first boot on
-OpenStack it switches the NIC to DHCP, restarts networking, and disables itself.
-If the NIC's ifcfg file is missing or cannot be rewritten, it still disables
-itself, leaves networking alone, and exits non-zero, so it never retries on
-every boot.
+The VM is looked up in vCenter using the credentials in the vSphere vault. The same
+vault entry can also supply the guest SSH login (`ssh_username`, `ssh_password`,
+`ssh_private_key_file`); see [doc/vaults.md](doc/vaults.md#vsphere-vault). Windows
+guests are detected and skipped, as are VMs that are not CentOS or not reachable
+over SSH. `-a` gives an address for VMs whose vCenter name is not in DNS. On CentOS,
+`playbooks/templates/stage-v2v.sh.j2` is installed as `/etc/init.d/stage-v2v.sh`
+and enabled with `chkconfig`. On first boot on OpenStack it switches the NIC to DHCP,
+restarts networking, and disables itself. If the NIC's ifcfg file is missing or cannot
+be rewritten, it still disables itself, leaves networking alone, and exits non-zero,
+so it never retries on every boot.
 
 Multi-disk VMs overlap their slow steps rather than running them end to end.
 GCP starts every M2VM image import before waiting on any of them, so total
@@ -914,19 +986,19 @@ at 80% used (`--warn-percent N` changes that), `FULL` at its limit, and
 
 For interactive access to a launched OpenStack VM, provide an OpenStack
 keypair and a security group that permits TCP/22. `openstack_auto_ip`
-(passed through to `openstack.cloud.server: auto_ip`) asks the cloud to
-give the server a public address however it does that (typically by
-allocating and attaching a floating IP). It defaults to `false` in the playbook (private/network address only);
-the wrapper defaults it to `true`, and exposes the setting as
-`OS_AUTO_IP`. The guest image must have cloud-init
+(passed through to `openstack.cloud.server: auto_ip`) asks the cloud to give
+the server a public address however it does that (typically by allocating
+and attaching a floating IP). It defaults to `false` in the playbook
+(private/network address only); the wrapper defaults it to `true`, and
+exposes the setting as `OS_AUTO_IP`. The guest image must have cloud-init
 (or another image-initialization agent) installed and enabled for Nova's
 keypair injection to add the public key; otherwise use credentials already
-present in the source VM. The launch wrapper reads `OS_FLAVOR`,
-`OS_KEY_NAME`, `OS_SECURITY_GROUPS_JSON`, and
-the explicit ID variables above. `OS_KEY_NAME` defaults to a keypair named
-`cloud`, which must exist for the authenticated OpenStack user; set it to the
-keypair you use. Set it to an empty value to omit keypair injection. In that
-case, the image or user-data must already provide a way to access the guest.
+present in the source VM. The launch wrapper reads `OS_FLAVOR`, `OS_KEY_NAME`,
+`OS_SECURITY_GROUPS_JSON`, and the explicit ID variables above. `OS_KEY_NAME`
+defaults to a keypair named `cloud`, which must exist for the authenticated
+OpenStack user; set it to the keypair you use. Set it to an empty value to
+omit keypair injection. In that case, the image or user-data must already
+provide a way to access the guest.
 
 For a guided launch, run `./bin/launch-openstack-dialog.sh`. It collects
 the same common wrapper settings, shows the generated shell command, and can
@@ -1051,6 +1123,12 @@ by default (`gcp_replace_existing_image=true`).
 Imports for a multi-disk VM run concurrently, so total import time is
 bounded by the slowest disk instead of the sum of them.
 
+A clean Ubuntu 24.04.5 controller migrated a one-disk, 40 GiB UEFI Ubuntu
+26.04.1 VM to GCP. The 1.65 GiB stream-optimized VMDK uploaded to the configured
+Cloud Storage bucket at 3.5 MiB/s; M2VM OS adaptation and image creation
+succeeded, and the controller removed the staging object, local export,
+snapshot, and clone after cataloging the image.
+
 #### GCP Launch
 
 `playbooks/launch-gcp-instance.yml` launches a Compute Engine instance from
@@ -1073,6 +1151,13 @@ inherited key; `gcloud compute ssh` and the Console's temporary-key flow
 depend on that agent. A launch retry reuses an instance only when its metadata
 identifies the same VM and migration and its disks come from the selected
 images. Launch accepts `gcp_disk_type` and network and tag options.
+The wrapper reads `GCP_TARGET_PROJECT`, `GCP_SUBNETWORK` and `GCP_TAGS_JSON` (a
+JSON array of network tags).
+Set `GCP_NO_ADDRESS=true` to create an instance without an external IP. The
+clean-controller test launched `gcp-controller-test-ubuntu26041` as an
+`e2-standard-2` in `us-central1-a` this way; its private IP was `10.128.0.17`,
+and the serial console reached the Ubuntu login prompt. SSH was not tested from
+the controller because the instance has no external IP.
 
 #### GCP SSH Access
 
@@ -1143,17 +1228,19 @@ an interactive prompt:
   -e vm_name=my-vm -e datacenter=Datacenter
 ```
 
-The `bin/` platform wrappers combine their environment-variable settings with
-any Ansible arguments supplied on the command line; for example,
-`./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e openstack_target_project=my-project`.
-Migration wrappers default their artifact root to `/work/migrate-v2v`,
-the same as the playbooks, and accept `ARTIFACT_ROOT` to override it (see
-[Artifact Root](#artifact-root)). The wrappers are useful when you want the
-playbook runner, vault handling, and verbosity applied consistently.
+The `bin/` platform wrappers combine their environment-variable
+settings with any Ansible arguments supplied on the command line;
+for example, `./bin/migrate-openstack-vm.sh -e vm_name=my-vm -e
+openstack_target_project=my-project`. Migration wrappers default their
+artifact root to `/work/migrate-v2v`, the same as the playbooks, and accept
+`ARTIFACT_ROOT` to override it (see [Artifact Root](#artifact-root)). The
+wrappers are useful when you want the playbook runner, vault handling,
+and verbosity applied consistently.
 
 The interactive `bin/*-dialog.sh` front ends build these wrapper commands for
-you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command examples (OpenStack networking matrix, AWS, GCP,
-migrate, and reconcile) are collected in
+you; see [Interactive Dialogs](#interactive-dialogs). Ready-to-run command
+examples (OpenStack networking matrix and migrate, OpenStack reconcile,
+AWS, GCP, and Caddy; there are no Azure examples) are collected in
 [examples/README.md](examples/README.md).
 
 ### Interactive Dialogs
@@ -1192,7 +1279,9 @@ What each kind asks:
   for the transfer backend (`BACKEND`, default auto), whether to discard a
   failed run (`DISCARD_RUN_ID`), and an optional vCenter CA bundle
   (`VCENTER_CA_BUNDLE`). The OpenStack one also asks whether to compress the
-  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set).
+  QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set)
+  and whether to run `virt-v2v-in-place` on the guest (`GUEST_CONVERT`, default
+  no; with an optional `VIRTIO_WIN` path for Windows).
 - **Launch dialogs** pick the target project the same way and offer the
   migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
@@ -1238,19 +1327,20 @@ examples are collected in
 
 ### Resume and Discard
 
-After an Azure, OpenStack, or GCP OVF run fails, the package, manifest, and
-referenced VMDKs are retained for resume. Azure also retains staged VHD blobs. AWS retains
-its OVA in S3 according to its existing flow.
+After an Azure, OpenStack, or GCP OVF run fails, the package, manifest,
+and referenced VMDKs are retained for resume. Azure also retains staged VHD
+blobs. AWS retains its OVA in S3 according to its existing flow.
 
-The OVF descriptor, checksum file, and large VMDKs stay in the run-directory
-root; `disks/` contains only transient QCOW2 conversion files. Resume and
-cleanup use the complete run directory. A run directory you supply with
-`migration_run_dir` is never deleted by the playbook, even after success or
-`discard_failed_artifacts=true`; only the default `<root>/<target>/<vm>/<run-id>`
-directory is removed, so delete an override directory yourself when finished. Per-disk QCOW2 files are removed after
+The OVF descriptor, checksum file, and large VMDKs stay in the
+run-directory root; `disks/` contains only transient QCOW2 conversion
+files. Resume and cleanup use the complete run directory. A run directory
+you supply with `migration_run_dir` is never deleted by the playbook,
+even after success or `discard_failed_artifacts=true`; only the default
+`<root>/<target>/<vm>/<run-id>` directory is removed, so delete an override
+directory yourself when finished. Per-disk QCOW2 files are removed after
 each upload or failed per-disk attempt; the OVF package and manifest remain
-available for resume unless `discard_failed_artifacts=true` is set. The playbook prints the run ID; resume
-it later with:
+available for resume unless `discard_failed_artifacts=true` is set. The
+playbook prints the run ID; resume it later with:
 
 ```bash
 ./bin/run-playbook.sh playbooks/migrate-openstack-vm.yml \
@@ -1300,7 +1390,8 @@ Every launch names the instance after the source VM by default; set
 it. Catalog lookup still uses the source `VM_NAME`. Successful migrations
 delete their staging object.
 
-OpenStack supports `openstack_boot_mode`, `openstack_nics`,
+OpenStack supports `openstack_boot_mode` (`uefi` or `bios`; defaults to the
+source VM's firmware), `openstack_nics`,
 `openstack_preserve_mac`, `openstack_mac_addresses`, `openstack_fixed_ips`,
 and `openstack_auto_ip`; pass `openstack_volume_type` and
 `openstack_availability_zone` with `-e`. When supplying multiple image IDs
@@ -1339,7 +1430,8 @@ default user (`debian`, `ubuntu`, `fedora`, `rocky`, `almalinux`, `centos` for
 CentOS 7, `cloud-user` for RHEL, `ec2-user` for Amazon Linux). An unknown
 guest, or a migration recorded before this field existed, gets `root@`, which
 migrated images also give the key to; `-e launch_ssh_user=<user>` picks the
-user outright. The
+user outright, and `-e launch_ssh_private_key=<path>` sets the key in the printed
+command (default `~/.ssh/cloud`; empty omits `-i`). The
 datastore manifest adds `source_vm_name`, `boot_order_source` (`bootOptions`
 when the VM's configured boot order named a disk, otherwise `controller`), and
 `transfer_backend` (which backend read the disks, so a resume reuses it).
@@ -1464,34 +1556,33 @@ the prior server and its ports were removed; ports already attached to a
 server cannot be reused, and their MACs remain reserved until the ports are
 deleted.
 
-Every successful AWS, Azure, OpenStack, or GCP launch appends one record to
-`/work/migrate-v2v/catalogs/deployment-catalog.json` via
-`bin/append-deployment-catalog.py`.
-AWS records contain `vm_name`, `target_platform`, `ami_id`, the
-`import_task_id` it came from, `instance_id`, `instance_type`, the selected
-vault project key, `aws_region`, `vpc_subnet_id`, `status`, and `launched_at`;
-they also record `aws_account_id` when known. Azure records contain the VM name,
-subscription, resource group, location, size, boot image ID, attached data-disk
-names, private and public IPs, source migration ID, `status`, and `launched_at`.
-OpenStack records contain `vm_name`, `target_platform`,
-`openstack_server_id`, the ordered image IDs,
-project (key), optional project ID and region, flavor, network and
-per-NIC `openstack_network_ids`, the port-backed `openstack_nics` entries,
-explicit `openstack_port_ids` when ports were pre-created, attached
-data-volume IDs, `status`, and `launched_at`. Pre-created ports are not
-deleted automatically when a server is later deleted; remove them
-explicitly when their MACs or fixed IPs must be reused.
-`bin/reconcile-catalog-openstack.py` reports remaining port IDs as orphans
-when it removes a deployment whose server is already gone. GCP records contain the instance name, project, zone, machine
+Every successful AWS, Azure, OpenStack, or GCP launch appends one
+record to `/work/migrate-v2v/catalogs/deployment-catalog.json` via
+`bin/append-deployment-catalog.py`. AWS records contain `vm_name`,
+`target_platform`, `ami_id`, the `import_task_id` it came from, `instance_id`,
+`instance_type`, the selected vault project key, `aws_region`, `vpc_subnet_id`,
+`status`, and `launched_at`; they also record `aws_account_id` when
+known. Azure records contain the VM name, subscription, resource group,
+location, size, boot image ID, attached data-disk names, private and public
+IPs, source migration ID, `status`, and `launched_at`. OpenStack records
+contain `vm_name`, `target_platform`, `openstack_server_id`, the ordered image
+IDs, project (key), optional project ID and region, flavor, network and per-NIC
+`openstack_network_ids`, the port-backed `openstack_nics` entries, explicit
+`openstack_port_ids` when ports were pre-created, attached data-volume IDs,
+`status`, and `launched_at`. Pre-created ports are not deleted automatically
+when a server is later deleted; remove them explicitly when their MACs or
+fixed IPs must be reused. `bin/reconcile-catalog-openstack.py` reports
+remaining port IDs as orphans when it removes a deployment whose server is
+already gone. GCP records contain the instance name, project, zone, machine
 type, boot image, attached data-disk names, status, and `launched_at`.
 Deployment `status` is recorded as each cloud reports it, so its casing is
 per platform: OpenStack `ACTIVE`, AWS `running`, Azure and GCP `RUNNING`.
 Only the lowercase `retired` left by older reconciliation runs is shared.
 Compare `status` case-insensitively when filtering across platforms.
 Same accumulate-not-supersede reasoning as the migration catalog - the same
-AMI or image can legitimately be launched more than once, so history is kept
-rather than overwritten; only an exact rerun against the same target resource
-identity replaces its own prior entry.
+AMI or image can legitimately be launched more than once, so history is
+kept rather than overwritten; only an exact rerun against the same target
+resource identity replaces its own prior entry.
 
 ### Catalog Reconciliation
 
@@ -1539,9 +1630,12 @@ blocked by Entra ID security defaults does not matter:
 #### GCP Project Reconciliation
 
 GCP migration and deployment catalog entries are scoped by `gcp_project`.
-When more than one project is present, pass the project ID explicitly.
-Credentials come from `--credentials-file`, else an exported
-`GOOGLE_APPLICATION_CREDENTIALS`, else the GCP vault entry whose key,
+If the catalogs contain one project, reconciliation selects it automatically.
+For catalogs spanning projects, it selects a unique matching project from the
+GCP vault (the same single-entry default used by the playbooks), or the active
+Google default project when that identifies a catalog project. Otherwise,
+pass `--project-id`. Credentials come from `--credentials-file`, else an
+exported `GOOGLE_APPLICATION_CREDENTIALS`, else the GCP vault entry whose key,
 `gcp_project`, or `project_id` matches, else the gcloud application-default
 login:
 
@@ -1549,10 +1643,10 @@ login:
 ./bin/reconcile-catalog-gcp.py --project-id my-project-a --dry-run
 ```
 
-Entries for other projects are left untouched. When the credentials come
-from Google's defaults, the ambient default project from Application Default Credentials (gcloud
-config, `GOOGLE_CLOUD_PROJECT`) is ignored; the run is refused only when the
-credentials themselves carry a different project, as a service account key does.
+Entries for other projects are left untouched. Set `GOOGLE_CLOUD_PROJECT`
+when you want the ambient Google default to select a project from a
+multi-project catalog. If the default does not identify any catalog project,
+the run asks for `--project-id` rather than guessing.
 
 #### OpenStack Catalog Reconciliation
 
@@ -1560,10 +1654,10 @@ Reconcile OpenStack migration images and deployments against the live cloud
 when resources may have been removed outside this repository. The script uses
 resource UUIDs from both catalogs and removes the exact entries whose resources
 are missing. A shared clone name or server ID does not remove any other row.
-It never deletes cloud resources, but removed rows are not kept anywhere: if
-your catalogs are committed to Git, its history holds the previous state;
-otherwise copy the catalog files first. It also removes OpenStack entries already marked
-`retired` by an older reconciliation run. Use `--dry-run` first:
+It never deletes cloud resources, but removed rows are not kept anywhere:
+if your catalogs are committed to Git, its history holds the previous state;
+otherwise copy the catalog files first. It also removes OpenStack entries
+already marked `retired` by an older reconciliation run. Use `--dry-run` first:
 
 ```bash
 ./bin/reconcile-catalog-openstack.py \
@@ -1704,16 +1798,19 @@ migrate-v2v/
 │   ├── list-image-catalog.py    # Browse migrated images across all target platforms
 │   ├── lookup-migration-*.py    # Migration catalog lookups
 │   ├── migrate-{aws,azure,gcp,openstack}-vm.sh  # Environment-aware migration wrappers
-│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for Azure migration
+│   ├── migrate-azure-vddk-dialog.sh  # Interactive front end for datastore-direct Azure migration
 │   ├── migrate-azure-vm-vddk.sh # Datastore-direct Azure migration wrapper
 │   ├── migrate-*-dialog.sh      # Interactive front ends for the migration wrappers
-│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for OpenStack migration
+│   ├── migrate-openstack-vddk-dialog.sh  # Interactive front end for datastore-direct OpenStack migration
 │   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
 │   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
+│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py  # Shared helpers
+│   ├── exec-with-stdin-env.sh   # Passes secrets to a child process on stdin
 │   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration
-│   └── *-vault.sh               # Vault management scripts
+│   └── edit-vault.sh            # Vault editor
+├── Dockerfile, container-entrypoint.sh, .dockerignore  # Controller container image
 ├── doc/                         # Documentation, workflow diagram, presentation
 ├── examples/                    # Launch matrix, cloud-init data, Caddy and systemd units
 ├── playbooks/                   # Ansible playbooks
@@ -1725,6 +1822,8 @@ migrate-v2v/
 │   ├── tasks/migration/         # Per-target task pipelines (aws, azure, gcp, openstack, common)
 │   ├── templates/               # Files installed on guests
 │   └── vars/                    # Shared variables
+├── local/                       # Site-specific wrappers and helpers (not part of the public tree)
+├── requirements*.txt            # Pinned Python packages (container Azure constraints included)
 ├── requirements.yml             # Pinned Ansible collections
 ├── tests/                       # Static validation gate and catalog tests
 └── web/                         # Controller web UI (see web/README.md)
@@ -1733,10 +1832,14 @@ migrate-v2v/
     ├── forms.py                 # Form fields derived from the bin/*-dialog.sh exports
     ├── dialog-checksums.json    # Dialog hashes; a changed dialog needs form review
     ├── Caddyfile                # HTTPS reverse proxy config
-    ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address)
+    ├── caddy.md, docker.md      # Guides: Caddy HTTPS; Docker Compose deployment
+    ├── compose.yaml             # Container deployment (compose.lan.yaml adds a LAN address, compose.kvm.yaml /dev/kvm)
+    ├── .env.example             # Compose settings template
     ├── icons/, static/          # Cloud icons and the stylesheet
     └── tests/                   # Web unit tests
 ```
+
+The tree shows the main files, not every one.
 
 The migration playbooks are thin target entry points. Shared vSphere
 preflight, snapshot, clone, export, manifest inspection, catalog append, and
@@ -1755,21 +1858,26 @@ tests/validate.sh
 It checks playbook and shell syntax, shellcheck warnings in `bin/` and in the
 shell templates under `playbooks/templates/`, file references in the Markdown
 docs, vault headers, Python compilation, YAML, catalog structure, and the pinned
-Ansible collection versions. It is a static/structure gate rather than a cloud
-integration test. Focused unit tests exercise catalog helper behavior and the
-datastore-direct disk manifest (`bin/inspect-vm.py`), but no vSphere or cloud
+Ansible collection versions, the installed Python requirements, and the vault
+schema. It also runs every unit test in `tests/test_*.py` and `web/tests`
+(wrappers, dialogs, catalog tools, per-cloud facts and launch guards, vault
+credentials, datastore-direct streams, and the web controller). It is a
+static/structure gate rather than a cloud integration test: no vSphere or cloud
 operations are performed. Run it before submitting changes.
 
 ### Documentation
 
 - [web/README.md](web/README.md) - controller website, local accounts, and job queue
+- [doc/windows.md](doc/windows.md) - Windows guests: OpenStack guest conversion and virtio-win drivers
+- [web/docker.md](web/docker.md) - running the controller in Docker Compose
+- [web/caddy.md](web/caddy.md) - HTTPS with Caddy, in the container or on the control host
 - [doc/vaults.md](doc/vaults.md) - vault file layouts in one place
 - [doc/workflow.md](doc/workflow.md) - illustrated migration workflow
   ([SVG](doc/workflow.svg))
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
 - [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
-  Dependency plan for the migration runtime image used by the web controller
+  Pinned runtime-image recipe for the web controller
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides

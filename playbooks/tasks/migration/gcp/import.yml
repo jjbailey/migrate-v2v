@@ -27,8 +27,10 @@
 
 - name: Configure gcloud to use only the temporary service-account key
   ansible.builtin.set_fact:
-    gcp_gcloud_env:
-      CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE: "{{ gcp_sa_key_file.path }}"
+    gcp_gcloud_env: >-
+      {{ (gcp_gcloud_env | default({})) | combine({
+        'CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE': gcp_sa_key_file.path
+      }) }}
   no_log: true
 
 - name: Plan the staging object and image name for every disk

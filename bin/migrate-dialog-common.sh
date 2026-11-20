@@ -105,6 +105,19 @@ if [[ $MIGRATE_WRAPPER == *-vddk.sh ]] ; then
         else
             COMPRESS=false
         fi
+
+        guest_default=no
+        [ "${GUEST_CONVERT:-false}" = true ] && guest_default=yes
+        if yesno "Convert the guest for KVM with virt-v2v-in-place?\n\nInstalls virtio drivers and removes VMware tools. Required for Windows. Stages every disk before upload." "$guest_default" ; then
+            GUEST_CONVERT=true
+            # Windows guests also need the virtio-win drivers; leave empty for
+            # Linux guests or when VIRTIO_WIN / the default location applies.
+            VIRTIO_WIN=$(input "virtio-win ISO or directory (blank: download stable ISO to ${WEB_INPUT_DIR:-${ARTIFACT_ROOT:-/work/migrate-v2v}/web-inputs}/virtio-win.iso):" "${VIRTIO_WIN:-}") || abort
+            [ -z "$VIRTIO_WIN" ] || VIRTIO_WIN=$(realpath -m -- "$(anchor_path "$VIRTIO_WIN")")
+        else
+            GUEST_CONVERT=false
+            VIRTIO_WIN=""
+        fi
     fi
 fi
 
@@ -118,7 +131,8 @@ summary="Migration summary for $VM_NAME$method
   Artifact root...: $ARTIFACT_ROOT
   Quiesce snapshot: $QUIESCE_SNAPSHOT"
 [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || summary="$summary
-  Compress images.: $COMPRESS"
+  Compress images.: $COMPRESS
+  Guest convert...: ${GUEST_CONVERT:-false}"
 [[ $MIGRATE_WRAPPER == *-vddk.sh ]] && summary="$summary
   Backend.........: $BACKEND
   Discard run.....: ${DISCARD_RUN_ID:-none}
@@ -139,7 +153,11 @@ dialog_tmp_files+=("$file")
     printf 'export %s=%s\n' "$MIGRATE_TARGET_VAR" "$(quote "$target_value")"
     printf 'export VALIDATE_CERTS=%s\n' "$(quote "$VALIDATE_CERTS")"
     printf 'export QUIESCE_SNAPSHOT=%s\n' "$(quote "$QUIESCE_SNAPSHOT")"
-    [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || printf 'export COMPRESS=%s\n' "$(quote "$COMPRESS")"
+    [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || {
+        printf 'export COMPRESS=%s\n' "$(quote "$COMPRESS")"
+        printf 'export GUEST_CONVERT=%s\n' "$(quote "${GUEST_CONVERT:-false}")"
+        printf 'export VIRTIO_WIN=%s\n' "$(quote "${VIRTIO_WIN:-}")"
+    }
     [[ $MIGRATE_WRAPPER == *-vddk.sh ]] && {
         # CBT: TODO - not yet implemented ; re-enable in future release
         # printf 'export REQUIRE_CBT=%s\n' "$(quote "$REQUIRE_CBT")" ;

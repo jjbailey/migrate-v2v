@@ -10,6 +10,8 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
@@ -34,6 +36,59 @@ def catalog_scope(migration_catalog, deployment_catalog):
                 continue
             projects.add(project)
     return projects
+
+def default_project_id(projects, load_projects, credentials_file=None):
+    """Infer one catalog project from configured GCP defaults, if possible."""
+    if len(projects) == 1:
+        return next(iter(projects))
+
+    # Explicit Google project environment settings are the operator's chosen
+    # default. Use those before the vault's single-project default.
+    for name in ("GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "CLOUDSDK_CORE_PROJECT"):
+        project = os.environ.get(name, "").strip()
+        if project:
+            if project not in projects:
+                raise ValueError(
+                    f"default GCP project {project} from {name} has no catalog entries; "
+                    f"catalog projects: {', '.join(sorted(projects)) or '<none>'}")
+            return project
+
+    # A single project in gcp.yml is also the playbooks' default selection.
+    # When several vault entries exist, a unique overlap with the catalog is
+    # still an unambiguous choice.
+    if not credentials_file and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip():
+        configured = load_projects()
+        vault_projects = set()
+        for key, entry in (configured or {}).items():
+            if not isinstance(entry, dict):
+                continue
+            project = str(
+                entry.get("gcp_project") or entry.get("project_id") or key
+            ).strip()
+            if project:
+                vault_projects.add(project)
+        matches = vault_projects & projects
+        if len(matches) == 1:
+            return next(iter(matches))
+
+    # google.auth.default() reports GOOGLE_CLOUD_PROJECT or the active gcloud
+    # ADC project. Use it to scope a multi-project catalog to the user's
+    # current GCP default; resources in all other projects stay untouched.
+    if not credentials_file:
+        try:
+            credentials, project = google.auth.default(scopes=[COMPUTE_SCOPE])
+        except google.auth.exceptions.GoogleAuthError:
+            credentials, project = None, None
+        project = (getattr(credentials, "project_id", None) or project or "")
+        project = str(project).strip()
+        if project:
+            if project not in projects:
+                raise ValueError(
+                    f"default GCP project {project} from Google credentials has no catalog entries; "
+                    f"catalog projects: {', '.join(sorted(projects)) or '<none>'}")
+            return project
+
+    return None
 
 def validate_scope(migration_catalog, deployment_catalog, project_id):
     projects = catalog_scope(migration_catalog, deployment_catalog)
@@ -108,7 +163,7 @@ def find_missing_resources(session, project_id, migration_catalog, deployment_ca
         if entry.get("gcp_project") != project_id:
             continue
         image_names = [entry.get("gcp_boot_image_name"),
-                       *entry.get("gcp_data_image_names", [])]
+                       *(entry.get("gcp_data_image_names") or [])]
         if not image_names or any(not isinstance(name, str) or not name.strip() for name in image_names):
             raise ValueError(
                 f"GCP migration {entry.get('clone_name', '<unknown>')} has invalid GCP image names")
@@ -219,7 +274,8 @@ def main():
                         default=default_catalog_path("deployment-catalog.json"))
     parser.add_argument(
         "--project-id",
-        help="GCP project; inferred when the catalogs contain one project",
+        help="GCP project; inferred from a single catalog project, a single "
+             "vault project, or the active Google default when unambiguous",
     )
     parser.add_argument("--credentials-file", type=Path,
                         help="service-account JSON, instead of the vault")
@@ -248,18 +304,24 @@ def main():
             f"{entry.get('clone_name') or entry.get('gcp_instance_name') or '<unknown>'}: "
             "no gcp_project recorded, so it cannot be checked or removed")
     projects = catalog_scope(migration_catalog, deployment_catalog)
-    if args.project_id:
-        project_id = args.project_id
-    elif len(projects) == 1:
-        project_id = next(iter(projects))
-    else:
+    loaded = {}
+    def load_projects():
+        if "projects" not in loaded:
+            loaded["projects"] = vault_projects(args.vault, "gcp_projects")
+        return loaded["projects"]
+
+    project_id = args.project_id or default_project_id(
+        projects, load_projects, args.credentials_file)
+    if not project_id:
+        if not projects:
+            raise ValueError("catalog contains no GCP projects to reconcile")
         raise ValueError(
-            "catalog contains multiple GCP projects; provide --project-id"
-        )
+            "catalog contains multiple GCP projects and no default project can "
+            "be inferred; set GOOGLE_CLOUD_PROJECT, configure one matching "
+            "project in gcp.yml, or provide --project-id")
     validate_scope(migration_catalog, deployment_catalog, project_id)
     credentials, credential_project, source = credentials_for(
-        project_id, lambda: vault_projects(args.vault, "gcp_projects"),
-        args.vault, args.credentials_file)
+        project_id, load_projects, args.vault, args.credentials_file)
     if credential_project and str(credential_project) != str(project_id):
         raise ValueError(
             f"resolved GCP credentials belong to project {credential_project}, "

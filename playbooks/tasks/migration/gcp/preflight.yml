@@ -7,11 +7,8 @@
 - name: Select the GCP project for this run
   ansible.builtin.import_tasks: select-project.yml
 
-- name: Check gcloud
-  ansible.builtin.command: gcloud --version
-  register: gcloud_check
-  failed_when: gcloud_check.rc != 0
-  changed_when: false
+- name: Ensure the GCP Cloud CLI is available
+  ansible.builtin.import_tasks: ensure-gcloud.yml
 
 - name: Check the Migrate to Virtual Machines image-import command
   # The same command group start-import.yml and finish-import.yml run.
@@ -23,6 +20,7 @@
       - image-imports
       - --help
   register: gcp_image_import_command_check
+  environment: "{{ gcp_gcloud_env }}"
   failed_when: gcp_image_import_command_check.rc != 0
   changed_when: false
 

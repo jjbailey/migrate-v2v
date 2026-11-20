@@ -25,7 +25,7 @@ import time
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 try:
     from .forms import CLOUDS, F, exported_fields, wrapper_path
@@ -111,24 +111,46 @@ def verify_password(password, encoded):
 
 DUMMY_PASSWORD_HASH = password_hash(secrets.token_urlsafe(32))
 
-def checked_input_path(value):
-    """Resolve an uploaded-path field inside the operator-managed input area."""
+def checked_input_path(value, allow_missing=False, allow_directory=False):
+    """Resolve an input path inside the operator-managed input area."""
     if not value or not Path(value).is_absolute():
         return None
     try:
-        candidate = Path(value).resolve(strict=True)
+        candidate = Path(value).resolve(strict=not allow_missing)
         root = INPUT_DIR.resolve(strict=True)
         candidate.relative_to(root)
     except (OSError, RuntimeError, ValueError):
         return None
-    if not candidate.is_file() or not os.access(candidate, os.R_OK):
+    if candidate.exists():
+        readable_file = candidate.is_file() and os.access(candidate, os.R_OK)
+        readable_directory = (
+            allow_directory and candidate.is_dir()
+            and os.access(candidate, os.R_OK) and os.access(candidate, os.X_OK)
+        )
+        if not (readable_file or readable_directory):
+            return None
+    elif not allow_missing:
         return None
-    for private_root in (STATE, VAULT_DIR, CATALOG_DIR):
+    else:
         try:
-            candidate.relative_to(private_root.resolve(strict=False))
+            candidate.parent.resolve(strict=True).relative_to(root)
+        except (OSError, RuntimeError, ValueError):
+            return None
+        if not candidate.parent.is_dir():
+            return None
+    for private_root in (STATE, VAULT_DIR, CATALOG_DIR):
+        private_path = private_root.resolve(strict=False)
+        try:
+            candidate.relative_to(private_path)
             return None
         except ValueError:
             pass
+        if candidate.is_dir():
+            try:
+                private_path.relative_to(candidate)
+                return None
+            except ValueError:
+                pass
     try:
         if candidate == PASSFILE.resolve(strict=False):
             return None
@@ -260,6 +282,8 @@ def validate(mode, cloud, method, posted):
     for name in fields:
         meta = F[name]
         value = posted.get(name, "").strip()
+        if name == "VIRTIO_WIN" and posted.get("GUEST_CONVERT") != "true":
+            value = ""
         picks = posted.get(f"_pick_{name}", [])
         if meta.kind == "json" and picks and value in ("", "[]"):
             value = json.dumps(picks)
@@ -281,9 +305,21 @@ def validate(mode, cloud, method, posted):
             except ValueError:
                 errors.append(f"{meta.label} must be a JSON array.")
         if meta.kind == "path" and value:
-            resolved = checked_input_path(value)
+            allow_missing_virtio_default = (
+                name == "VIRTIO_WIN"
+                and posted.get("GUEST_CONVERT") == "true"
+                and Path(value) == INPUT_DIR / "virtio-win.iso"
+            )
+            resolved = checked_input_path(
+                value,
+                allow_missing=allow_missing_virtio_default,
+                allow_directory=name == "VIRTIO_WIN",
+            )
             if resolved is None:
-                errors.append(f"{meta.label} must name a readable file under {INPUT_DIR}.")
+                if name == "VIRTIO_WIN":
+                    errors.append(f"{meta.label} must name a readable file or directory under {INPUT_DIR}, or the default virtio-win ISO path.")
+                else:
+                    errors.append(f"{meta.label} must name a readable file under {INPUT_DIR}.")
             else:
                 value = str(resolved)
         values[name] = value
@@ -379,8 +415,11 @@ def worker():
                     if not isinstance(values, dict):
                         raise ValueError("job values are not a JSON object")
                     env = {key: os.environ[key] for key in (
-                        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "DIB7_VENV_BIN",
-                        "ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_LOCAL_TEMP") if key in os.environ}
+                        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "ANSIBLE_ASYNC_DIR", "DIB7_VENV_BIN",
+                        "ANSIBLE_COLLECTIONS_PATH", "ANSIBLE_LOCAL_TEMP", "WEB_INPUT_DIR",
+                        "LIBGUESTFS_PATH", "OVFTOOL_ACCEPT_LICENSE", "OVFTOOL_INSTALL_DIR",
+                        "OPENVDDK_INSTALL_DIR", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY",
+                        "https_proxy", "http_proxy", "no_proxy") if key in os.environ}
                     env.update({"ARTIFACT_ROOT": str(ARTIFACT_ROOT),
                                 "MIGRATE_V2V_VAULT_DIR": str(VAULT_DIR),
                                 "MIGRATE_V2V_CATALOG_DIR": str(CATALOG_DIR),
@@ -551,7 +590,8 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
             sections.append(f'<input type="hidden" name="{name}" value="{esc(project)}">')
             continue
         meta = F[name]
-        value = posted.get(name, defaults.get(name, meta.default))
+        field_default = str(INPUT_DIR / "virtio-win.iso") if name == "VIRTIO_WIN" else meta.default
+        value = posted.get(name, defaults.get(name, field_default))
         options = None
         if name == "VSPHERE_TARGET_VCENTER":
             options = [(t, t) for t in vault_keys("vsphere.yml", "vsphere_projects")]
@@ -671,10 +711,16 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/login":
             if self.user():
                 return self.redirect("/")
-            token = sign({"exp": int(time.time()) + 600, "csrf": secrets.token_urlsafe(24)})
-            csrf = unsign(token)["csrf"]
+            session = self.session()
+            if session and not session.get("user") and session.get("csrf"):
+                csrf = session["csrf"]
+                headers = None
+            else:
+                csrf = secrets.token_urlsafe(24)
+                token = sign({"exp": int(time.time()) + 600, "csrf": csrf})
+                headers = {"Set-Cookie": self.session_cookie(token, 600)}
             body = f'''<section class="login panel"><div class="eyebrow">CONTROLLER ACCESS</div><h1>Sign in</h1><p>Use a local account for this controller.</p><form method="post" action="/login">{csrf_input(csrf)}<label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="button">Sign in</button></form></section>'''
-            return self.send(200, page("Sign in", body), {"Set-Cookie": self.session_cookie(token, 600)})
+            return self.send(200, page("Sign in", body), headers)
         if not self.require_auth():
             return
         user = self.user()
@@ -1101,6 +1147,46 @@ def add_user(name):
     save_users(entries)
     print(f"Saved local account {name}.")
 
+def bootstrap_user():
+    """Create the initial web account from caddy.yml, without replacing users."""
+    import fcntl
+
+    lock_path = STATE / "user-bootstrap.lock"
+    with open(lock_path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entries = users()
+        if entries:
+            print("A local web account already exists; bootstrap skipped.")
+            return
+
+        vault = VAULT_DIR / "caddy.yml"
+        if not vault.is_file():
+            raise SystemExit(f"Initial web account vault is missing: {vault}")
+        if not PASSFILE.is_file():
+            raise SystemExit(f"Vault password file is missing: {PASSFILE}")
+        try:
+            import yaml
+        except ImportError:
+            raise SystemExit("PyYAML is required to read the initial web account vault.")
+        try:
+            result = subprocess.run(
+                ["ansible-vault", "view", str(vault), "--vault-password-file", str(PASSFILE)],
+                input=b"", capture_output=True, timeout=30, check=True)
+            data = yaml.safe_load(result.stdout)
+        except (OSError, subprocess.SubprocessError, ValueError, yaml.YAMLError):
+            raise SystemExit("Could not decrypt or parse the initial web account vault.")
+
+        if not isinstance(data, dict):
+            raise SystemExit("Initial web account vault must contain a YAML mapping.")
+        name = data.get("web_user")
+        password = data.get("web_password")
+        if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{2,31}", name):
+            raise SystemExit("caddy.yml web_user must be a valid 3–32 character username.")
+        if not isinstance(password, str) or len(password) < 12:
+            raise SystemExit("caddy.yml web_password must contain at least 12 characters.")
+        save_users({name: password_hash(password)})
+        print(f"Created initial local web account {name} from caddy.yml.")
+
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1108,13 +1194,17 @@ def main():
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
     user_cmd = sub.add_parser("user")
-    user_cmd.add_argument("action", choices=("add", "delete", "list"))
+    user_cmd.add_argument("action", choices=("add", "bootstrap", "delete", "list"))
     user_cmd.add_argument("name", nargs="?")
     args = parser.parse_args()
     init_state()
     if args.command == "user":
         if args.action == "list":
             print("\n".join(sorted(users())))
+        elif args.action == "bootstrap":
+            if args.name:
+                parser.error("user bootstrap does not take a name")
+            bootstrap_user()
         elif not args.name:
             parser.error("user name required")
         elif args.action == "add":

@@ -36,6 +36,8 @@ REQUIRED_KEYS = ("tenant_id", "subscription_id", "client_id",
                  "client_secret", "resource_group")
 
 def select_vault_entry(vault, requested):
+    if not Path(vault).exists():
+        raise SystemExit(f"no vault at {vault}; use --vault or export credentials")
     data = read_vault(vault)
     projects = {str(key): value or {} for key, value in (
         data.get("azure_projects") or {}).items()}

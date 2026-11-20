@@ -7,8 +7,11 @@
 import argparse
 import json
 import shutil
+import sys
 import textwrap
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from catalog_common import default_catalog_path, read_snapshot, timestamp_sort_key
 

@@ -1,0 +1,108 @@
+---
+# playbooks/tasks/migration/openstack/guest-convert-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Optional guest conversion for the datastore-direct path
+# (openstack_guest_convert=true). virt-v2v-in-place inspects the guest across
+# all of its disks, so unlike the plain path nothing is uploaded until every
+# disk is converted:
+#
+#   1. stream and convert every pending disk to a staged QCOW2 (uncompressed:
+#      the in-place pass rewrites clusters, so compression waits until after it)
+#   2. run virt-v2v-in-place over the whole disk set, in boot order
+#   3. optionally compress each disk (openstack_convert_compress)
+#
+# The upload loop in import-vddk.yml then runs as usual. Peak staging is the
+# whole VM rather than one or two disks. A marker file records a finished
+# conversion so a resume never mixes converted and unconverted disks.
+#
+# Expects: openstack_pending_disks (every disk of the VM, in manifest order),
+# openstack_staging_dir, artifact_manifest.
+
+- name: Re-check the guest conversion prerequisites for this run
+  # A resume skips prepare-source-manifest.yml, which does this before the snapshot.
+  ansible.builtin.include_tasks: guest-convert-check-vddk.yml
+  vars:
+    source_guest_id: "{{ artifact_manifest.source_guest_id | default('') }}"
+
+- name: Start the first disk's stream and conversion
+  ansible.builtin.include_tasks: convert-disk-vddk.yml
+  vars:
+    openstack_convert_disk: "{{ openstack_pending_disks | first }}"
+    openstack_convert_compress: false
+
+- name: Convert every disk, one conversion ahead
+  ansible.builtin.include_tasks: guest-convert-disk-vddk.yml
+  loop: "{{ openstack_pending_disks }}"
+  loop_control:
+    loop_var: openstack_disk
+    index_var: openstack_pending_position
+    label: "disk {{ openstack_disk.index }}"
+
+- name: Run virt-v2v-in-place over the whole disk set
+  vars:
+    openstack_guest_convert_argv: >-
+      {{ openstack_guest_convert_args if (openstack_guest_convert_args is not string)
+         else ((openstack_guest_convert_args | from_yaml) if (openstack_guest_convert_args | trim).startswith('[')
+               else openstack_guest_convert_args.split()) }}
+  # libguestfs launches its appliance directly rather than through libvirt,
+  # so it needs no libvirtd. The fixed appliance path is set on the play, and
+  # the virtio-win location is given only to a Windows guest, the one case
+  # that reads it.
+  environment: >-
+    {{ {'LIBGUESTFS_BACKEND': 'direct',
+        'LIBGUESTFS_PATH': openstack_libguestfs_path
+          | default('/work/migrate-v2v/libguestfs-appliance')}
+       | combine({'VIRTIO_WIN': openstack_virtio_win} if (openstack_guest_is_windows | bool) else {}) }}
+  ansible.builtin.command:
+    argv: >-
+      {{ ['virt-v2v-in-place', '-i', 'disk']
+         + (openstack_pending_disks
+            | map(attribute='index')
+            | map('string')
+            | map('regex_replace', '^', openstack_staging_dir ~ '/disk-')
+            | map('regex_replace', '$', '.qcow2')
+            | list)
+         + (openstack_guest_convert_argv | map('string') | list) }}
+  async: "{{ openstack_convert_async_timeout | int }}"
+  poll: 30
+  register: guest_convert_result
+  changed_when: true
+  # Failure is reported below, with the log path and the end of the output.
+  failed_when: false
+
+- name: Keep the virt-v2v-in-place log in the run directory
+  ansible.builtin.copy:
+    content: |
+      {{ guest_convert_result.stdout | default('') }}
+      {{ guest_convert_result.stderr | default('') }}
+    dest: "{{ migration_run_dir }}/virt-v2v-in-place.log"
+    mode: "0600"
+
+- name: Fail if guest conversion failed
+  ansible.builtin.fail:
+    msg: >-
+      virt-v2v-in-place failed (exit {{ guest_convert_result.rc | default('unknown') }};
+      full log {{ migration_run_dir }}/virt-v2v-in-place.log):
+      {{ (guest_convert_result.stderr_lines | default([]))[-15:] | join(' | ') }}
+  when: guest_convert_result.rc | default(1) != 0
+
+- name: Record that this run's disks are guest-converted
+  ansible.builtin.copy:
+    content: "{{ {'guest_converted': true, 'windows': openstack_guest_is_windows | bool} | to_json }}\n"
+    dest: "{{ migration_run_dir }}/guest-converted.json"
+    mode: "0600"
+
+- name: Compress each converted disk after the in-place pass
+  ansible.builtin.shell: |
+    set -eu
+    disk={{ (openstack_staging_dir ~ '/disk-' ~ openstack_disk.index ~ '.qcow2') | quote }}
+    {{ qemu_img_bin | quote }} convert -c -o cluster_size=2M -f qcow2 -O qcow2 "$disk" "$disk.tmp"
+    mv -f "$disk.tmp" "$disk"
+  loop: "{{ openstack_pending_disks }}"
+  loop_control:
+    loop_var: openstack_disk
+    label: "disk {{ openstack_disk.index }}"
+  changed_when: true
+  when: openstack_convert_compress | bool
+

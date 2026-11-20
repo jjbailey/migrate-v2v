@@ -212,7 +212,7 @@ def main():
         # the exact launch to replace on an idempotent catalog append.
         catalog["deployments"] = [
             old for old in catalog["deployments"]
-            if not same_deployment_identity(old, entry)
+            if not (isinstance(old, dict) and same_deployment_identity(old, entry))
         ]
         catalog["deployments"].append(entry)
         write_catalog(path, catalog, "deployments")

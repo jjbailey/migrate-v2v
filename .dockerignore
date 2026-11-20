@@ -2,14 +2,30 @@
 # runtime data, downloaded tools, and repository history out of the image.
 .git/
 .ansible/
+.aws/
+.agents/
+.codex/
+local/
+tests/
+web/tests/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.venv/
+venv/
+**/venv/
 /vaults/
 /catalogs/
 /artifacts/
 /output/
 /tools/
 /secrets/
-.env
-.env.*
+**/.env
+**/.env.*
+!web/.env.example
 
 # Local migration outputs and tool archives must not become image layers.
 VMware-ovftool-*.zip
@@ -20,6 +36,8 @@ VMware-ovftool-*.zip
 **/*.img
 **/*.log
 **/*.retry
+**/*.sqlite3
+**/*.db
 
 # Python caches.
 **/__pycache__/

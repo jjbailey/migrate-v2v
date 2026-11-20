@@ -45,6 +45,10 @@ for address in $(hostname -I 2> /dev/null) ; do
     esac
 done
 export CADDY_HOSTS
+# IP-literal clients omit SNI. Use the first discovered host address as the
+# default TLS name; Caddy checks that such requests' Host header matches.
+FIRST_CADDY_IPV4="$(hostname -I 2> /dev/null | awk '{for (i = 1; i <= NF; i++) if ($i !~ /:/) {print $i; exit}}')"
+export CADDY_DEFAULT_SNI="${CADDY_DEFAULT_SNI:-${FIRST_CADDY_IPV4:-localhost}}"
 
 caddy run --config "$PROJECT_HOME/web/Caddyfile" &
 CADDY_PID=$!

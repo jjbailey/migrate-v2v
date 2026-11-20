@@ -34,6 +34,11 @@ class WrapperTestCase(unittest.TestCase):
         stub = stub_bin / "ansible-playbook"
         stub.write_text(STUB)
         stub.chmod(0o755)
+        # The standard migrate wrappers need ovftool on PATH or they try to
+        # download it (ansible-run.sh), which a unit test must never do.
+        ovftool = stub_bin / "ovftool"
+        ovftool.write_text("#!/bin/sh\nexit 0\n")
+        ovftool.chmod(0o755)
         self.argv_file = self.tmp / "argv.json"
         # An empty HOME has no ~/.dib-vault-pass, so ansible-run.sh
         # appends --ask-vault-pass, which the stub ignores.
@@ -139,13 +144,22 @@ class MigrateWrapperTests(WrapperTestCase):
     def test_vddk_options(self):
         self.run_wrapper("migrate-openstack-vm-vddk.sh", {
             "VM_NAME": "vm", "BACKEND": "curl", "COMPRESS": "true",
+            "GUEST_CONVERT": "true", "VIRTIO_WIN": "/iso/virtio win.iso",
             "VCENTER_CA_BUNDLE": "/etc/ssl/my ca.pem"})
         extra = self.extra_vars()
         self.assertEqual(extra["vddk_backend"], "curl")
         self.assertEqual(extra["openstack_convert_compress"], "true")
+        self.assertEqual(extra["openstack_guest_convert"], "true")
+        self.assertEqual(extra["openstack_virtio_win"], "/iso/virtio win.iso")
         self.assertEqual(extra["vddk_ca_bundle"], "/etc/ssl/my ca.pem")
         self.assertNotIn("vddk_require_cbt", extra)
         self.assertNotIn("discard_run_id", extra)
+
+    def test_guest_convert_is_off_unless_asked_for(self):
+        self.run_wrapper("migrate-openstack-vm-vddk.sh", {"VM_NAME": "vm"})
+        extra = self.extra_vars()
+        self.assertNotIn("openstack_guest_convert", extra)
+        self.assertNotIn("openstack_virtio_win", extra)
 
     def test_azure_vddk_options(self):
         self.run_wrapper("migrate-azure-vm-vddk.sh", {

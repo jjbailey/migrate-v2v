@@ -2,6 +2,7 @@ services:
   https:
     environment:
       CADDY_HOSTS: "localhost:8443, 127.0.0.1:8443, ${WEB_ADDRESS:?Set WEB_ADDRESS to this controller's LAN IP}:8443"
+      CADDY_DEFAULT_SNI: ${WEB_ADDRESS:?Set WEB_ADDRESS to this controller's LAN IP}
     ports:
       - target: 8443
         published: "8443"

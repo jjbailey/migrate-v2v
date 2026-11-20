@@ -1,6 +1,6 @@
 {
-  "launch-dialog-common.sh": "dccc573a3fcccb1bbcc9703501e1c8eb2475a6a9f9e8602d8ce4d0b306d10dd9",
-  "migrate-dialog-common.sh": "95b87206cbb021083338bca69c77f4a76dd2e8e3f73046c9d07aebafe35f0d5a",
+  "launch-dialog-common.sh": "4c50f78f3ca132609c7cc65c9ab71a15ea102f7add4845e141e285958e3956a4",
+  "migrate-dialog-common.sh": "1362965c937dce5e9b051adc0701f1579f3152a06f85bc7a9656a40b86598c35",
   "launch-aws-dialog.sh": "7b9efae074b293178d3e15ee736f57b28efa59aceb929c23e31a4bc20f6fe824",
   "launch-azure-dialog.sh": "42d6c1afb15c67cd54093bd8d697fd761b9aed05dc9e98a048eb458e904abe9a",
   "launch-gcp-dialog.sh": "ebe67017476e4e9bf3ac015132970c7fc220241a00d13a2432e11fcdb072832e",

@@ -25,6 +25,8 @@
       - "{{ playbook_dir }}/../bin/install-ovftool.py"
   environment:
     OVFTOOL_INSTALL_DIR: "{{ ovftool_install_dir_effective }}"
+    OVFTOOL_ACCEPT_LICENSE: "{{ lookup('ansible.builtin.env', 'OVFTOOL_ACCEPT_LICENSE') | default('1', true) }}"
+    OVFTOOL_ARCHIVE: "{{ lookup('ansible.builtin.env', 'OVFTOOL_ARCHIVE') }}"
   register: ovftool_install_result
   changed_when: "'Installed OVF Tool ' in (ovftool_install_result.stdout | default(''))"
   when: ovftool_check.rc != 0

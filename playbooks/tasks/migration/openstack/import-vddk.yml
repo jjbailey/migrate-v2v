@@ -14,6 +14,9 @@
 # bound by the network, so overlapping them hides the shorter of the two on
 # every disk after the first. Peak staging space is two qcow2 files instead of
 # one, which is why the lookahead is exactly one disk and not the whole set.
+#
+# With openstack_guest_convert the disks are all converted first
+# (guest-convert-vddk.yml) and the loop below only uploads them.
 
 - name: Resolve which disks already have a Glance image
   ansible.builtin.include_tasks: check-image.yml
@@ -22,12 +25,77 @@
     loop_var: openstack_disk
     label: "disk {{ openstack_disk.index }}"
 
+- name: Check whether an earlier attempt of this run guest-converted its disks
+  ansible.builtin.stat:
+    path: "{{ migration_run_dir }}/guest-converted.json"
+  register: guest_converted_marker
+
+- name: Refuse to resume a guest-converted run without guest conversion
+  ansible.builtin.fail:
+    msg: >-
+      An earlier attempt of this run already guest-converted its disks, so the
+      rest must be converted the same way. Resume with GUEST_CONVERT=true
+      (-e openstack_guest_convert=true), or discard the run.
+  when:
+    - guest_converted_marker.stat.exists
+    - not (openstack_guest_convert | bool)
+    - openstack_pending_disks | length > 0
+
+# virt-v2v-in-place converts a guest's disks together, so a partly uploaded set
+# cannot be finished by converting only the rest: the active images are
+# redone with it. They carry this run's ID in their names, so nothing else is
+# touched, and deleting them is what check-image.yml already does for a
+# non-active one.
+- name: Redo every disk when guest conversion resumes a partly uploaded run
+  when:
+    - openstack_guest_convert | bool
+    - openstack_pending_disks | length > 0
+    - openstack_disk_image_ids | length > 0
+  block:
+    - name: Delete the run's already-uploaded images
+      openstack.cloud.image:
+        auth: "{{ openstack_auth }}"
+        region_name: "{{ openstack_region_name }}"
+        name: "{{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}"
+        state: absent
+      loop: "{{ artifact_manifest.disks }}"
+      loop_control:
+        loop_var: openstack_disk
+        label: "disk {{ openstack_disk.index }}"
+      no_log: true
+
+    - name: Wait for the deleted images to disappear
+      openstack.cloud.image_info:
+        auth: "{{ openstack_auth }}"
+        region_name: "{{ openstack_region_name }}"
+        name: "{{ openstack_image_prefix }}-disk-{{ openstack_disk.index }}"
+      register: guest_convert_redo_check
+      until: guest_convert_redo_check.images | length == 0
+      retries: "{{ openstack_import_poll_retries | int }}"
+      delay: "{{ openstack_import_poll_delay | int }}"
+      loop: "{{ artifact_manifest.disks }}"
+      loop_control:
+        loop_var: openstack_disk
+        label: "disk {{ openstack_disk.index }}"
+      no_log: true
+
+    - name: Queue every disk for conversion and upload
+      ansible.builtin.set_fact:
+        openstack_pending_disks: "{{ artifact_manifest.disks }}"
+        openstack_disk_image_ids: {}
+
 - name: Report the disks that still need conversion
   ansible.builtin.debug:
     msg: >-
       {{ openstack_pending_disks | length }} of
       {{ artifact_manifest.disks | length }} disk(s) need conversion and upload;
       {{ openstack_disk_image_ids | length }} already present in Glance.
+
+- name: Convert the guest, then upload each disk
+  ansible.builtin.include_tasks: guest-convert-vddk.yml
+  when:
+    - openstack_guest_convert | bool
+    - openstack_pending_disks | length > 0
 
 - name: Convert and upload each remaining disk
   ansible.builtin.include_tasks: import-disk-vddk.yml

@@ -22,7 +22,9 @@
     migration_target: openstack
     export_format: datastore
     qemu_img_bin: qemu-img
-    openstack_boot_mode: uefi
+    # Empty follows the source VM's firmware (efi -> uefi, else bios);
+    # set uefi or bios to override.
+    openstack_boot_mode: ""
     resume_run_id: ""
     # Discard a failed run instead of resuming it: removes its retained
     # snapshot, its run directory, and any images it uploaded. Nothing else runs.
@@ -38,6 +40,29 @@
     # Compress the QCOW2 as it is written (qemu-img convert -c): a smaller
     # staging file and upload for more CPU. Worth it on a slow upload link.
     openstack_convert_compress: false
+    # Run virt-v2v-in-place over the converted disks before upload: installs
+    # virtio drivers, removes VMware drivers and tools, and fixes boot
+    # configuration so the guest boots under KVM. Windows needs it. Converts
+    # every disk first (no upload overlap) and stages the whole VM; see
+    # doc/datastore-direct.md.
+    openstack_guest_convert: false
+    # Extra virt-v2v-in-place arguments (a list, or a whitespace-separated
+    # string), e.g. ["--firstboot", "/path/to/script.sh"].
+    openstack_guest_convert_args: []
+    # virtio-win drivers for Windows guests: an ISO or an unpacked directory
+    # (virt-v2v's VIRTIO_WIN). The stable ISO is downloaded to artifact_root
+    # on the first Windows conversion when no override is supplied.
+    openstack_virtio_win_default_path: >-
+      {{ (lookup('ansible.builtin.env', 'WEB_INPUT_DIR')
+          | default(artifact_root ~ '/web-inputs', true)
+          | regex_replace('/+$', '')) }}/virtio-win.iso
+    openstack_virtio_win: >-
+      {{ lookup('ansible.builtin.env', 'VIRTIO_WIN') | default(openstack_virtio_win_default_path, true) }}
+    # A fixed libguestfs appliance avoids supermin needing to read the
+    # controller's /boot kernel as the unprivileged migration user.
+    openstack_libguestfs_path: >-
+      {{ lookup('ansible.builtin.env', 'LIBGUESTFS_PATH')
+         | default(artifact_root ~ '/libguestfs-appliance', true) }}
     # Conversions run in the background so they can overlap the previous disk's
     # upload; these bound how long one may take.
     openstack_convert_async_timeout: 86400

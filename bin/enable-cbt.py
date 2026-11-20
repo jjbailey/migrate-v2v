@@ -125,6 +125,8 @@ def main():
         raise SystemExit(f"enable-cbt: {error}")
     try:
         vm = find_vm(service.RetrieveContent(), datacenter, args.vm)
+        if vm.config is None:
+            raise SystemExit(f"enable-cbt: {args.vm} has no readable configuration (orphaned or inaccessible?)")
         if vm.config.changeTrackingEnabled:
             print(f"CBT is already enabled on {args.vm}")
             return

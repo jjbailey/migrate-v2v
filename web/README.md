@@ -1,4 +1,4 @@
-# Controller web UI
+# Controller Web UI
 
 ![The controller overview: migrate and launch cards for AWS, Azure, Google Cloud, and OpenStack, with recent jobs below](overview.svg)
 
@@ -31,66 +31,45 @@ and behavior, update `web/dialog-checksums.json`. If a dialog exports a new
 variable without web metadata, the form refuses to load rather than silently
 dropping it. The dialog script is authoritative if wording or behavior differs.
 
-## Runtime
+## Running the controller
 
-The web process uses only Python's standard library; reading
-Ansible Vaults and the migration catalog needs the repository's
-existing Python/Ansible dependencies. The actual migration and launch
-wrappers require the full runtime listed in [the container dependency
-plan](../doc/ubuntu-24.04-container-dependencies.md). That image has
-not yet been built in this repository. `compose.yaml` therefore requires
-`MIGRATE_V2V_RUNTIME_IMAGE` to name a prepared image with those tools and
-the Python environment on `PATH`. The VDDK kit and OVF Tool continue to
-install under the mounted artifact root.
+The controller is a Python process, `python3 web/app.py serve`, that listens on
+plain HTTP (`127.0.0.1:8080` by default). It needs HTTPS in front of it because
+its login cookie is `Secure`. Two choices are independent of each other:
 
-The image must include `python3`, `ansible-vault`, PyYAML, and all tools
-needed by the selected workflows. Run with a UID/GID that can read the vault
-password file and write the artifact root. The repository itself is mounted
-read-only; artifacts, catalog, vaults, tools, and web state live under
-`/work/migrate-v2v`.
+- **Where the app runs.** In a container, from the Compose stack in
+  [docker.md](docker.md), which bundles every runtime dependency. Or directly on
+  the Ansible control host, below.
+- **Where Caddy runs.** In the Compose stack, or on the control host (as a
+  script for testing or as a systemd service). See [caddy.md](caddy.md).
 
-Files selected in the web forms (SSH public keys, a vCenter CA bundle,
-or OpenStack cloud-init data) must be placed under `WEB_INPUT_DIR`, which
-defaults to `ARTIFACT_ROOT/web-inputs` (`/work/migrate-v2v/web-inputs` in
-Compose). The site resolves symlinks and rejects files outside that directory,
-including vault and web-state files. Do not put secrets in the input directory.
+### On the control host
 
-## Setup
-
-1. Copy `web/.env.example` to `web/.env`, set the runtime image, host UID/GID,
-   artifact root, and absolute vault password file path. Keep `.env` private.
-
-2. Create a local account:
-
-   ```sh
-   docker compose --env-file web/.env -f web/compose.yaml run --rm controller python3 web/app.py user add operator
-   ```
-
-3. Start the site:
-
-   ```sh
-   docker compose --env-file web/.env -f web/compose.yaml up -d
-   ```
-
-4. Open `https://localhost:8443`. Caddy uses a per-install local certificate
-   authority. Its root certificate is in the persistent `caddy-data` volume at
-   `/data/caddy/pki/authorities/local/root.crt`; trust that root on each client
-   that will open the site. Keep the CA private key in the volume private.
-
-By default Compose publishes HTTPS on `127.0.0.1` only. To also serve this
-controller's own LAN IP, set `WEB_ADDRESS` in `web/.env` to that IP and
-start with both files:
+The Python process can use the repository dependencies installed on the host.
+From the repository root, set `VAULT_PASSWORD_FILE` to the existing readable
+vault password file, then create a local account:
 
 ```sh
-docker compose --env-file web/.env -f web/compose.yaml -f web/compose.lan.yaml up -d
+export VAULT_PASSWORD_FILE="$HOME/.dib-vault-pass"
+python3 web/app.py user add operator
 ```
 
-Then open `https://CONTROLLER_IP:8443`. The configured IP must belong to
-this controller. The controller HTTP process has no published port; Caddy is
-the sole entry point. The site's local accounts use salted scrypt password
-hashes, signed HttpOnly sessions, and CSRF tokens. Run `python3 web/app.py
-user add NAME` in the controller service again to add or reset an account;
-`user delete NAME` removes one.
+Start the web backend:
+
+```sh
+python3 web/app.py serve
+```
+
+Then put HTTPS in front of it with Caddy ([caddy.md](caddy.md)); for testing,
+`local/run-caddy.sh` starts both. A service install uses the systemd units in
+[examples/README.md](../examples/README.md#caddy-on-the-ansible-control-host).
+
+## Accounts, jobs, and security
+
+The site's local accounts use salted scrypt password hashes, signed HttpOnly
+sessions, and CSRF tokens. Manage them with `python3 web/app.py user add NAME`
+(also resets a password), `user delete NAME`, and `user list`. In Docker, run the
+same commands in the controller service (see [docker.md](docker.md#setup)).
 
 Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
 `WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not
@@ -105,36 +84,21 @@ grouped by cloud provider in a print-friendly view, with a separate option
 to inspect both catalog files as raw JSON. It can also clear finished job
 records and their output logs; queued and running jobs are retained.
 
-## Run directly on this host
+## Files selected in the forms
 
-The Python process can use the repository dependencies installed on the
-host. From the repository root, set `VAULT_PASSWORD_FILE` to the existing
-readable vault password file, then create a local account:
+Files selected in the web forms (SSH public keys, a vCenter CA bundle,
+OpenStack cloud-init data, or virtio-win driver files) must be placed under
+`WEB_INPUT_DIR`, which defaults to `ARTIFACT_ROOT/web-inputs`
+(`/work/migrate-v2v/web-inputs` in Compose). The site resolves symlinks and
+rejects input paths outside that directory, including vault and web-state
+files. Do not put secrets in the input directory. The virtio-win field accepts
+an ISO file or an unpacked driver directory.
 
-```sh
-export VAULT_PASSWORD_FILE="$HOME/.dib-vault-pass"
-python3 web/app.py user add operator
-```
-
-Start Caddy and the web backend together. If `local/run-caddy.sh` does not
-exist yet, copy the example first; `-n` keeps an existing script:
-
-```sh
-cp -n examples/run-caddy-example.sh local/run-caddy.sh
-```
-
-Modify local/run-caddy.sh as required. To run both as services instead, see
-the systemd units in [examples/README.md](../examples/README.md#caddy-on-the-ansible-control-host).
-
-```sh
-./local/run-caddy.sh
-```
-
-The script binds Caddy on all IPv4 and IPv6 interfaces and includes every
-IP assigned to the host when it starts. Open `https://localhost:8443` or
-`https://<controller-ip>:8443`. If the host's addresses change, restart the
-script so Caddy can issue certificates for the new addresses. Caddy must be
-installed separately; it is not bundled in the repository. Its local CA may
-need to be trusted by each client browser. For temporary local development
-without Caddy, set `WEB_SECURE_COOKIE=false`, start `python3 web/app.py
-serve --host 127.0.0.1 --port 8080`, and open `http://127.0.0.1:8080`.
+For an OpenStack datastore-direct migration with guest conversion enabled, the
+host play installs Ubuntu's `virt-v2v`, `libguestfs-tools`, and Windows
+`rhsrvany` packages if needed, then builds the fixed appliance under
+`ARTIFACT_ROOT/libguestfs-appliance`. The container image has those packages
+already and uses its baked appliance at `/tmp/libguestfs-appliance`. Windows
+conversions download Fedora's stable virtio-win ISO to
+`ARTIFACT_ROOT/web-inputs/virtio-win.iso` when missing; the form pre-fills that
+path.

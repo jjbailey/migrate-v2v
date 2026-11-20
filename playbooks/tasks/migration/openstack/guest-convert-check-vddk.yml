@@ -1,0 +1,76 @@
+---
+# playbooks/tasks/migration/openstack/guest-convert-check-vddk.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Guest-conversion checks that need the source VM's guest OS, run from
+# common/prepare-source-manifest.yml before the snapshot is taken. Expects
+# source_guest_id and openstack_virtio_win.
+
+- name: Record whether the source guest is Windows
+  # vSphere guest IDs: windows9_64Guest, windows2019srv_64Guest, winNetStandardGuest, ...
+  ansible.builtin.set_fact:
+    openstack_guest_is_windows: "{{ (source_guest_id | default('')) is match('(?i)^win') }}"
+
+- name: Check whether the Windows firstboot helper is installed
+  ansible.builtin.command:
+    argv: [dpkg-query, -W, "-f=${Status}", rhsrvany]
+  register: rhsrvany_package_status
+  failed_when: false
+  changed_when: false
+  when: openstack_guest_is_windows | bool
+
+- name: Install the Windows firstboot helper when missing
+  ansible.builtin.apt:
+    name: rhsrvany
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  become: "{{ (guest_convert_uid.stdout | int) != 0 }}"
+  when:
+    - openstack_guest_is_windows | bool
+    - rhsrvany_package_status.stdout != 'install ok installed'
+
+- name: Create the shared input directory for the default virtio-win ISO
+  ansible.builtin.file:
+    path: "{{ openstack_virtio_win_default_path | dirname }}"
+    state: directory
+    mode: "0755"
+  when:
+    - openstack_guest_is_windows | bool
+    - openstack_virtio_win == openstack_virtio_win_default_path
+
+- name: Check for the virtio-win drivers a Windows guest needs
+  ansible.builtin.stat:
+    path: "{{ openstack_virtio_win }}"
+  register: virtio_win_stat
+  when: openstack_guest_is_windows | bool
+
+- name: Download the stable virtio-win ISO when using the default path
+  ansible.builtin.get_url:
+    url: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+    dest: "{{ openstack_virtio_win_default_path }}"
+    mode: "0644"
+    force: false
+  when:
+    - openstack_guest_is_windows | bool
+    - openstack_virtio_win == openstack_virtio_win_default_path
+    - not virtio_win_stat.stat.exists
+
+- name: Recheck the virtio-win drivers after an automatic download
+  ansible.builtin.stat:
+    path: "{{ openstack_virtio_win }}"
+  register: virtio_win_final_stat
+  when: openstack_guest_is_windows | bool
+
+- name: Fail if a Windows guest has no virtio-win drivers
+  ansible.builtin.fail:
+    msg: >-
+      '{{ vm_name }}' is a Windows guest ({{ source_guest_id }}) and
+      guest conversion needs the virtio-win drivers, but
+      {{ openstack_virtio_win }} does not exist. Download virtio-win.iso
+      (https://fedorapeople.org/groups/virt/virtio-win/) and pass its path
+      with VIRTIO_WIN or -e openstack_virtio_win=<iso or directory>.
+  when:
+    - openstack_guest_is_windows | bool
+    - not virtio_win_final_stat.stat.exists
+

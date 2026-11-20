@@ -1,0 +1,7 @@
+# Optional libguestfs acceleration. Use only on a Linux host with /dev/kvm.
+services:
+  controller:
+    devices:
+      - /dev/kvm:/dev/kvm
+    group_add:
+      - "${KVM_GID:?Set KVM_GID to the host group ID that can access /dev/kvm}"

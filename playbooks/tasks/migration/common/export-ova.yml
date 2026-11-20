@@ -120,6 +120,12 @@
                    | default('', true), true) }}
   no_log: true
 
+# This path never converts the guest, so a Windows VM would upload but not
+# boot on OpenStack. Refuse it before the snapshot; other targets are unaffected.
+- name: Require guest conversion for a Windows guest
+  ansible.builtin.include_tasks: ../openstack/guest-convert-required-vddk.yml
+  when: migration_target == 'openstack'
+
 - name: Mark the snapshot for best-effort cleanup
   ansible.builtin.set_fact:
     snapshot_cleanup_required: true

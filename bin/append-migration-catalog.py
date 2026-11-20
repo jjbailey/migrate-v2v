@@ -290,7 +290,7 @@ def main():
         # name is the run identity instead.
         catalog["migrations"] = [
             old for old in catalog["migrations"]
-            if not same_migration_identity(old, entry)
+            if not (isinstance(old, dict) and same_migration_identity(old, entry))
         ]
         catalog["migrations"].append(entry)
         write_catalog(path, catalog, "migrations")

@@ -2,8 +2,8 @@
 # playbooks/stage-v2v.yml
 # vim: set tabstop=2 shiftwidth=2 expandtab:
 
-# Stage the stage-v2v init script on CentOS VMs before virt-v2v migrates them
-# to OpenStack. Windows guests are detected through vCenter and skipped.
+# Stage the stage-v2v init script on CentOS VMs before they are migrated to
+# OpenStack. Windows guests are detected through vCenter and skipped.
 #
 # vCenter credentials come from $MIGRATE_V2V_VAULT_DIR/vsphere.yml, the same vault and
 # selection scheme as the migrate playbooks:

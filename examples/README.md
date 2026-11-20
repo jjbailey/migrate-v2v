@@ -506,7 +506,9 @@ source ~/my-project-a-openrc.sh
 
 Caddy can be run on the ansible control host as a reverse proxy / TLS
 terminator in front of the migration web app. The `examples/` directory
-provides example systemd unit files and a test script:
+provides example systemd unit files and a test script. See
+[web/caddy.md](../web/caddy.md) for the Caddyfile variables, TLS names and
+certificate trust, which apply wherever Caddy runs:
 
 - `caddy.service.example` — runs Caddy from the repository's
   `web/Caddyfile`. Suitable when you manage the config file directly.
@@ -528,6 +530,9 @@ be written with braces (`${PROJECT_HOME}/web`, not `$PROJECT_HOME/web`).
 8443 unless `CADDY_HOSTS` is set. To reach the site from other machines, add
 every address clients will use to the unit, for example
 `Environment="CADDY_HOSTS=localhost:8443, 127.0.0.1:8443, 192.0.2.10:8443"`.
+For clients opening an IP-literal URL, also set
+`CADDY_DEFAULT_SNI=192.0.2.10`; IP-literal URLs omit SNI, and Caddy requires
+the HTTP Host to match this default name.
 Serve the site over HTTPS only: the login cookie is `Secure`, so a plain
 `http://` site cannot sign anyone in. Use a `redir` to the HTTPS address if
 you want port 80 to answer.
