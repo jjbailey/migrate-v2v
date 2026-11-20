@@ -52,7 +52,7 @@ def select_vault_entry(vault, requested):
             f"or project_id in {vault}. "
             f"Available: {', '.join(projects) or '<none>'}"
         )
-    if not projects and data.get("gcp_project"):
+    if data.get("gcp_project"):
         return "legacy", data
     if len(projects) == 1:
         return next(iter(projects.items()))

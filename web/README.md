@@ -66,10 +66,13 @@ Then put HTTPS in front of it with Caddy ([caddy.md](caddy.md)); for testing,
 
 ## Accounts, jobs, and security
 
-The site's local accounts use salted scrypt password hashes, signed HttpOnly
-sessions, and CSRF tokens. Manage them with `python3 web/app.py user add NAME`
-(also resets a password), `user delete NAME`, and `user list`. In Docker, run the
-same commands in the controller service (see [docker.md](docker.md#setup)).
+The site's local accounts use 3 to 32 character usernames and 12 to 16384
+character passwords stored as salted scrypt hashes, signed HttpOnly sessions,
+and CSRF tokens. Sign-in limits each account from one client IP to 10 attempts
+and each client IP to 30 attempts in five minutes, with at most four password
+hashes running at once. Manage accounts with `python3 web/app.py user add NAME`
+(also resets a password), `user delete NAME`, and `user list`. In Docker, run
+the same commands in the controller service (see [docker.md](docker.md#setup)).
 
 Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
 `WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not

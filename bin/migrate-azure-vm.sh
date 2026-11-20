@@ -18,6 +18,8 @@ VALIDATE_CERTS=${VALIDATE_CERTS:-}
 QUIESCE_SNAPSHOT=${QUIESCE_SNAPSHOT:-true}
 AZURE_TARGET_PROJECT=${AZURE_TARGET_PROJECT:-}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
+DISCARD_RUN_ID=${DISCARD_RUN_ID:-}
+VCENTER_CA_BUNDLE=${VCENTER_CA_BUNDLE:-}
 
 wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
@@ -32,5 +34,7 @@ fi
 [ -n "$AZURE_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var azure_target_project "$AZURE_TARGET_PROJECT")")
 args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
 [ -n "$ARTIFACT_ROOT" ] && args+=(-e "$(wrapper_var artifact_root "$ARTIFACT_ROOT")")
+[ -n "$DISCARD_RUN_ID" ] && args+=(-e "$(wrapper_var discard_run_id "$DISCARD_RUN_ID")")
+[ -n "$VCENTER_CA_BUNDLE" ] && args+=(-e "$(wrapper_var vddk_ca_bundle "$VCENTER_CA_BUNDLE")")
 
 wrapper_run_playbook playbooks/migrate-azure-vm.yml "${args[@]}" "${wrapper_extra_args[@]}" -v

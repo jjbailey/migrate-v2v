@@ -95,7 +95,7 @@ elif '--radiolist' in args:
     print(value, file=sys.stderr, end='')
 elif '--yesno' in args:
     prompt = args[args.index('--yesno') + 1]
-    if os.environ.get('TEST_CANCEL') and 'Launch without an external IP' in prompt:
+    if os.environ.get('TEST_CANCEL') and prompt == 'External IP?':
         sys.exit(255)
     if prompt == 'Public IP?':
         if os.environ.get('TEST_PUBLIC_IP_LOG'):

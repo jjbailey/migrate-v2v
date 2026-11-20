@@ -37,6 +37,7 @@ except ImportError:  # direct python3 web/app.py invocation
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
 from catalog_common import read_snapshot
+from vault_common import ansible_vault_bin  # noqa: E402
 
 STATE = Path(os.environ.get("WEB_STATE_DIR", "/work/migrate-v2v/web-state"))
 ARTIFACT_ROOT = Path(os.environ.get("ARTIFACT_ROOT", "/work/migrate-v2v"))
@@ -49,6 +50,8 @@ KEY = STATE / "session.key"
 DB = STATE / "jobs.sqlite3"
 MAX_BODY = 64 * 1024
 MAX_FIELD = 16 * 1024
+MAX_LOGIN_NAME = 32
+MAX_LOGIN_PASSWORD = MAX_FIELD
 SESSION_AGE = 12 * 60 * 60
 TERMINAL_JOB_STATUSES = ("completed", "failed", "interrupted")
 LOGIN_FAILURES = {}
@@ -56,6 +59,7 @@ ACTIVE_PROCESS = None
 ACTIVE_LOCK = threading.Lock()
 STOP_EVENT = threading.Event()
 LOGIN_LOCK = threading.Lock()
+LOGIN_HASH_SLOTS = threading.BoundedSemaphore(4)
 VAULT_CACHE = {}
 VAULT_CACHE_LOCK = threading.Lock()
 VAULT_FILE_LOCKS = {}
@@ -222,9 +226,11 @@ def vault_keys(filename, map_name):
                 import yaml
             except ImportError:
                 yaml = None
-            if yaml is not None:
+            if yaml is None:
+                print("web: PyYAML is unavailable; cannot read vault entries", file=sys.stderr)
+            else:
                 try:
-                    command = ["ansible-vault", "view", str(vault),
+                    command = [ansible_vault_bin(), "view", str(vault),
                                "--vault-password-file", str(PASSFILE)]
                     result = subprocess.run(command, input=b"", capture_output=True,
                                             timeout=30, check=True)
@@ -234,8 +240,11 @@ def vault_keys(filename, map_name):
                     if isinstance(entries, dict):
                         names = sorted(str(name) for name in entries)
                 except (OSError, subprocess.SubprocessError, ValueError,
-                        AttributeError, yaml.YAMLError):
+                        AttributeError, yaml.YAMLError, SystemExit) as error:
+                    print(f"web: could not read {filename} vault entries: {error}", file=sys.stderr)
                     names = []
+        elif vault.is_file():
+            print(f"web: vault password file is missing; cannot read {filename} entries", file=sys.stderr)
         VAULT_CACHE[filename] = (source_signature, now + VAULT_CACHE_TTL, names)
         return list(names)
 
@@ -818,20 +827,35 @@ class Handler(BaseHTTPRequestHandler):
             ip = trusted_client_ip(self)
             now = time.time()
             name, password = posted.get("username", ""), posted.get("password", "")
+            if (not name or len(name) > MAX_LOGIN_NAME
+                    or not 12 <= len(password) <= MAX_LOGIN_PASSWORD):
+                return self.send(400, page(
+                    "Invalid sign-in", '<div class="alert">Username or password is outside the allowed length.</div>'))
             failure_key = (ip, name.casefold())
+            ip_key = (ip, None)
             prune_login_failures(now)
+            if not LOGIN_HASH_SLOTS.acquire(blocking=False):
+                return self.send(429, page(
+                    "Try later", '<div class="alert">Sign-in is busy. Try again shortly.</div>'))
             # Count this attempt before the slow scrypt check, in the same
             # locked step as the limit test, so parallel requests cannot all
             # pass the check before any of them is recorded.
-            with LOGIN_LOCK:
-                failures = LOGIN_FAILURES.setdefault(failure_key, [])
-                limited = len(failures) >= 10
-                if not limited:
-                    failures.append(now)
-            if limited:
-                return self.send(429, page("Try later", '<div class="alert">Too many sign-in attempts. Try again in five minutes.</div>'))
-            stored = users().get(name, "")
-            matched = verify_password(password, stored or DUMMY_PASSWORD_HASH)
+            try:
+                with LOGIN_LOCK:
+                    failures = LOGIN_FAILURES.get(failure_key, [])
+                    ip_failures = LOGIN_FAILURES.get(ip_key, [])
+                    limited = len(failures) >= 10 or len(ip_failures) >= 30
+                    if not limited:
+                        failures = LOGIN_FAILURES.setdefault(failure_key, failures)
+                        ip_failures = LOGIN_FAILURES.setdefault(ip_key, ip_failures)
+                        failures.append(now)
+                        ip_failures.append(now)
+                if limited:
+                    return self.send(429, page("Try later", '<div class="alert">Too many sign-in attempts. Try again in five minutes.</div>'))
+                stored = users().get(name, "")
+                matched = verify_password(password, stored or DUMMY_PASSWORD_HASH)
+            finally:
+                LOGIN_HASH_SLOTS.release()
             if not stored or not matched:
                 return self.send(401, page("Sign in", '<div class="alert">Invalid username or password.</div><a href="/login">Try again</a>'))
             with LOGIN_LOCK:
@@ -1143,8 +1167,9 @@ def add_user(name):
     if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{2,31}", name):
         raise SystemExit("Username must be 3–32 letters, digits, dots, underscores or hyphens.")
     password = getpass.getpass("Password: ")
-    if len(password) < 12 or password != getpass.getpass("Confirm password: "):
-        raise SystemExit("Passwords must match and contain at least 12 characters.")
+    if (not 12 <= len(password) <= MAX_LOGIN_PASSWORD
+            or password != getpass.getpass("Confirm password: ")):
+        raise SystemExit(f"Passwords must match and contain 12–{MAX_LOGIN_PASSWORD} characters.")
     entries = users()
     entries[name] = password_hash(password)
     save_users(entries)
@@ -1173,7 +1198,7 @@ def bootstrap_user():
             raise SystemExit("PyYAML is required to read the initial web account vault.")
         try:
             result = subprocess.run(
-                ["ansible-vault", "view", str(vault), "--vault-password-file", str(PASSFILE)],
+                [ansible_vault_bin(), "view", str(vault), "--vault-password-file", str(PASSFILE)],
                 input=b"", capture_output=True, timeout=30, check=True)
             data = yaml.safe_load(result.stdout)
         except (OSError, subprocess.SubprocessError, ValueError, yaml.YAMLError):
@@ -1185,8 +1210,9 @@ def bootstrap_user():
         password = data.get("web_password")
         if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{2,31}", name):
             raise SystemExit("caddy.yml web_user must be a valid 3–32 character username.")
-        if not isinstance(password, str) or len(password) < 12:
-            raise SystemExit("caddy.yml web_password must contain at least 12 characters.")
+        if not isinstance(password, str) or not 12 <= len(password) <= MAX_LOGIN_PASSWORD:
+            raise SystemExit(
+                f"caddy.yml web_password must contain 12–{MAX_LOGIN_PASSWORD} characters.")
         save_users({name: password_hash(password)})
         print(f"Created initial local web account {name} from caddy.yml.")
 

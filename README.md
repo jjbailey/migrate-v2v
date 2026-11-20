@@ -435,10 +435,10 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   `vcenter_hostname`/`vcenter_username`/`vcenter_password` still works
   unmodified: with no explicit `-e vsphere_target_vcenter` the legacy
   credentials are used as-is even when `vsphere_projects` is also present
-  (the same rule as `openstack_auth`). The legacy `GOVC_URL`/`GOVC_USERNAME`/
-  `GOVC_PASSWORD`/`GOVC_INSECURE` vault keys are gone: the selector derives
-  them from the selected entry, so update the vault through the map (or the
-  flat block) only.
+  (the same rule as `openstack_auth`). Legacy `GOVC_URL`, `GOVC_USERNAME`,
+  and `GOVC_PASSWORD` values are derived from the selected entry. A legacy
+  flat vault may still set `GOVC_INSECURE` to override the value derived from
+  `validate_certs`; update it through the flat block only.
 
   ```yaml
   vsphere_projects:
@@ -539,11 +539,12 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
   a single entry is selected automatically. There is no separate default-account
   setting; a one-entry map is the default. A legacy flat mapping remains supported.
-  Loaded by all three playbooks. The playbooks export
-  the access keys into the task environment so the `amazon.aws` modules pick
-  them up the normal boto3 way; if those entries are empty, boto3 falls back
-  to a local `~/.aws` configuration or an instance profile, and the playbooks
-  warn when nothing at all resolves.
+  Loaded by all three playbooks. The `amazon.aws` modules receive explicit
+  credential parameters through `module_defaults`; the keys stay out of task
+  environments and process command lines. The AWS CLI upload path receives its
+  credentials over stdin. If the vault keys are empty, boto3 can use a local
+  `~/.aws` configuration or an instance profile, and the playbooks warn when
+  nothing resolves.
 
   ```yaml
   aws_projects:
@@ -1215,8 +1216,11 @@ instance's keys, delete and relaunch it.
 Credentials (vCenter host/user/password, OpenStack authentication, AWS
 region/bucket/role and access keys, and GCP project/service-account settings)
 come from the encrypted runtime vaults - see
-[Secrets](#secrets). Anything still passed with `-e` overrides the vault values;
-`-e aws_region=...`, `-e vcenter_hostname=...` and friends still work.
+[Secrets](#secrets). Extra variables passed with `-e` override vault values;
+for example, `-e aws_region=...` still works. Select a vCenter with
+`-e vsphere_target_vcenter=<key-or-hostname>` so the host and its credentials
+come from the same vault entry. Overriding `vcenter_hostname` by itself can
+pair one host with another entry's credentials.
 
 `bin/run-playbook.sh` runs the playbook locally and automatically supplies the
 Ansible Vault password from `~/.dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
@@ -1524,7 +1528,7 @@ entry for the given `vm_name`; pass `--project <account-id-or-key>` when
 selecting among multiple AWS accounts and `--region <region>` to restrict
 the match to one region (the launch playbook passes its `aws_region`,
 since an AMI cannot be launched in another region). With `--project`,
-rows recorded for that account or vault project key win; only the oldest legacy
+rows recorded for that account or vault project key win; the newest legacy
 rows without either `aws_account_id` or `aws_project` are used as a fallback,
 since they could come from any account. OpenStack entries contain an ordered
 list of Glance image IDs, one per source disk, for use by the OpenStack launch workflow;

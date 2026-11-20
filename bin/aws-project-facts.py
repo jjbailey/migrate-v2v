@@ -64,7 +64,7 @@ def select_vault_entry(vault, requested):
             f"or profile in {vault}. "
             f"Available: {', '.join(projects) or '<none>'}"
         )
-    if not projects and data.get("aws_region"):
+    if data.get("aws_region"):
         return "legacy", data
     if len(projects) == 1:
         return next(iter(projects.items()))

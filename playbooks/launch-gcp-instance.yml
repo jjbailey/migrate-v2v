@@ -118,7 +118,7 @@
                   - --vm-name
                   - "{{ vm_name }}"
                   - --project
-                  - "{{ gcp_target_project_name }}"
+                  - "{{ gcp_project }}"
               register: gcp_migration_lookup
               changed_when: false
 

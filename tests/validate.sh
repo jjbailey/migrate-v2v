@@ -86,7 +86,7 @@ from pathlib import Path
 ALLOWED = {"vaults/env", "vaults/aws-staging.yml"}
 # Runtime vault files under $MIGRATE_V2V_VAULT_DIR, outside the repository,
 # which the docs name by file name.
-RUNTIME_FILES = {f"{name}.yml" for name in ("aws", "azure", "gcp", "openstack", "vsphere")}
+RUNTIME_FILES = {f"{name}.yml" for name in ("aws", "azure", "caddy", "gcp", "openstack", "vsphere")}
 
 # Outside a Git checkout (a tarball or other copy), fall back to every file
 # below the tree, skipping hidden directories, as the YAML check does.

@@ -27,6 +27,8 @@ F = {
     "VCENTER_DATACENTER": Field("Legacy datacenter override", help="Only used without a selected vCenter."),
     "VALIDATE_CERTS": Field("Validate vCenter certificates", "choice", choices=("", "true", "false")),
     "QUIESCE_SNAPSHOT": Field("Quiesce snapshot", "boolean", "true"),
+    "REQUIRE_CBT": Field("Require source CBT", "boolean", "false",
+                         help="Stop before transfer if Changed Block Tracking is unavailable."),
     "AWS_TARGET_PROJECT": Field("AWS account"),
     "AZURE_TARGET_PROJECT": Field("Azure subscription"),
     "GCP_TARGET_PROJECT": Field("GCP project"),
@@ -109,7 +111,7 @@ def exported_fields(mode: str, cloud: str, method: str = "standard") -> tuple[st
         names = [n for n in names if n != "MIGRATE_TARGET_VAR"]
         if method != "vddk":
             names = [n for n in names if n not in ("BACKEND", "DISCARD_RUN_ID", "VCENTER_CA_BUNDLE",
-                                                  "COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
+                                                  "COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN", "REQUIRE_CBT")]
         elif cloud != "openstack":
             names = [n for n in names if n not in ("COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
     else:
