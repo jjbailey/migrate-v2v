@@ -25,7 +25,7 @@ import time
 from http import cookies
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 try:
     from .forms import CLOUDS, F, exported_fields, wrapper_path

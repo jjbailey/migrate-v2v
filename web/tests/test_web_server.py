@@ -12,7 +12,6 @@ Handler.do_GET/do_POST directly, with the socket replaced by buffers.
 
 import hashlib
 import io
-import json
 import os
 import subprocess
 import tempfile
