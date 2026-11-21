@@ -95,8 +95,13 @@ elif '--radiolist' in args:
     print(value, file=sys.stderr, end='')
 elif '--yesno' in args:
     prompt = args[args.index('--yesno') + 1]
-    if os.environ.get('TEST_CANCEL') and 'Launch without an external IP' in prompt:
+    if os.environ.get('TEST_CANCEL') and prompt == 'External IP?':
         sys.exit(255)
+    if prompt == 'Public IP?':
+        if os.environ.get('TEST_PUBLIC_IP_LOG'):
+            with open(os.environ['TEST_PUBLIC_IP_LOG'], 'w') as log:
+                log.write('default-no' if '--defaultno' in args else 'default-yes')
+        sys.exit(1 if os.environ.get('TEST_PUBLIC_IP') == 'no' else 0)
     sys.exit(0 if 'Use the shared launch network' in prompt or 'Request a floating' in prompt else 1)
 '''
 
@@ -260,6 +265,19 @@ class LaunchDialogTests(unittest.TestCase):
             if arg == "-e":
                 extra.update(json.loads(argv[position + 1]))
         self.assertEqual(extra["azure_ssh_source_prefix"], "203.0.113.0/24")
+
+    def test_azure_public_ip_prompt_defaults_to_yes_and_can_select_no(self):
+        prompt_log = self.tmp / "public-ip-default"
+        files = self.run_dialog("azure", TEST_PUBLIC_IP_LOG=str(prompt_log))
+        self.assertEqual(prompt_log.read_text(), "default-yes")
+        self.assertIn("export AZURE_NO_PUBLIC_IP='false'", files[0].read_text())
+        files[0].unlink()
+
+        files = self.run_dialog("azure", TEST_PUBLIC_IP="no",
+                                TEST_PUBLIC_IP_LOG=str(prompt_log))
+        command = files[0].read_text()
+        self.assertIn("export AZURE_NO_PUBLIC_IP='true'", command)
+        self.assertIn("export AZURE_SSH_SOURCE_PREFIX=''", command)
 
     def test_cancel_stops_before_command_generation(self):
         self.assertEqual(self.run_dialog("gcp", TEST_CANCEL="1"), [])

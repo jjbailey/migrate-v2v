@@ -189,7 +189,11 @@ load_aws_instance_type_choices()
 }
 
 AWS_TARGET_PROJECT=$(choose_target "Which AWS account should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/aws.yml" aws_projects "${AWS_TARGET_PROJECT:-}") || abort
-VM_NAME=$(choose_vm_required aws AWS) || abort
+choose_vm_required aws AWS "$AWS_TARGET_PROJECT" || abort
+GUEST_PROBE=${GUEST_PROBE:-false}
+if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachability from this controller, not SSH authentication." "$GUEST_PROBE" ; then
+    GUEST_PROBE=true
+fi
 INSTANCE_NAME=$(input "EC2 instance Name tag (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 while : ; do
@@ -312,6 +316,8 @@ done
 
 say "Launch summary for $VM_NAME
 
+  Migration run..: $MIGRATION_ID
+  SSH probe......: $GUEST_PROBE
   Instance name..: ${INSTANCE_NAME:-same as $VM_NAME}
   Account........: ${AWS_TARGET_PROJECT:-auto-select}
   Subnet.........: $AWS_SUBNET_ID
@@ -329,6 +335,8 @@ dialog_tmp_files+=("$file")
     printf 'export MIGRATE_V2V_CATALOG_DIR=%s\n' "$(quote "$MIGRATE_V2V_CATALOG_DIR")"
     printf 'export AWS_TARGET_PROJECT=%s\n' "$(quote "$AWS_TARGET_PROJECT")"
     printf 'export VM_NAME=%s\n' "$(quote "$VM_NAME")"
+    printf 'export MIGRATION_ID=%s\n' "$(quote "$MIGRATION_ID")"
+    printf 'export GUEST_PROBE=%s\n' "$(quote "$GUEST_PROBE")"
     printf 'export INSTANCE_NAME=%s\n' "$(quote "$INSTANCE_NAME")"
     printf 'export AWS_SUBNET_ID=%s\n' "$(quote "$AWS_SUBNET_ID")"
     printf 'export AWS_SECURITY_GROUPS_JSON=%s\n' "$(quote "$AWS_SECURITY_GROUPS_JSON")"

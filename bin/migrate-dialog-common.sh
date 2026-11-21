@@ -37,21 +37,22 @@ else
     QUIESCE_SNAPSHOT=false
 fi
 
+preflight_default=no
+[ "${PREFLIGHT_ONLY:-false}" = true ] && preflight_default=yes
+if yesno "Run preflight checks only?\n\nChecks source access, target permissions, and local artifact space, then stops before migration setup." "$preflight_default" ; then
+    PREFLIGHT_ONLY=true
+else
+    PREFLIGHT_ONLY=false
+fi
+
 if [[ $MIGRATE_WRAPPER == *-vddk.sh ]] ; then
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #     cb_default=no
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #     [ "${REQUIRE_CBT:-false}" = true ] && cb_default=yes
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #     if yesno "Require Changed Block Tracking (CBT) on the source VM?\n\nCBT avoids re-reading unchanged disk blocks on resumes." "$cb_default" ; then
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #         REQUIRE_CBT=true
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #     else
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #         REQUIRE_CBT=false
-    # CBT: TODO - not yet implemented ; re-enable in future release
-    #     fi
+    cbt_default=no
+    [ "${REQUIRE_CBT:-false}" = true ] && cbt_default=yes
+    if yesno "Require Changed Block Tracking (CBT) on the source VM?\n\nWhen enabled, the migration stops before transfer if CBT is unavailable." "$cbt_default" ; then
+        REQUIRE_CBT=true
+    else
+        REQUIRE_CBT=false
+    fi
 
     backend_default=auto
     [ -n "${BACKEND:-}" ] && backend_default="$BACKEND"
@@ -129,11 +130,13 @@ summary="Migration summary for $VM_NAME$method
   Target..........: ${!MIGRATE_TARGET_VAR:-auto-select}
   Validate certs..: ${VALIDATE_CERTS:-vault default}
   Artifact root...: $ARTIFACT_ROOT
-  Quiesce snapshot: $QUIESCE_SNAPSHOT"
+  Quiesce snapshot: $QUIESCE_SNAPSHOT
+  Preflight only..: $PREFLIGHT_ONLY"
 [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || summary="$summary
   Compress images.: $COMPRESS
   Guest convert...: ${GUEST_CONVERT:-false}"
 [[ $MIGRATE_WRAPPER == *-vddk.sh ]] && summary="$summary
+  Require CBT.....: ${REQUIRE_CBT:-false}
   Backend.........: $BACKEND
   Discard run.....: ${DISCARD_RUN_ID:-none}
   CA bundle.......: ${VCENTER_CA_BUNDLE:-none}"
@@ -153,17 +156,25 @@ dialog_tmp_files+=("$file")
     printf 'export %s=%s\n' "$MIGRATE_TARGET_VAR" "$(quote "$target_value")"
     printf 'export VALIDATE_CERTS=%s\n' "$(quote "$VALIDATE_CERTS")"
     printf 'export QUIESCE_SNAPSHOT=%s\n' "$(quote "$QUIESCE_SNAPSHOT")"
+    printf 'export PREFLIGHT_ONLY=%s\n' "$(quote "$PREFLIGHT_ONLY")"
     [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || {
         printf 'export COMPRESS=%s\n' "$(quote "$COMPRESS")"
         printf 'export GUEST_CONVERT=%s\n' "$(quote "${GUEST_CONVERT:-false}")"
         printf 'export VIRTIO_WIN=%s\n' "$(quote "${VIRTIO_WIN:-}")"
     }
     [[ $MIGRATE_WRAPPER == *-vddk.sh ]] && {
-        # CBT: TODO - not yet implemented ; re-enable in future release
-        # printf 'export REQUIRE_CBT=%s\n' "$(quote "$REQUIRE_CBT")" ;
+        printf 'export REQUIRE_CBT=%s\n' "$(quote "$REQUIRE_CBT")"
         printf 'export BACKEND=%s\n' "$(quote "$BACKEND")"
-        printf 'export DISCARD_RUN_ID=%s\n' "$(quote "$DISCARD_RUN_ID")"
-        printf 'export VCENTER_CA_BUNDLE=%s\n' "$(quote "$VCENTER_CA_BUNDLE")"
+        if [ -n "$DISCARD_RUN_ID" ] ; then
+            printf 'export DISCARD_RUN_ID=%s\n' "$(quote "$DISCARD_RUN_ID")"
+        else
+            printf 'unset DISCARD_RUN_ID\n'
+        fi
+        if [ -n "$VCENTER_CA_BUNDLE" ] ; then
+            printf 'export VCENTER_CA_BUNDLE=%s\n' "$(quote "$VCENTER_CA_BUNDLE")"
+        else
+            printf 'unset VCENTER_CA_BUNDLE\n'
+        fi
     }
     printf '%s\n' "$(quote "$script_dir/$MIGRATE_WRAPPER")"
 } > "$file"

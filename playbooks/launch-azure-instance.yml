@@ -53,6 +53,8 @@
     azure_boot_image_id: ""
     azure_data_snapshot_ids: []
     azure_migration_id: ""
+    guest_probe_enabled: false
+    guest_probe_timeout: 300
     # select-project.yml falls back to this when the vault entry has no
     # storage_container. A launch never stages blobs, so empty is fine.
     azure_storage_container: ""
@@ -133,6 +135,8 @@
                   - "{{ migration_catalog_path }}"
                   - --vm-name
                   - "{{ vm_name }}"
+                  - --migration-id
+                  - "{{ migration_id | default('') }}"
                   - --project
                   - "{{ azure_subscription_id }}"
                   - --region
@@ -255,6 +259,13 @@
                   {{ (azure_vm_final.vms | first).data_disks | default([])
                      | sort(attribute='lun') | map(attribute='name') | list }}
 
+            - name: Optionally check guest SSH reachability
+              ansible.builtin.include_tasks: tasks/probe-guest-ssh.yml
+              vars:
+                guest_probe_host: "{{ azure_public_ip or azure_private_ip }}"
+                guest_probe_guest_id: >-
+                  {{ (azure_lookup | default({})).source_guest_id | default('') }}
+
         - name: Display the Azure VM
           ansible.builtin.debug:
             msg: >-
@@ -280,6 +291,9 @@
               source_migration_id: "{{ azure_migration_id_effective | default('', true) }}"
               status: "RUNNING"
               launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+              guest_probe_status: "{{ guest_probe_status }}"
+              guest_probe_port: "{{ guest_probe_port }}"
+              guest_probe_checked_at: "{{ guest_probe_checked_at }}"
 
         - name: Create a private temporary file for the catalog entry
           ansible.builtin.tempfile:

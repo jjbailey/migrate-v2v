@@ -32,9 +32,9 @@ with a default for local use:
 | `CADDY_UPSTREAM`    | `127.0.0.1:8080`                             | Where the web app listens                                       |
 
 It uses `tls internal`, so Caddy issues certificates from its own local
-certificate authority; it does not contact a public CA. Its hard timeouts avoid
-newer idle-timeout options so it also runs on older Caddy binaries (it is
-written to work with Caddy 2.6; the Compose stack pins 2.8.4).
+certificate authority; it does not contact a public CA. The Caddyfile sets
+request-body, header, response-write, and idle connection timeouts. These
+options work with Caddy 2.6; the Compose stack pins 2.8.4.
 
 ### Addresses and TLS names
 

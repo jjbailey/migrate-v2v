@@ -1,0 +1,98 @@
+---
+# playbooks/tasks/migration/common/estimate-artifact-space.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+- name: Resolve the source VM for the capacity estimate
+  environment:
+    GOVC_URL: "{{ govc_url }}"
+    GOVC_USERNAME: "{{ govc_username }}"
+    GOVC_INSECURE: "{{ govc_insecure }}"
+  ansible.builtin.command:
+    stdin: "{{ govc_password }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - find
+      - "/{{ datacenter }}/vm"
+      - -type
+      - m
+  register: preflight_vm_find
+  changed_when: false
+  failed_when: false
+  no_log: true
+
+- name: Select exact source VM matches for the capacity estimate
+  ansible.builtin.set_fact:
+    preflight_vm_matches: >-
+      {{ (preflight_vm_find.stdout_lines | default([]))
+         | select('match', '.*/' ~ (vm_name | regex_escape) ~ '$') | list }}
+
+- name: Require one source VM for the capacity estimate
+  ansible.builtin.assert:
+    that:
+      - preflight_vm_find.rc == 0
+      - preflight_vm_matches | length == 1
+    fail_msg: >-
+      Could not resolve '{{ vm_name }}' in datacenter '{{ datacenter }}' for
+      the artifact space estimate (govc exit {{ preflight_vm_find.rc }},
+      {{ preflight_vm_matches | length }} match(es)).
+
+- name: Read source disk capacities for the capacity estimate
+  environment:
+    GOVC_URL: "{{ govc_url }}"
+    GOVC_USERNAME: "{{ govc_username }}"
+    GOVC_INSECURE: "{{ govc_insecure }}"
+  ansible.builtin.command:
+    stdin: "{{ govc_password }}"
+    argv:
+      - "{{ stdin_env_bin }}"
+      - GOVC_PASSWORD
+      - "--"
+      - "{{ govc_bin }}"
+      - vm.info
+      - -json
+      - "{{ preflight_vm_matches | first }}"
+  register: preflight_vm_info
+  changed_when: false
+  no_log: true
+
+- name: Estimate required artifact space without creating a snapshot
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../bin/check-artifact-space.py"
+      - --artifact-root
+      - "{{ migration_run_dir | default(artifact_root, true) }}"
+    stdin: "{{ preflight_vm_info.stdout | string }}"
+  register: artifact_space_report
+  changed_when: false
+  no_log: true
+
+- name: Require write and search permission at the artifact path
+  ansible.builtin.assert:
+    that:
+      - (artifact_space_report.stdout | from_json).artifact_root_writable | bool
+      - (artifact_space_report.stdout | from_json).artifact_root_is_directory | bool
+    fail_msg: >-
+      The nearest existing path for {{ migration_run_dir | default(artifact_root, true) }}
+      is not writable by the playbook user.
+      The path checked was {{ (artifact_space_report.stdout | from_json).space_checked_on }}.
+
+- name: Report estimated artifact space
+  ansible.builtin.debug:
+    msg: >-
+      {% set space = artifact_space_report.stdout | from_json %}
+      {% if not space.known %}
+      Artifact space estimate unavailable: {{ space.reason }}.
+      {% elif space.estimate_exceeds_available %}
+      WARNING: estimated artifact requirement is about {{ (space.estimated_bytes / 1073741824) | round(1) }} GiB,
+      while {{ (space.available_bytes / 1073741824) | round(1) }} GiB is available on {{ space.space_checked_on }}.
+      Thin disks may make the estimate high; check capacity before continuing.
+      {% else %}
+      Estimated artifact requirement is about {{ (space.estimated_bytes / 1073741824) | round(1) }} GiB;
+      {{ (space.available_bytes / 1073741824) | round(1) }} GiB is available on {{ space.space_checked_on }}.
+      The estimate uses provisioned disk capacity and may be high for thin disks.
+      {% endif %}
+

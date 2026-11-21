@@ -8,9 +8,10 @@ import contextlib
 import importlib.util
 import io
 import json
+import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -97,11 +98,18 @@ class KeypairTests(unittest.TestCase):
 
     def run_main(self, argv, client):
         out = io.StringIO()
-        with mock.patch.object(facts, "read_vault",
-                               return_value={"azure_projects": {"a": ENTRY}}), \
-                mock.patch.object(facts, "make_client", return_value=client), \
-                contextlib.redirect_stdout(out):
-            self.assertEqual(facts.main(argv), 0)
+        azure_exceptions = ModuleType("azure.core.exceptions")
+        azure_exceptions.AzureError = type("AzureError", (Exception,), {})
+        with tempfile.TemporaryDirectory() as directory:
+            vault = Path(directory) / "azure.yml"
+            vault.touch()
+            with mock.patch.dict("sys.modules", {
+                    "azure.core.exceptions": azure_exceptions}), \
+                    mock.patch.object(facts, "read_vault",
+                                   return_value={"azure_projects": {"a": ENTRY}}), \
+                    mock.patch.object(facts, "make_client", return_value=client), \
+                    contextlib.redirect_stdout(out):
+                self.assertEqual(facts.main([*argv, "--vault", str(vault)]), 0)
         return out.getvalue()
 
     def test_json_output(self):

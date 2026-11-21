@@ -30,9 +30,11 @@ REQUIRE_CBT=${REQUIRE_CBT:-}
 BACKEND=${BACKEND:-}
 DISCARD_RUN_ID=${DISCARD_RUN_ID:-}
 VCENTER_CA_BUNDLE=${VCENTER_CA_BUNDLE:-}
+PREFLIGHT_ONLY=${PREFLIGHT_ONLY:-false}
 
 wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
+wrapper_require_bool PREFLIGHT_ONLY "$PREFLIGHT_ONLY"
 wrapper_require_bool REQUIRE_CBT "$REQUIRE_CBT"
 case "$DISCARD_RUN_ID" in
     "" | *[!0-9]*)
@@ -55,6 +57,7 @@ if [ -z "$VSPHERE_TARGET_VCENTER" ] && [ -n "$VCENTER_DATACENTER" ] ; then
 fi
 [ -n "$VALIDATE_CERTS" ] && args+=(-e "$(wrapper_var validate_certs "$VALIDATE_CERTS")")
 args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
+args+=(-e "$(wrapper_var preflight_only "$PREFLIGHT_ONLY")")
 [ -n "$AZURE_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var azure_target_project "$AZURE_TARGET_PROJECT")")
 [ -n "$ARTIFACT_ROOT" ] && args+=(-e "$(wrapper_var artifact_root "$ARTIFACT_ROOT")")
 [ -n "$REQUIRE_CBT" ] && args+=(-e "$(wrapper_var vddk_require_cbt "$REQUIRE_CBT")")

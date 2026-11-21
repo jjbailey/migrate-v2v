@@ -123,7 +123,7 @@
 - name: Normalize the OpenStack project identity to strings
   ansible.builtin.set_fact:
     openstack_target_project_name: "{{ openstack_target_project_name | string }}"
-    openstack_auth_project_id: "{{ openstack_auth.project_id | default(openstack_auth.project_name) | string }}"
+    openstack_auth_project_id: "{{ openstack_auth.project_id | default(openstack_auth.project_name, true) | string }}"
   no_log: true
 
 - name: Fail when the vault key and project_name disagree

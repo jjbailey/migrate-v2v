@@ -35,7 +35,7 @@ The encrypted YAML contains:
 
 ```yaml
 web_user: operator
-web_password: "<replace-with-a-unique-password-of-at-least-12-characters>"
+web_password: "<replace-with-a-unique-password-of-12-to-16384-characters>"
 ```
 
 The Docker guide runs `python3 web/app.py user bootstrap` before starting the
@@ -81,8 +81,9 @@ subscription, or project than the catalog scope. `--vault` names another
 vault file.
 
 The `*-project-facts.py` scripts feed the launch dialogs, so they select the
-same vault entry the launch playbook will use; only
-`openstack-project-facts.py` with no PROJECT argument uses `OS_*` instead.
+same vault entry the launch playbook will use. With no PROJECT argument,
+`openstack-project-facts.py` can use `OS_*`, and `aws-project-facts.py` can use
+exported AWS credentials or `--profile` instead of the vault.
 
 ## AWS Vault
 
@@ -103,6 +104,8 @@ Select an account with `-e aws_target_project=<key-or-account-id>`. A
 single-entry map is auto-selected; there is no separate default-account
 setting. A legacy flat mapping containing
 `aws_region`, `s3_bucket`, and `vmimport_role_name` remains supported.
+When both layouts exist and no account is specified, the playbook and facts
+tool use the legacy mapping; an explicit account selects `aws_projects`.
 
 `bin/aws-project-facts.py` reads `aws.yml` and selects an account
 the same way the playbooks do (vault key, account ID, or profile).
@@ -132,6 +135,8 @@ Select a project with `-e gcp_target_project=<key-or-project-id>`. A
 single-entry map is auto-selected. A legacy flat mapping containing
 `gcp_project`, `gcs_bucket`, optional `gcp_import_location`, and
 `service_account_key` remains supported.
+When both layouts exist and no project is specified, the playbook and facts
+tool use the legacy mapping; an explicit project selects `gcp_projects`.
 
 `bin/gcp-project-facts.py` reads `gcp.yml` and selects a project
 the same way the playbooks do (vault key, `gcp_project`, or `project_id`).

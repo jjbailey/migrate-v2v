@@ -17,3 +17,42 @@
   failed_when: azure_qemu_img_check.rc != 0
   changed_when: false
 
+- name: Check the Azure resource group and existing staging storage account
+  module_defaults:
+    group/azure.azcollection.all: "{{ azure_module_defaults }}"
+  block:
+    - name: Look up the configured Azure resource group
+      azure.azcollection.azure_rm_resourcegroup_info:
+        name: "{{ azure_resource_group }}"
+      register: azure_preflight_resource_group
+
+    - name: Require the configured Azure resource group to exist
+      ansible.builtin.assert:
+        that:
+          - azure_preflight_resource_group.resourcegroups | default([]) | length > 0
+        fail_msg: >-
+          Azure resource group {{ azure_resource_group }} does not exist in
+          subscription {{ azure_subscription_id }}. Create it before starting
+          the migration; the export will not be started.
+        quiet: true
+
+    - name: Look up the staging storage account when it already exists
+      azure.azcollection.azure_rm_storageaccount_info:
+        resource_group: "{{ azure_resource_group }}"
+        name: "{{ azure_storage_account }}"
+      register: azure_preflight_storage_account
+
+    - name: Require an existing storage account to match the image region
+      ansible.builtin.assert:
+        that:
+          - >-
+            ((azure_preflight_storage_account.storageaccounts | first).location | lower | replace(' ', ''))
+            == (azure_location | lower | replace(' ', ''))
+        fail_msg: >-
+          Storage account {{ azure_storage_account }} is in
+          {{ (azure_preflight_storage_account.storageaccounts | first).location }},
+          but images are created in {{ azure_location }}. Use a storage
+          account in the same region as the image.
+        quiet: true
+      when: azure_preflight_storage_account.storageaccounts | default([]) | length > 0
+

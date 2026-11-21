@@ -66,10 +66,13 @@ Then put HTTPS in front of it with Caddy ([caddy.md](caddy.md)); for testing,
 
 ## Accounts, jobs, and security
 
-The site's local accounts use salted scrypt password hashes, signed HttpOnly
-sessions, and CSRF tokens. Manage them with `python3 web/app.py user add NAME`
-(also resets a password), `user delete NAME`, and `user list`. In Docker, run the
-same commands in the controller service (see [docker.md](docker.md#setup)).
+The site's local accounts use 3 to 32 character usernames and 12 to 16384
+character passwords stored as salted scrypt hashes, signed HttpOnly sessions,
+and CSRF tokens. Sign-in limits each account from one client IP to 10 attempts
+and each client IP to 30 attempts in five minutes, with at most four password
+hashes running at once. Manage accounts with `python3 web/app.py user add NAME`
+(also resets a password), `user delete NAME`, and `user list`. In Docker, run
+the same commands in the controller service (see [docker.md](docker.md#setup)).
 
 Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
 `WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not
@@ -77,12 +80,22 @@ follow `ARTIFACT_ROOT`, so set both when the artifact root lives elsewhere.
 Job output is stored in mode `0600` log files there. A running job stopped
 by a controller shutdown or restart is marked **interrupted** and is never
 rerun automatically. Review its log and cloud state before submitting another
-operation. The site does not offer arbitrary shell arguments or a terminal.
+operation. A queued job can be cancelled from its job page before the worker
+claims it. Running jobs cannot be cancelled in the UI because terminating a
+migration may leave cloud resources before cleanup runs. The site does not
+offer arbitrary shell arguments or a terminal.
 
 The **Maintenance** page shows concise migration and launch catalog entries
 grouped by cloud provider in a print-friendly view, with a separate option
 to inspect both catalog files as raw JSON. It can also clear finished job
-records and their output logs; queued and running jobs are retained.
+records and their output logs; queued, running, and failed or interrupted
+migration jobs with pending recovery actions are retained. **Manage failed jobs**
+reads retained run IDs from job output and queues resume actions for Azure, GCP,
+and OpenStack migrations, or discard actions for Azure and OpenStack
+datastore-direct runs.
+The action is created as a new queued job, preserving the original job and its
+log. Runs without an explicit resume or discard hint in the saved output are
+shown without an action.
 
 ## Files selected in the forms
 

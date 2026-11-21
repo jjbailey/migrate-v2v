@@ -1,0 +1,73 @@
+---
+# playbooks/tasks/probe-guest-ssh.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+- name: Initialize guest SSH probe result
+  ansible.builtin.set_fact:
+    guest_probe_port: 22
+    guest_probe_status: "not_requested"
+    guest_probe_checked_at: ""
+
+- name: Check whether SSH accepts TCP connections from the controller
+  block:
+    - name: Wait for the guest SSH port
+      ansible.builtin.wait_for:
+        host: "{{ guest_probe_host }}"
+        port: "{{ guest_probe_port }}"
+        connect_timeout: 5
+        sleep: 5
+        timeout: "{{ guest_probe_timeout | int }}"
+      delegate_to: localhost
+
+    - name: Record a successful SSH TCP probe
+      ansible.builtin.set_fact:
+        guest_probe_status: "passed"
+        guest_probe_checked_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+  rescue:
+    - name: Record an unsuccessful SSH TCP probe
+      ansible.builtin.set_fact:
+        guest_probe_status: "timed_out"
+        guest_probe_checked_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+  when:
+    - guest_probe_enabled | bool
+    - guest_probe_host | default('') | length > 0
+    - guest_probe_guest_id | default('') | length > 0
+    - "guest_probe_guest_id | default('') is not match('(?i)^win')"
+
+- name: Skip the SSH probe for Windows guests
+  ansible.builtin.set_fact:
+    guest_probe_status: "skipped_windows"
+  when:
+    - guest_probe_enabled | bool
+    - "guest_probe_guest_id | default('') is match('(?i)^win')"
+
+- name: Skip the SSH probe when the guest OS is unknown
+  ansible.builtin.set_fact:
+    guest_probe_status: "skipped_unknown_guest_os"
+  when:
+    - guest_probe_enabled | bool
+    - guest_probe_guest_id | default('') | length == 0
+
+- name: Record that SSH could not be probed without a reachable address
+  ansible.builtin.set_fact:
+    guest_probe_status: "no_address"
+  when:
+    - guest_probe_enabled | bool
+    - guest_probe_guest_id | default('') | length > 0
+    - "guest_probe_guest_id | default('') is not match('(?i)^win')"
+    - guest_probe_host | default('') | length == 0
+
+- name: Explain the guest SSH probe result
+  ansible.builtin.debug:
+    msg: >-
+      {% if guest_probe_status == 'skipped_windows' %}
+      Skipping the SSH TCP probe for Windows guest '{{ guest_probe_guest_id }}'.
+      {% elif guest_probe_status == 'skipped_unknown_guest_os' %}
+      Skipping the SSH TCP probe because the guest OS is unknown.
+      {% else %}
+      SSH TCP probe {{ guest_probe_status }} on port 22. This records network
+      reachability from the controller; it does not verify SSH authentication.
+      {% endif %}
+  when:
+    - guest_probe_status in ['timed_out', 'no_address', 'skipped_windows', 'skipped_unknown_guest_os']
+

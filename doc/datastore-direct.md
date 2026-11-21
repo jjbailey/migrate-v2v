@@ -148,7 +148,7 @@ compression runs after the in-place pass, because the pass rewrites clusters.
   use a stand-in `virt-v2v-in-place`; a Linux guest that lacks virtio still
   needs an end-to-end check.
 
-## Usage
+## OpenStack Usage
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
@@ -158,8 +158,9 @@ BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backen
 ./bin/migrate-openstack-vddk-dialog.sh                           # guided front end
 ```
 
-The guided front end asks for the backend, whether to discard a failed run,
-an optional vCenter CA bundle, QCOW2 compression, and guest conversion.
+The guided front end asks for the backend, whether to require source CBT,
+whether to discard a failed run, an optional vCenter CA bundle, QCOW2
+compression, and guest conversion.
 
 The wrapper takes the same environment variables as `bin/migrate-openstack-vm.sh`
 (`VM_NAME`, `VSPHERE_TARGET_VCENTER`, `VCENTER_DATACENTER`, `OS_PROJECT_NAME`,
@@ -366,7 +367,8 @@ tests are unchanged.
 
 A full copy of a snapshot does not need CBT, so it is **off by default**.
 `-e vddk_require_cbt=true` (or `REQUIRE_CBT=true`) makes the playbook
-insist on it. `bin/enable-cbt.py` (pyVmomi) can enable it ahead of time: it
+insist on it. The datastore-direct dialog and web form expose this option,
+off by default. `bin/enable-cbt.py` (pyVmomi) can enable it ahead of time: it
 reconfigures the VM without a power cycle and is idempotent. It takes
 `--vm`. Exported `VCENTER_USERNAME` and `VCENTER_PASSWORD` (with
 `VCENTER_HOSTNAME` or `--vcenter` for the host, and `--datacenter`) are used

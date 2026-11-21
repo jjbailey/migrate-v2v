@@ -12,6 +12,8 @@ source "$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/nul
 wrapper_capture_args "$@"
 
 VM_NAME=${VM_NAME:-}
+MIGRATION_ID=${MIGRATION_ID:-}
+GUEST_PROBE=${GUEST_PROBE:-false}
 # Optional name for the new server when it should differ from the source VM.
 INSTANCE_NAME=${INSTANCE_NAME:-}
 OS_FLAVOR=${OS_FLAVOR:-}
@@ -35,6 +37,7 @@ wrapper_require_bool OS_PRESERVE_MAC "$OS_PRESERVE_MAC"
 wrapper_require_bool OS_AUTO_IP "$OS_AUTO_IP"
 wrapper_require_bool OS_DHCP_USER_DATA "$OS_DHCP_USER_DATA"
 wrapper_require_bool OS_CONFIG_DRIVE "$OS_CONFIG_DRIVE"
+wrapper_require_bool GUEST_PROBE "$GUEST_PROBE"
 wrapper_require_json_array OS_SECURITY_GROUPS_JSON "$OS_SECURITY_GROUPS_JSON"
 wrapper_require_json_array OS_SECURITY_GROUP_IDS_JSON "$OS_SECURITY_GROUP_IDS_JSON"
 wrapper_require_json_array OS_MAC_ADDRESSES_JSON "$OS_MAC_ADDRESSES_JSON"
@@ -43,6 +46,8 @@ wrapper_require_json_array OS_NICS_JSON "$OS_NICS_JSON"
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
+[ -n "$MIGRATION_ID" ] && args+=(-e "$(wrapper_var migration_id "$MIGRATION_ID")")
+args+=(-e "$(wrapper_var guest_probe_enabled "$GUEST_PROBE")")
 [ -n "$INSTANCE_NAME" ] && args+=(-e "$(wrapper_var instance_name "$INSTANCE_NAME")")
 [ -n "$OS_FLAVOR" ] && args+=(-e "$(wrapper_var openstack_flavor "$OS_FLAVOR")")
 [ -n "$OS_NICS_JSON" ] && args+=(-e "$(wrapper_var openstack_network "")")

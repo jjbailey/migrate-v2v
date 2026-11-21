@@ -26,6 +26,7 @@ def project(entry):
         "gcp_data_image_names": entry.get("gcp_data_image_names", []),
         "gcp_data_image_selflinks": entry.get("gcp_data_image_selflinks", []),
         "migration_id": entry.get("clone_name", ""),
+        "source_vcenter_key": entry.get("source_vcenter_key", ""),
         # Older rows have no guest ID; the launch then prints root@.
         "source_guest_id": (entry.get("artifact_manifest") or {}).get("source_guest_id", ""),
     }

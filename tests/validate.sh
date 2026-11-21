@@ -82,11 +82,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# Paths the docs mention on purpose even though they are gone.
-ALLOWED = {"vaults/env", "vaults/aws-staging.yml"}
+# Paths the docs mention on purpose even though they are gone. The public
+# GitHub export omits the maintainer-only local/ directory but retains guides
+# that describe its helper scripts.
+ALLOWED = {"vaults/env", "vaults/aws-staging.yml", "local/", "local/run-caddy.sh"}
 # Runtime vault files under $MIGRATE_V2V_VAULT_DIR, outside the repository,
 # which the docs name by file name.
-RUNTIME_FILES = {f"{name}.yml" for name in ("aws", "azure", "gcp", "openstack", "vsphere")}
+RUNTIME_FILES = {f"{name}.yml" for name in ("aws", "azure", "caddy", "gcp", "openstack", "vsphere")}
 
 # Outside a Git checkout (a tarball or other copy), fall back to every file
 # below the tree, skipping hidden directories, as the YAML check does.

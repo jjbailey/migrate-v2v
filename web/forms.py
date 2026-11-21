@@ -23,10 +23,17 @@ class Field:
 
 F = {
     "VM_NAME": Field("Source VM", required=True),
+    "MIGRATION_ID": Field("Completed migration run"),
+    "GUEST_PROBE": Field("Wait for SSH TCP port after launch", "boolean", "false",
+                          help="Checks TCP port 22 from this controller and records the result; it does not verify SSH authentication."),
     "VSPHERE_TARGET_VCENTER": Field("Source vCenter"),
     "VCENTER_DATACENTER": Field("Legacy datacenter override", help="Only used without a selected vCenter."),
     "VALIDATE_CERTS": Field("Validate vCenter certificates", "choice", choices=("", "true", "false")),
     "QUIESCE_SNAPSHOT": Field("Quiesce snapshot", "boolean", "true"),
+    "PREFLIGHT_ONLY": Field("Preflight only", "boolean", "false",
+                             help="Checks source access, target permissions, and local space, then stops before migration setup."),
+    "REQUIRE_CBT": Field("Require source CBT", "boolean", "false",
+                         help="Stop before transfer if Changed Block Tracking is unavailable."),
     "AWS_TARGET_PROJECT": Field("AWS account"),
     "AZURE_TARGET_PROJECT": Field("Azure subscription"),
     "GCP_TARGET_PROJECT": Field("GCP project"),
@@ -49,7 +56,7 @@ F = {
     "AZURE_VNET_NAME": Field("Virtual network", default="migrate-v2v-vnet", required=True),
     "AZURE_SUBNET_NAME": Field("Subnet", default="migrate-v2v-subnet", required=True),
     "AZURE_NSG_NAME": Field("Network security group", default="migrate-v2v-nsg", required=True),
-    "AZURE_NO_PUBLIC_IP": Field("No public IP", "boolean", "false"),
+    "AZURE_NO_PUBLIC_IP": Field("Public IP", "boolean", "false"),
     "AZURE_SSH_SOURCE_PREFIX": Field("Allow SSH from", help="Required for a public IP. Enter a CIDR or service tag; * explicitly allows SSH from anywhere."),
     "AZURE_ADMIN_USERNAME": Field("Admin username", default="azureuser", required=True),
     "AZURE_SSH_KEY_NAME": Field("Azure SSH key resource", default="cloud", required=True),
@@ -60,7 +67,7 @@ F = {
     "GCP_NETWORK": Field("Network", default="default", required=True),
     "GCP_SUBNETWORK": Field("Subnetwork", help="Optional. Clear this field to let GCP use the selected network's default."),
     "GCP_TAGS_JSON": Field("Network tags", "json", "[]", help="JSON array of tag names."),
-    "GCP_NO_ADDRESS": Field("No external IP", "boolean", "false"),
+    "GCP_NO_ADDRESS": Field("External IP", "boolean", "false"),
     "GCP_SSH_USER": Field("SSH metadata user", default="cloudinit"),
     "GCP_SSH_KEY_FILE": Field("SSH public key file", "path",
                                help="Select an absolute file under WEB_INPUT_DIR."),
@@ -109,7 +116,7 @@ def exported_fields(mode: str, cloud: str, method: str = "standard") -> tuple[st
         names = [n for n in names if n != "MIGRATE_TARGET_VAR"]
         if method != "vddk":
             names = [n for n in names if n not in ("BACKEND", "DISCARD_RUN_ID", "VCENTER_CA_BUNDLE",
-                                                  "COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
+                                                  "COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN", "REQUIRE_CBT")]
         elif cloud != "openstack":
             names = [n for n in names if n not in ("COMPRESS", "GUEST_CONVERT", "VIRTIO_WIN")]
     else:

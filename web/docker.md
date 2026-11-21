@@ -145,7 +145,7 @@ changing either configured root.
 
 3. Bootstrap the initial web account from the encrypted `caddy.yml` vault in
    `ARTIFACT_ROOT_HOST/vaults/` (see [Vault layouts](../doc/vaults.md#web-controller-bootstrap-account)).
-   It must contain a `web_user` and a `web_password` of at least 12 characters.
+   It must contain a `web_user` and a `web_password` of 12 to 16384 characters.
    This creates an account only when the persistent account store is empty;
    repeated runs leave existing accounts unchanged.
 

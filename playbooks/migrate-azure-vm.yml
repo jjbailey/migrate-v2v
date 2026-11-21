@@ -52,6 +52,15 @@
     - name: Run Azure preflight checks
       ansible.builtin.import_tasks: tasks/migration/azure/preflight.yml
 
+    - name: Report preflight-only completion
+      ansible.builtin.debug:
+        msg: Preflight checks completed. No migration snapshot or export was started.
+      when: preflight_only | bool
+
+    - name: Stop after preflight checks when requested
+      ansible.builtin.meta: end_play
+      when: preflight_only | bool
+
     - name: Initialize the Azure migration
       ansible.builtin.import_tasks: tasks/migration/azure/initialize.yml
 

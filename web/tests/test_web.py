@@ -80,6 +80,15 @@ class HttpTests(unittest.TestCase):
             self.assertIn('name="_pick_OS_SECURITY_GROUPS_JSON"', form)
             lookup.assert_called_once()
 
+    def test_azure_public_ip_defaults_to_yes(self):
+        with patch.object(app, "targets", return_value=["site"]), \
+             patch.object(app, "launch_choices", return_value=({}, {}, [])), \
+             patch.object(app, "catalog_vms", return_value=[]):
+            form = app.form_html("launch", "azure", "standard", "token",
+                                 posted={"AZURE_TARGET_PROJECT": "site"}, user="operator")
+        self.assertIn('<label for="AZURE_NO_PUBLIC_IP">Public IP</label>', form)
+        self.assertIn('<option value="false" selected>Yes</option><option value="true">No</option>', form)
+
     def test_aws_choices_follow_selected_subnet(self):
         calls = []
         def query(cloud, project, *flags):

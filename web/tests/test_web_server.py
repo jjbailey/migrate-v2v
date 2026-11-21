@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 from web import app, facts, forms
 
 PASSWORD = "sample-password-123"
+WRONG_PASSWORD = "incorrect-password"
 
 class Response:
     def __init__(self, status, headers, body):
@@ -165,7 +166,7 @@ class LoginTests(IsolatedState):
         self.assertIn(f'value="{csrf}"', second.body)
         response = self.request("POST", "/login",
                                 {"_csrf": csrf, "username": "nobody",
-                                 "password": "invalid"}, cookie=token)
+                                 "password": WRONG_PASSWORD}, cookie=token)
         self.assertEqual(response.status, 401)
         self.assertNotIn("The form expired", response.body)
 
@@ -191,11 +192,11 @@ class LoginTests(IsolatedState):
 
     def test_ten_failures_lock_that_user_from_that_address(self):
         for _ in range(10):
-            self.assertEqual(self.post_login("operator", "bad", ip="192.0.2.7").status, 401)
+            self.assertEqual(self.post_login("operator", WRONG_PASSWORD, ip="192.0.2.7").status, 401)
         self.assertEqual(self.post_login("operator", PASSWORD, ip="192.0.2.7").status, 429)
         # Another address, or another user, is not locked out.
         self.assertEqual(self.post_login("operator", PASSWORD, ip="192.0.2.8").status, 303)
-        self.assertEqual(self.post_login("someone", "bad", ip="192.0.2.7").status, 401)
+        self.assertEqual(self.post_login("someone", WRONG_PASSWORD, ip="192.0.2.7").status, 401)
 
     def test_the_limit_holds_for_parallel_attempts(self):
         # Every attempt is counted before the slow password check, so a burst
@@ -204,9 +205,12 @@ class LoginTests(IsolatedState):
         def slow_verify(password, encoded):
             time.sleep(0.05)
             return False
-        with patch.object(app, "verify_password", side_effect=slow_verify):
+        # Give every worker a hash slot so this checks the account/IP limiter,
+        # not the separate defensive cap on concurrent scrypt operations.
+        with patch.object(app, "LOGIN_HASH_SLOTS", threading.BoundedSemaphore(15)), \
+                patch.object(app, "verify_password", side_effect=slow_verify):
             threads = [threading.Thread(target=lambda: results.append(
-                self.post_login("operator", "bad", ip="192.0.2.9").status)) for _ in range(15)]
+                self.post_login("operator", WRONG_PASSWORD, ip="192.0.2.9").status)) for _ in range(15)]
             for thread in threads:
                 thread.start()
             for thread in threads:
@@ -216,7 +220,8 @@ class LoginTests(IsolatedState):
 
     def test_success_clears_earlier_failures(self):
         for _ in range(9):
-            self.post_login("operator", "bad", ip="192.0.2.10")
+            self.assertEqual(self.post_login("operator", WRONG_PASSWORD, ip="192.0.2.10").status, 401)
+        self.assertIn(("192.0.2.10", "operator"), app.LOGIN_FAILURES)
         self.assertEqual(self.post_login("operator", PASSWORD, ip="192.0.2.10").status, 303)
         self.assertNotIn(("192.0.2.10", "operator"), app.LOGIN_FAILURES)
 

@@ -282,6 +282,25 @@ Notes:
 - In a container, bind-mount the chosen root at the same path inside the
   container so resume finds the runs from either side.
 
+Before a full migration, run the same source and destination checks without
+creating a snapshot or exporting disks by setting `PREFLIGHT_ONLY=true` on a
+wrapper, choosing **Preflight only** in a dialog or web form, or passing
+`-e preflight_only=true` to a playbook. The check also estimates local artifact
+space from the source disks' provisioned capacity (see `bin/check-artifact-space.py`)
+and warns when that estimate
+is larger than the available space. Thin disks can make this estimate high;
+review it as guidance. Preflight can still install missing command-line tools
+that the selected workflow requires.
+
+```bash
+PREFLIGHT_ONLY=true ./bin/migrate-openstack-vm.sh \
+  -e vm_name=my-vm -e openstack_target_project=my-project
+
+./bin/run-playbook.sh playbooks/migrate-azure-vm.yml \
+  -e vm_name=my-vm -e azure_target_project=my-project \
+  -e preflight_only=true
+```
+
 ## Configure Access
 
 Set up the vCenter and destination cloud accounts before running a migration.
@@ -318,7 +337,7 @@ the AWS bootstrap is a one-time administrative step.
   - _Launch_: `ec2:RunInstances` and tagging, and read access to the images,
     subnets, and security groups you name.
 - **GCP** (`service_account_key`): in the project selected by `gcp_project`,
-  upload, list, and delete objects in `gcs_bucket`; create, read, and delete
+  list, upload, and delete objects in `gcs_bucket`; create, read, and delete
   Compute images; create, read, and delete VM Migration image imports (the
   Cloud Build service account used by the import needs its usual access to
   the bucket and Compute); and, for launches, create instances and disks,
@@ -435,10 +454,10 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   `vcenter_hostname`/`vcenter_username`/`vcenter_password` still works
   unmodified: with no explicit `-e vsphere_target_vcenter` the legacy
   credentials are used as-is even when `vsphere_projects` is also present
-  (the same rule as `openstack_auth`). The legacy `GOVC_URL`/`GOVC_USERNAME`/
-  `GOVC_PASSWORD`/`GOVC_INSECURE` vault keys are gone: the selector derives
-  them from the selected entry, so update the vault through the map (or the
-  flat block) only.
+  (the same rule as `openstack_auth`). Legacy `GOVC_URL`, `GOVC_USERNAME`,
+  and `GOVC_PASSWORD` values are derived from the selected entry. A legacy
+  flat vault may still set `GOVC_INSECURE` to override the value derived from
+  `validate_certs`; update it through the flat block only.
 
   ```yaml
   vsphere_projects:
@@ -539,11 +558,12 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
   a single entry is selected automatically. There is no separate default-account
   setting; a one-entry map is the default. A legacy flat mapping remains supported.
-  Loaded by all three playbooks. The playbooks export
-  the access keys into the task environment so the `amazon.aws` modules pick
-  them up the normal boto3 way; if those entries are empty, boto3 falls back
-  to a local `~/.aws` configuration or an instance profile, and the playbooks
-  warn when nothing at all resolves.
+  Loaded by all three playbooks. The `amazon.aws` modules receive explicit
+  credential parameters through `module_defaults`; the keys stay out of task
+  environments and process command lines. The AWS CLI upload path receives its
+  credentials over stdin. If the vault keys are empty, boto3 can use a local
+  `~/.aws` configuration or an instance profile, and the playbooks warn when
+  nothing resolves.
 
   ```yaml
   aws_projects:
@@ -580,6 +600,11 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
       service_account_key: |
         { ... JSON ... }
   ```
+
+  Create the staging bucket before migration. Preflight checks that the
+  configured bucket is accessible before taking a snapshot or exporting the
+  VM; it does not create the bucket. The bucket's location is independent of
+  `gcp_import_location`.
 
   `gcp_import_location` (default `us-central1` when the entry leaves it out)
   is the region the Migrate to Virtual Machines _import job_ runs in - the value passed to `gcloud compute migration image-imports
@@ -1106,6 +1131,9 @@ full matrix (DHCP-only, fixed-IP-only, multi-NIC, config-drive, and cleanup).
 `playbooks/migrate-gcp-vm.yml` exports the VM as an OVF package, uploads its
 VMDKs to Cloud Storage, and imports each disk through Migrate to Virtual
 Machines. The boot disk receives guest OS adaptation; data disks skip it.
+Before creating a snapshot or exporting, preflight verifies that the configured
+Cloud Storage staging bucket is accessible. The bucket must already exist; the
+workflow does not create it.
 Check the [supported guest OS list](https://docs.cloud.google.com/migrate/virtual-machines/docs/5.0/discover/supported-os-versions)
 before migrating. GCP starts imports for all disks before waiting for them. The guest must be
 on Google's supported list because M2VM adapts the boot disk for Compute
@@ -1215,8 +1243,11 @@ instance's keys, delete and relaunch it.
 Credentials (vCenter host/user/password, OpenStack authentication, AWS
 region/bucket/role and access keys, and GCP project/service-account settings)
 come from the encrypted runtime vaults - see
-[Secrets](#secrets). Anything still passed with `-e` overrides the vault values;
-`-e aws_region=...`, `-e vcenter_hostname=...` and friends still work.
+[Secrets](#secrets). Extra variables passed with `-e` override vault values;
+for example, `-e aws_region=...` still works. Select a vCenter with
+`-e vsphere_target_vcenter=<key-or-hostname>` so the host and its credentials
+come from the same vault entry. Overriding `vcenter_hostname` by itself can
+pair one host with another entry's credentials.
 
 `bin/run-playbook.sh` runs the playbook locally and automatically supplies the
 Ansible Vault password from `~/.dib-vault-pass`, `VAULT_PASSWORD_FILE`, or
@@ -1355,6 +1386,24 @@ playbook prints the run ID; resume it later with:
 AWS does not resume with `resume_run_id`; a failed import is canceled while
 its staged OVA remains in S3 for a follow-up import. Set
 `discard_failed_artifacts=true` to delete the S3 object on failure.
+To retry the retained OVA manually, use the bucket, key, and region printed in
+the failed run's output. The AWS account needs the configured `vmimport` role
+and access to that object:
+
+```bash
+aws ec2 import-image --region <region> --role-name <vmimport-role> \
+  --description "Retry <vm-name>" \
+  --disk-containers '[{"Format":"OVA","UserBucket":{"S3Bucket":"<bucket>","S3Key":"<key>"}}]'
+aws ec2 describe-import-image-tasks --region <region> \
+  --import-task-ids <import-task-id>
+```
+
+Use the licensing option appropriate for the guest OS when starting the import;
+AWS recommends specifying `--license-type` or `--usage-operation`. The
+returned AMI is not added to this project's migration catalog, so record and
+tag it yourself if you plan to launch it through this application. See the
+[AWS VM Import image guide](https://docs.aws.amazon.com/vm-import/latest/userguide/import-vm-image.html)
+for supported options.
 If the import finished but a later step failed (the snapshot check, tagging,
 or the catalog append), the run deregisters the imported AMI and deletes its
 snapshots, since no catalog row will ever point at them.
@@ -1520,11 +1569,16 @@ that check.
 
 `playbooks/launch-aws-instance.yml` reads AWS entries in this catalog through
 `bin/lookup-migration-ami.py`, which picks the most recent `status: completed`
-entry for the given `vm_name`; pass `--project <account-id-or-key>` when
+entry for the given `vm_name`; pass `--migration-id <clone-name>` to select a
+specific catalog run, or `--source-vcenter-key <vault-key>` to restrict the
+source. The launch dialogs and web picker expose each run with its vCenter,
+project, region, date, and migration ID, so older completed runs can be chosen.
+Without an explicit run or vCenter, lookup fails when matching entries come
+from multiple source vCenters. Pass `--project <account-id-or-key>` when
 selecting among multiple AWS accounts and `--region <region>` to restrict
 the match to one region (the launch playbook passes its `aws_region`,
 since an AMI cannot be launched in another region). With `--project`,
-rows recorded for that account or vault project key win; only the oldest legacy
+rows recorded for that account or vault project key win; the newest legacy
 rows without either `aws_account_id` or `aws_project` are used as a fallback,
 since they could come from any account. OpenStack entries contain an ordered
 list of Glance image IDs, one per source disk, for use by the OpenStack launch workflow;
@@ -1540,12 +1594,26 @@ are supplied. Azure entries contain the boot image, data-snapshot IDs, and the
 subscription/resource group for one `vm_name`; `bin/lookup-migration-azure.py
 --project <subscription-or-vault-key>` picks the newest `completed` migration
 for one VM in one subscription, and the launch playbook uses it to derive the
-image and snapshot names unless explicit names are supplied. If a VM has been
-migrated more than once, the newest migration wins unless you override with
-an explicit `ami_id`. "Newest" compares `migrated_at` as a parsed instant,
+image and snapshot names unless explicit names are supplied. If no migration
+ID is supplied, the newest migration wins within the selected project and
+region. "Newest" compares `migrated_at` as a parsed instant,
 so timestamps with a non-`Z` UTC offset sort correctly, and the catalog files
 and launch dialogs order rows the same way. New writes are fully validated;
 the readers still tolerate rows written before the current schema.
+
+Set `MIGRATION_ID=<clone-name>` in a launch wrapper to launch a specific
+catalog run outside the dialog or web form. On the playbook directly, use
+`-e migration_id=<clone-name>`.
+
+The dialogs and web forms offer an optional SSH TCP probe after launch. It is
+off by default because the controller may not be able to reach a guest's
+network. Set `GUEST_PROBE=true` with a wrapper or
+`-e guest_probe_enabled=true` with a playbook to wait up to five minutes for
+port 22. The result is saved in the deployment catalog as
+`guest_probe_status` (`passed`, `timed_out`, `no_address`, `skipped_windows`,
+`skipped_unknown_guest_os`, or `not_requested`). Windows guests and guests
+with an unknown OS are skipped. The probe checks TCP reachability and does not
+authenticate to the guest.
 
 ### Deployment Catalog
 
@@ -1787,6 +1855,7 @@ migrate-v2v/
 │   ├── append-*-catalog.py      # Migration and deployment catalog appenders
 │   ├── aws-project-facts.py     # Subnets, security groups, keypairs for one AWS account/region
 │   ├── azure-project-facts.py   # SSH public key resources for one Azure subscription
+│   ├── check-artifact-space.py  # Estimates local artifact space from a source VM (preflight check)
 │   ├── enable-cbt.py            # Enables Changed Block Tracking without a power cycle
 │   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
 │   ├── inspect-ova.py           # OVA inspection

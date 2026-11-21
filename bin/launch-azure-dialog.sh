@@ -59,7 +59,11 @@ print("\n".join(out))' "$facts" "$current" 2> /dev/null
 }
 
 AZURE_TARGET_PROJECT=$(choose_target "Which Azure subscription should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/azure.yml" azure_projects "${AZURE_TARGET_PROJECT:-}") || abort
-VM_NAME=$(choose_vm_required azure Azure) || abort
+choose_vm_required azure Azure "$AZURE_TARGET_PROJECT" || abort
+GUEST_PROBE=${GUEST_PROBE:-false}
+if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachability from this controller, not SSH authentication." "$GUEST_PROBE" ; then
+    GUEST_PROBE=true
+fi
 
 INSTANCE_NAME=$(input "Azure VM name (blank to derive it from $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 AZURE_VM_SIZE=$(input_required "VM size:" "${AZURE_VM_SIZE:-Standard_B2s_v2}" "The VM size cannot be empty.") || abort
@@ -74,9 +78,15 @@ if ! yesno "Use the shared launch network?\n\n  VNet..: $AZURE_VNET_NAME\n  Subn
     AZURE_SUBNET_NAME=$(input_required "Subnet name:" "$AZURE_SUBNET_NAME" "The subnet name cannot be empty.") || abort
     AZURE_NSG_NAME=$(input_required "Network security group name:" "$AZURE_NSG_NAME" "The network security group name cannot be empty.") || abort
 fi
-public_ip_default=no
-[ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=yes
-if yesno "Launch without a public IP address?" "$public_ip_default" ; then AZURE_NO_PUBLIC_IP=true; else AZURE_NO_PUBLIC_IP=false; fi
+public_ip_default=yes
+[ "${AZURE_NO_PUBLIC_IP:-false}" = true ] && public_ip_default=no
+if yesno "Public IP?" "$public_ip_default" ; then
+    AZURE_NO_PUBLIC_IP=false
+    public_ip=yes
+else
+    AZURE_NO_PUBLIC_IP=true
+    public_ip=no
+fi
 
 # The NSG's SSH rule is only created when the NSG is missing, and only matters
 # when the VM is reachable from outside, so ask only for a public IP.
@@ -128,12 +138,14 @@ fi
 
 say "Launch summary for $VM_NAME
 
+  Migration run: $MIGRATION_ID
+  SSH probe....: $GUEST_PROBE
   Subscription.: ${AZURE_TARGET_PROJECT:-auto-select}
   VM name......: ${INSTANCE_NAME:-derived from $VM_NAME}
   VM size......: $AZURE_VM_SIZE
   VNet / subnet: $AZURE_VNET_NAME / $AZURE_SUBNET_NAME
   NSG..........: $AZURE_NSG_NAME
-  No public IP.: $AZURE_NO_PUBLIC_IP
+  Public IP....: $public_ip
   SSH source...: ${AZURE_SSH_SOURCE_PREFIX:-n/a (no public IP)}
   Admin user...: $AZURE_ADMIN_USERNAME
   SSH key......: $AZURE_SSH_KEY_NAME" 17
@@ -143,7 +155,7 @@ dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
     emit_runtime_path_exports
-    for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "VM_NAME=$VM_NAME" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
+    for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "VM_NAME=$VM_NAME" "MIGRATION_ID=$MIGRATION_ID" "GUEST_PROBE=$GUEST_PROBE" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
         "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \

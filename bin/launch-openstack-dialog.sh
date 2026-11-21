@@ -154,7 +154,11 @@ print("\n".join(out))' "$facts" 2> /dev/null
 
 # Project first: it decides where the instance and its volumes land.
 PROJECT=$(choose_target "Which OpenStack project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/openstack.yml" openstack_projects "${OS_PROJECT_NAME:-}") || abort
-VM_NAME=$(choose_vm_required openstack OpenStack) || abort
+choose_vm_required openstack OpenStack "$PROJECT" || abort
+GUEST_PROBE=${GUEST_PROBE:-false}
+if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachability from this controller, not SSH authentication." "$GUEST_PROBE" ; then
+    GUEST_PROBE=true
+fi
 INSTANCE_NAME=$(input "OpenStack server name (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 FIXED_IPS_JSON=""
@@ -387,17 +391,19 @@ done
 
 say "Launch summary for ${VM_NAME}
 
-  Server name: ${INSTANCE_NAME:-same as $VM_NAME}
-  Project....: ${PROJECT:-auto-select}
-  Addressing.: ${addr_mode}${FIXED_IPS_JSON:+ ($FIXED_IPS_JSON)}
-  MACs.......: ${mac_mode}${MAC_JSON:+ ($MAC_JSON)}
-  Floating IP: ${AUTO_IP}
-  Security...: ${sg_mode}${SGS_JSON:+ ($SGS_JSON)}${SG_IDS_JSON:+ ($SG_IDS_JSON)}
-  ConfigDrive: ${CONFIG_DRIVE}
-  User data..: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
-  Flavor.....: ${FLAVOR}
-  SSH key....: ${KEY_NAME:-none}
-  Network....: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
+  Migration run: ${MIGRATION_ID}
+  SSH probe....: ${GUEST_PROBE}
+  Server name..: ${INSTANCE_NAME:-same as $VM_NAME}
+  Project......: ${PROJECT:-auto-select}
+  Addressing...: ${addr_mode}${FIXED_IPS_JSON:+ ($FIXED_IPS_JSON)}
+  MACs.........: ${mac_mode}${MAC_JSON:+ ($MAC_JSON)}
+  Floating IP..: ${AUTO_IP}
+  Security.....: ${sg_mode}${SGS_JSON:+ ($SGS_JSON)}${SG_IDS_JSON:+ ($SG_IDS_JSON)}
+  ConfigDrive..: ${CONFIG_DRIVE}
+  User data....: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
+  Flavor.......: ${FLAVOR}
+  SSH key......: ${KEY_NAME:-none}
+  Network......: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 dialog_tmp_files+=("$file")
@@ -405,7 +411,7 @@ dialog_tmp_files+=("$file")
     printf '#!/bin/bash\n'
     emit_runtime_path_exports
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
-        "VM_NAME=$VM_NAME" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
+        "VM_NAME=$VM_NAME" "MIGRATION_ID=$MIGRATION_ID" "GUEST_PROBE=$GUEST_PROBE" "OS_FLAVOR=$FLAVOR" "OS_KEY_NAME=$KEY_NAME" \
         "OS_NETWORK=$NETWORK" "OS_NETWORK_ID=$NETWORK_ID" "OS_NICS_JSON=$OS_NICS_JSON" \
         "OS_SECURITY_GROUPS_JSON=$SGS_JSON" "OS_SECURITY_GROUP_IDS_JSON=$SG_IDS_JSON" \
         "OS_PRESERVE_MAC=$PRESERVE_MAC" "OS_MAC_ADDRESSES_JSON=$MAC_JSON" \
