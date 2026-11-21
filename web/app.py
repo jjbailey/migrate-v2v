@@ -976,7 +976,7 @@ class Handler(BaseHTTPRequestHandler):
                     cards.append(f'<article class="cloud-card"><div class="card-icon {cloud}">{icon_html(cloud)}</div><div><div class="card-kicker">{mode.upper()}</div><h3>{cloud_name(cloud)}</h3></div><div class="card-links">{links}</div></article>')
             with db() as conn:
                 recent = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 5").fetchall()
-            body = '''<section class="hero"><div class="eyebrow"><i></i> VMWARE TO CLOUD</div><h1>Move with clarity.</h1><p>Choose a cloud, migrate a VM, then launch from its completed image. Operations are queued and run one at a time.</p></section>'''
+            body = '''<section class="hero"><div class="eyebrow"><i></i>VMWARE TO CLOUD</div><h1>Move with clarity.</h1><p>Choose a cloud, migrate a VM, then launch from its completed image. Operations are queued and run one at a time.</p></section>'''
             body += '<div class="section-title"><h2>Migrate</h2><p>Create a cloud image from a vSphere VM.</p></div><div class="card-grid">' + ''.join(cards[::2]) + '</div>'
             body += '<div class="section-title"><h2>Launch</h2><p>Start an instance from a completed migration.</p></div><div class="card-grid">' + ''.join(cards[1::2]) + '</div>'
             body += '<div class="section-title"><h2>Recent jobs</h2><a href="/jobs">View all →</a></div>' + jobs_table(recent)
@@ -1151,7 +1151,7 @@ def maintenance_home(user, token):
              and not item.get("pending_job_id"))
         for item in recovery_jobs()
     )
-    body = f'''<div class="page-heading"><div><div class="eyebrow"><i></i> VMWARE TO CLOUD / CONTROLLER</div><h1>Maintenance</h1>
+    body = f'''<div class="page-heading"><div><div class="eyebrow"><i></i>VMWARE TO CLOUD / CONTROLLER</div><h1>Maintenance</h1>
 <p>Review the catalogs, recover failed runs, or clear finished jobs.</p></div></div>
 <div class="maintenance-grid">
 <article class="maintenance-card panel"><div class="eyebrow">CATALOGS</div><h2>Migration and launch records</h2>
