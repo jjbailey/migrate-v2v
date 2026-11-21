@@ -12,6 +12,8 @@ source "$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/nul
 wrapper_capture_args "$@"
 
 VM_NAME=${VM_NAME:-}
+MIGRATION_ID=${MIGRATION_ID:-}
+GUEST_PROBE=${GUEST_PROBE:-false}
 INSTANCE_NAME=${INSTANCE_NAME:-}
 AZURE_TARGET_PROJECT=${AZURE_TARGET_PROJECT:-}
 AZURE_VM_SIZE=${AZURE_VM_SIZE:-}
@@ -31,6 +33,7 @@ AZURE_SSH_KEY_NAME=${AZURE_SSH_KEY_NAME:-cloud}
 AZURE_SSH_KEY_FILE=${AZURE_SSH_KEY_FILE:-}
 
 wrapper_require_bool AZURE_NO_PUBLIC_IP "$AZURE_NO_PUBLIC_IP"
+wrapper_require_bool GUEST_PROBE "$GUEST_PROBE"
 
 if [ -n "$AZURE_SSH_KEY_FILE" ] && [ ! -r "$AZURE_SSH_KEY_FILE" ] ; then
     echo "${wrapper_name}: AZURE_SSH_KEY_FILE is not readable: $AZURE_SSH_KEY_FILE" >&2
@@ -39,6 +42,8 @@ fi
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
+[ -n "$MIGRATION_ID" ] && args+=(-e "$(wrapper_var migration_id "$MIGRATION_ID")")
+args+=(-e "$(wrapper_var guest_probe_enabled "$GUEST_PROBE")")
 [ -n "$INSTANCE_NAME" ] && args+=(-e "$(wrapper_var instance_name "$INSTANCE_NAME")")
 [ -n "$AZURE_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var azure_target_project "$AZURE_TARGET_PROJECT")")
 [ -n "$AZURE_VM_SIZE" ] && args+=(-e "$(wrapper_var azure_vm_size "$AZURE_VM_SIZE")")

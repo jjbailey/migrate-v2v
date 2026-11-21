@@ -38,12 +38,14 @@ GUEST_CONVERT=${GUEST_CONVERT:-}
 VIRTIO_WIN=${VIRTIO_WIN:-}
 DISCARD_RUN_ID=${DISCARD_RUN_ID:-}
 VCENTER_CA_BUNDLE=${VCENTER_CA_BUNDLE:-}
+PREFLIGHT_ONLY=${PREFLIGHT_ONLY:-false}
 
 wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
 wrapper_require_bool REQUIRE_CBT "$REQUIRE_CBT"
 wrapper_require_bool COMPRESS "$COMPRESS"
 wrapper_require_bool GUEST_CONVERT "$GUEST_CONVERT"
+wrapper_require_bool PREFLIGHT_ONLY "$PREFLIGHT_ONLY"
 case "$DISCARD_RUN_ID" in
     "" | *[!0-9]*)
         [ -z "$DISCARD_RUN_ID" ] || wrapper_error "DISCARD_RUN_ID must be the digits-only ID of a failed run, not a flag (got '$DISCARD_RUN_ID')"
@@ -65,6 +67,7 @@ if [ -z "$VSPHERE_TARGET_VCENTER" ] && [ -n "$VCENTER_DATACENTER" ] ; then
 fi
 [ -n "$VALIDATE_CERTS" ] && args+=(-e "$(wrapper_var validate_certs "$VALIDATE_CERTS")")
 args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
+args+=(-e "$(wrapper_var preflight_only "$PREFLIGHT_ONLY")")
 [ -n "$OS_PROJECT_NAME" ] && args+=(-e "$(wrapper_var openstack_target_project "$OS_PROJECT_NAME")")
 [ -n "$ARTIFACT_ROOT" ] && args+=(-e "$(wrapper_var artifact_root "$ARTIFACT_ROOT")")
 [ -n "$REQUIRE_CBT" ] && args+=(-e "$(wrapper_var vddk_require_cbt "$REQUIRE_CBT")")

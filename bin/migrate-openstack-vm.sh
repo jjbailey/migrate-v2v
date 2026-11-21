@@ -18,9 +18,11 @@ VALIDATE_CERTS=${VALIDATE_CERTS:-}
 QUIESCE_SNAPSHOT=${QUIESCE_SNAPSHOT:-true}
 OS_PROJECT_NAME=${OS_PROJECT_NAME:-}
 ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
+PREFLIGHT_ONLY=${PREFLIGHT_ONLY:-false}
 
 wrapper_require_bool VALIDATE_CERTS "$VALIDATE_CERTS"
 wrapper_require_bool QUIESCE_SNAPSHOT "$QUIESCE_SNAPSHOT"
+wrapper_require_bool PREFLIGHT_ONLY "$PREFLIGHT_ONLY"
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
@@ -30,6 +32,7 @@ if [ -z "$VSPHERE_TARGET_VCENTER" ] && [ -n "$VCENTER_DATACENTER" ] ; then
 fi
 [ -n "$VALIDATE_CERTS" ] && args+=(-e "$(wrapper_var validate_certs "$VALIDATE_CERTS")")
 args+=(-e "$(wrapper_var quiesce_snapshot "$QUIESCE_SNAPSHOT")")
+args+=(-e "$(wrapper_var preflight_only "$PREFLIGHT_ONLY")")
 [ -n "$OS_PROJECT_NAME" ] && args+=(-e "$(wrapper_var openstack_target_project "$OS_PROJECT_NAME")")
 [ -n "$ARTIFACT_ROOT" ] && args+=(-e "$(wrapper_var artifact_root "$ARTIFACT_ROOT")")
 

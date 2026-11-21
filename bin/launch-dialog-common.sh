@@ -239,12 +239,28 @@ tristate()
 
 choose_vm()
 {
-    local platform=$1 label=$2 name picked
+    local platform=$1 label=$2 target_project=${3:-} id name detail picked state
     local choices=()
-    while IFS= read -r name ; do
-        [ -z "$name" ] || choices+=("${name%%$'\t'*}" "${name#*$'\t'}" OFF)
+    local default_selected=0
+    local -A names_by_id=()
+    while IFS=$'\t' read -r id name detail ; do
+        [ -n "$id" ] || continue
+        state=OFF
+        if [ -n "${MIGRATION_ID:-}" ] && [ "$id" = "$MIGRATION_ID" ] ; then
+            state=ON
+            default_selected=1
+        elif [ -z "${MIGRATION_ID:-}" ] && [ "$default_selected" -eq 0 ] ; then
+            state=ON
+            default_selected=1
+        fi
+        names_by_id["$id"]=$name
+        choices+=("$id" "$name — $detail" "$state")
     done < <(
         python3 -c 'import json,sys,datetime,os
+def project_values(row, platform):
+    fields={"aws":("aws_project","aws_account_id"),"azure":("azure_subscription_id",),
+            "gcp":("gcp_project",),"openstack":("openstack_project","openstack_project_id")}
+    return {str(row.get(field) or "") for field in fields.get(platform, ())}
 def when(v):
     try:
         d=datetime.datetime.fromisoformat(v.replace("Z","+00:00"))
@@ -253,36 +269,53 @@ def when(v):
         return datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
 try: rows=json.load(open(os.path.join(os.environ["MIGRATE_V2V_CATALOG_DIR"],"migration-catalog.json"))).get("migrations",[])
 except Exception: rows=[]
-best={}
+selected=[]
+project_selected=[]
 for row in rows:
-    name=row.get("vm_name")
+    name=str(row.get("vm_name") or "")
+    run_id=str(row.get("clone_name") or "")
     stamp=row.get("migrated_at") or ""
-    if not name or row.get("target_platform")!=sys.argv[1] or row.get("status")!="completed":
+    if not name or not run_id or row.get("target_platform")!=sys.argv[1] or row.get("status")!="completed":
         continue
-    if name not in best or when(stamp)>when(best[name]): best[name]=stamp
-for name,stamp in sorted(best.items(), key=lambda item: when(item[1]), reverse=True):
-    print("%s\t%s" % (name, stamp[:10] or "undated"))' "$platform"
+    region={"aws":row.get("aws_region"),"azure":row.get("azure_location"),
+            "gcp":row.get("gcp_import_location"),"openstack":row.get("openstack_region")}.get(sys.argv[1]) or "region unknown"
+    source=row.get("source_vcenter_key") or "source vCenter unknown"
+    project=" / ".join(sorted(value for value in project_values(row, sys.argv[1]) if value)) or "project unknown"
+    detail=" / ".join((source, project, str(region), stamp[:10] or "undated"))
+    item=(when(stamp),run_id,name,detail)
+    selected.append(item)
+    if sys.argv[2] and sys.argv[2] in project_values(row, sys.argv[1]):
+        project_selected.append(item)
+if project_selected:
+    selected=project_selected
+clean=lambda value:str(value).replace("\t"," ").replace("\n"," ")
+for _,run_id,name,detail in sorted(selected, reverse=True):
+    print("%s\t%s\t%s" % tuple(map(clean,(run_id,name,detail))))' "$platform" "$target_project"
     )
     if [ ${#choices[@]} -eq 0 ] ; then
-        say "No completed ${label} migrations in $MIGRATE_V2V_CATALOG_DIR/migration-catalog.json.\\n\\nType the VM name manually instead." 10 || true
-        input "VM name (as recorded in the migration catalog):" ""
-        return
+        say "No completed ${label} migrations for ${target_project:-the selected project} in $MIGRATE_V2V_CATALOG_DIR/migration-catalog.json." 10 || true
+        VM_NAME=$(input "VM name (as recorded in the migration catalog):" "") || return 1
+        MIGRATION_ID=""
+        return 0
     fi
-    choices[2]=ON
-    choices+=("_other" "Type a different VM name" OFF)
-    picked=$(dlg --radiolist "Which VM do you want to launch?\n(Newest completed ${label} migration first.)" "$(height 16)" "$COLS" 8 "${choices[@]}") || return 1
-    [ "$picked" != _other ] && printf %s "$picked" || input "VM name:" ""
+    choices+=("_other" "Enter a VM name and use its newest matching migration" OFF)
+    picked=$(dlg --radiolist "Which completed ${label} migration should launch?\n(Choose a specific run; newest first.)" "$(height 18)" "$COLS" 8 "${choices[@]}") || return 1
+    if [ "$picked" = _other ] ; then
+        VM_NAME=$(input "VM name:" "") || return 1
+        MIGRATION_ID=""
+    else
+        VM_NAME=${names_by_id["$picked"]}
+        MIGRATION_ID=$picked
+    fi
+    [ -n "$VM_NAME" ]
 }
 
 choose_vm_required()
 {
-    local platform=$1 label=$2 vm
+    local platform=$1 label=$2 target_project=${3:-}
     while : ; do
-        vm=$(choose_vm "$platform" "$label") || return 1
-        if [ -n "$vm" ] ; then
-            printf %s "$vm"
-            return 0
-        fi
+        choose_vm "$platform" "$label" "$target_project" || return 1
+        [ -n "${VM_NAME:-}" ] && return 0
         bad "The VM name cannot be empty." || true
     done
 }

@@ -59,7 +59,11 @@ print("\n".join(out))' "$facts" "$current" 2> /dev/null
 }
 
 AZURE_TARGET_PROJECT=$(choose_target "Which Azure subscription should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/azure.yml" azure_projects "${AZURE_TARGET_PROJECT:-}") || abort
-VM_NAME=$(choose_vm_required azure Azure) || abort
+choose_vm_required azure Azure "$AZURE_TARGET_PROJECT" || abort
+GUEST_PROBE=${GUEST_PROBE:-false}
+if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachability from this controller, not SSH authentication." "$GUEST_PROBE" ; then
+    GUEST_PROBE=true
+fi
 
 INSTANCE_NAME=$(input "Azure VM name (blank to derive it from $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 AZURE_VM_SIZE=$(input_required "VM size:" "${AZURE_VM_SIZE:-Standard_B2s_v2}" "The VM size cannot be empty.") || abort
@@ -134,6 +138,8 @@ fi
 
 say "Launch summary for $VM_NAME
 
+  Migration run: $MIGRATION_ID
+  SSH probe....: $GUEST_PROBE
   Subscription.: ${AZURE_TARGET_PROJECT:-auto-select}
   VM name......: ${INSTANCE_NAME:-derived from $VM_NAME}
   VM size......: $AZURE_VM_SIZE
@@ -149,7 +155,7 @@ dialog_tmp_files+=("$file")
 {
     printf '#!/bin/bash\n'
     emit_runtime_path_exports
-    for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "VM_NAME=$VM_NAME" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
+    for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "VM_NAME=$VM_NAME" "MIGRATION_ID=$MIGRATION_ID" "GUEST_PROBE=$GUEST_PROBE" "AZURE_TARGET_PROJECT=$AZURE_TARGET_PROJECT" \
         "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
         "AZURE_VM_SIZE=$AZURE_VM_SIZE" "AZURE_VNET_NAME=$AZURE_VNET_NAME" \
         "AZURE_SUBNET_NAME=$AZURE_SUBNET_NAME" "AZURE_NSG_NAME=$AZURE_NSG_NAME" \

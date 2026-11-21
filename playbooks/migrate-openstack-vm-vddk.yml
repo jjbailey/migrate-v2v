@@ -122,6 +122,15 @@
     - name: Run OpenStack preflight checks
       ansible.builtin.import_tasks: tasks/migration/openstack/preflight-vddk.yml
 
+    - name: Report preflight-only completion
+      ansible.builtin.debug:
+        msg: Preflight checks completed. No migration snapshot or disk stream was started.
+      when: preflight_only | bool
+
+    - name: Stop after preflight checks when requested
+      ansible.builtin.meta: end_play
+      when: preflight_only | bool
+
     - name: Initialize the OpenStack migration
       ansible.builtin.import_tasks: tasks/migration/openstack/initialize-vddk.yml
 

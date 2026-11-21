@@ -12,6 +12,8 @@ source "$(CDPATH='' builtin cd -- "$(dirname -- "${BASH_SOURCE[0]}")" > /dev/nul
 wrapper_capture_args "$@"
 
 VM_NAME=${VM_NAME:-}
+MIGRATION_ID=${MIGRATION_ID:-}
+GUEST_PROBE=${GUEST_PROBE:-false}
 # Optional name for the new instance when it should differ from the source VM.
 INSTANCE_NAME=${INSTANCE_NAME:-}
 GCP_ZONE=${GCP_ZONE:-}
@@ -31,9 +33,12 @@ GCP_SSH_KEY_FILE=${GCP_SSH_KEY_FILE:-}
 
 wrapper_require_bool GCP_NO_ADDRESS "$GCP_NO_ADDRESS"
 wrapper_require_json_array GCP_TAGS_JSON "$GCP_TAGS_JSON"
+wrapper_require_bool GUEST_PROBE "$GUEST_PROBE"
 
 args=()
 [ -n "$VM_NAME" ] && args+=(-e "$(wrapper_var vm_name "$VM_NAME")")
+[ -n "$MIGRATION_ID" ] && args+=(-e "$(wrapper_var migration_id "$MIGRATION_ID")")
+args+=(-e "$(wrapper_var guest_probe_enabled "$GUEST_PROBE")")
 [ -n "$INSTANCE_NAME" ] && args+=(-e "$(wrapper_var instance_name "$INSTANCE_NAME")")
 [ -n "$GCP_ZONE" ] && args+=(-e "$(wrapper_var gcp_zone "$GCP_ZONE")")
 [ -n "$GCP_TARGET_PROJECT" ] && args+=(-e "$(wrapper_var gcp_target_project "$GCP_TARGET_PROJECT")")

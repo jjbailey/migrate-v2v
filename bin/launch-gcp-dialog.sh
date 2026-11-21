@@ -15,7 +15,11 @@ DIALOG_NAME=launch-gcp-dialog
 source "$script_dir/launch-dialog-common.sh"
 
 GCP_TARGET_PROJECT=$(choose_target "Which GCP project should this VM launch into?" "$MIGRATE_V2V_VAULT_DIR/gcp.yml" gcp_projects "${GCP_TARGET_PROJECT:-}") || abort
-VM_NAME=$(choose_vm_required gcp GCP) || abort
+choose_vm_required gcp GCP "$GCP_TARGET_PROJECT" || abort
+GUEST_PROBE=${GUEST_PROBE:-false}
+if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachability from this controller, not SSH authentication." "$GUEST_PROBE" ; then
+    GUEST_PROBE=true
+fi
 INSTANCE_NAME=$(input "GCP instance name (blank to derive it from $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
 # Query one gcp-project-facts.py section and format tag\item\status lines
@@ -167,6 +171,8 @@ fi
 
 say "Launch summary for $VM_NAME
 
+  Migration run: $MIGRATION_ID
+  SSH probe....: $GUEST_PROBE
   Instance name: ${INSTANCE_NAME:-derived from $VM_NAME}
   Project......: ${GCP_TARGET_PROJECT:-auto-select}
   Zone.........: $GCP_ZONE
@@ -183,7 +189,7 @@ dialog_tmp_files+=("$file")
     printf '#!/bin/bash\n'
     emit_runtime_path_exports
     for pair in "ARTIFACT_ROOT=$ARTIFACT_ROOT" "MIGRATE_V2V_VAULT_DIR=$MIGRATE_V2V_VAULT_DIR" "MIGRATE_V2V_CATALOG_DIR=$MIGRATE_V2V_CATALOG_DIR" \
-        "VM_NAME=$VM_NAME" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
+        "VM_NAME=$VM_NAME" "MIGRATION_ID=$MIGRATION_ID" "GUEST_PROBE=$GUEST_PROBE" "GCP_ZONE=$GCP_ZONE" "GCP_MACHINE_TYPE=$GCP_MACHINE_TYPE" \
         "GCP_NETWORK=$GCP_NETWORK" "GCP_SUBNETWORK=$GCP_SUBNETWORK" "GCP_TAGS_JSON=$GCP_TAGS_JSON" \
         "GCP_NO_ADDRESS=$GCP_NO_ADDRESS" "GCP_TARGET_PROJECT=$GCP_TARGET_PROJECT" \
         "GCP_SSH_USER=$GCP_SSH_USER" "GCP_SSH_KEY_FILE=$GCP_SSH_KEY_FILE" \

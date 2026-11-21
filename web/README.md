@@ -80,7 +80,10 @@ follow `ARTIFACT_ROOT`, so set both when the artifact root lives elsewhere.
 Job output is stored in mode `0600` log files there. A running job stopped
 by a controller shutdown or restart is marked **interrupted** and is never
 rerun automatically. Review its log and cloud state before submitting another
-operation. The site does not offer arbitrary shell arguments or a terminal.
+operation. A queued job can be cancelled from its job page before the worker
+claims it. Running jobs cannot be cancelled in the UI because terminating a
+migration may leave cloud resources before cleanup runs. The site does not
+offer arbitrary shell arguments or a terminal.
 
 The **Maintenance** page shows concise migration and launch catalog entries
 grouped by cloud provider in a print-friendly view, with a separate option

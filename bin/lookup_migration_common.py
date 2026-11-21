@@ -44,6 +44,10 @@ def build_parser(with_status=False, with_project=False, with_region=False):
     parser = argparse.ArgumentParser()
     parser.add_argument("--catalog", required=True, type=pathlib.Path)
     parser.add_argument("--vm-name", required=True)
+    parser.add_argument("--migration-id",
+                        help="select this exact catalog migration instead of the newest")
+    parser.add_argument("--source-vcenter-key",
+                        help="restrict matches to this source vCenter vault key")
     if with_status:
         parser.add_argument("--status", default="completed")
     if with_project:
@@ -59,6 +63,21 @@ def build_parser(with_status=False, with_project=False, with_region=False):
         )
     return parser
 
+def selection_filter(args, entry_filter=None):
+    filters = []
+    if entry_filter is not None:
+        provider_filter = entry_filter(args)
+        if provider_filter is not None:
+            filters.append(provider_filter)
+    if args.migration_id:
+        filters.append(lambda entry: str(entry.get("clone_name", "")) == args.migration_id)
+    if args.source_vcenter_key:
+        filters.append(lambda entry: str(entry.get("source_vcenter_key", ""))
+                       == args.source_vcenter_key)
+    if not filters:
+        return None
+    return lambda entry: all(check(entry) for check in filters)
+
 def run(tool, platform, project, parser_options=None, entry_filter=None,
         fallback_filter=None):
     """Parse arguments, find the newest row, and print the projected fields.
@@ -68,9 +87,10 @@ def run(tool, platform, project, parser_options=None, entry_filter=None,
     tried only if entry_filter matches nothing.
     """
     args = build_parser(**(parser_options or {})).parse_args()
-    filters = [entry_filter]
+    combined_filter = selection_filter(args, entry_filter)
+    filters = [combined_filter]
     if fallback_filter is not None and fallback_filter(args) is not None:
-        filters.append(fallback_filter)
+        filters.append(selection_filter(args, fallback_filter))
     latest = None
     for filter_index, make_filter in enumerate(filters):
         latest = latest_migration(
@@ -78,7 +98,7 @@ def run(tool, platform, project, parser_options=None, entry_filter=None,
             args.vm_name,
             platform,
             status=getattr(args, "status", "completed"),
-            entry_filter=None if make_filter is None else make_filter(args),
+            entry_filter=make_filter,
             tool=tool,
         )
         if latest is not None:
@@ -93,8 +113,25 @@ def run(tool, platform, project, parser_options=None, entry_filter=None,
         raise SystemExit(
             f"{tool}: no usable {getattr(args, 'status', 'completed')!r} "
             f"{platform} migration found for vm_name={args.vm_name!r} "
+            f"migration_id={args.migration_id!r} "
             f"in {args.catalog}"
         )
+    if not args.migration_id and not args.source_vcenter_key:
+        catalog = read_snapshot(args.catalog, "migrations")
+        matching_sources = {str(entry.get("source_vcenter_key") or "").strip()
+                            for entry in catalog.get("migrations", [])
+                            if entry.get("vm_name") == args.vm_name
+                            and entry.get("target_platform") == platform
+                            and entry.get("status") == getattr(args, "status", "completed")
+                            and parse_timestamp(entry.get("migrated_at")) is not None
+                            and (combined_filter is None or combined_filter(entry))}
+        if len(matching_sources) > 1:
+            source_labels = sorted(key or "unknown" for key in matching_sources)
+            raise SystemExit(
+                f"{tool}: {args.vm_name!r} has completed {platform} migrations "
+                f"from multiple source vCenters ({', '.join(source_labels)}); "
+                "select one with --migration-id or --source-vcenter-key"
+            )
     print(json.dumps(project(latest)))
 
 def main(tool, platform, project, parser_options=None, entry_filter=None,

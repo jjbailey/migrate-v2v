@@ -45,6 +45,8 @@
     gcp_boot_image_name: ""
     gcp_data_image_names: []
     gcp_migration_id: ""
+    guest_probe_enabled: false
+    guest_probe_timeout: 300
     catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
     migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
     deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
@@ -117,6 +119,8 @@
                   - "{{ migration_catalog_path }}"
                   - --vm-name
                   - "{{ vm_name }}"
+                  - --migration-id
+                  - "{{ migration_id | default('') }}"
                   - --project
                   - "{{ gcp_project }}"
               register: gcp_migration_lookup
@@ -305,6 +309,17 @@
           ansible.builtin.debug:
             msg: "{{ gcp_instance_description.stdout | from_json }}"
 
+        - name: Optionally check guest SSH reachability
+          ansible.builtin.include_tasks: tasks/probe-guest-ssh.yml
+          vars:
+            gcp_probe_nic0: >-
+              {{ ((gcp_instance_description.stdout | from_json).networkInterfaces
+                  | default([{}], true)) | first }}
+            guest_probe_host: >-
+              {{ ((gcp_probe_nic0.accessConfigs | default([{}], true)) | first).natIP
+                 | default(gcp_probe_nic0.networkIP | default(''), true) }}
+            guest_probe_guest_id: "{{ gcp_source_guest_id | default('') }}"
+
         - name: Build the GCP deployment catalog entry
           ansible.builtin.set_fact:
             gcp_deployment_entry:
@@ -318,6 +333,9 @@
               gcp_data_disk_names: "{{ gcp_data_disk_names }}"
               status: "RUNNING"
               launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+              guest_probe_status: "{{ guest_probe_status }}"
+              guest_probe_port: "{{ guest_probe_port }}"
+              guest_probe_checked_at: "{{ guest_probe_checked_at }}"
 
         - name: Create a private temporary file for the catalog entry
           ansible.builtin.tempfile:

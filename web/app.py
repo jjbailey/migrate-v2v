@@ -36,7 +36,7 @@ except ImportError:  # direct python3 web/app.py invocation
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
-from catalog_common import read_snapshot
+from catalog_common import read_snapshot, timestamp_sort_key
 from vault_common import ansible_vault_bin  # noqa: E402
 
 STATE = Path(os.environ.get("WEB_STATE_DIR", "/work/migrate-v2v/web-state"))
@@ -53,7 +53,7 @@ MAX_FIELD = 16 * 1024
 MAX_LOGIN_NAME = 32
 MAX_LOGIN_PASSWORD = MAX_FIELD
 SESSION_AGE = 12 * 60 * 60
-TERMINAL_JOB_STATUSES = ("completed", "failed", "interrupted")
+TERMINAL_JOB_STATUSES = ("completed", "failed", "interrupted", "cancelled")
 LOGIN_FAILURES = {}
 ACTIVE_PROCESS = None
 ACTIVE_LOCK = threading.Lock()
@@ -259,6 +259,50 @@ def catalog_vms(cloud):
     except (OSError, subprocess.SubprocessError, ValueError):
         return []
 
+def catalog_migrations(cloud, project=None):
+    try:
+        entries = read_snapshot(CATALOG_DIR / "migration-catalog.json", "migrations").get("migrations", [])
+    except (OSError, ValueError):
+        return []
+    project_fields = {
+        "aws": ("aws_project", "aws_account_id"),
+        "azure": ("azure_subscription_id",),
+        "gcp": ("gcp_project",),
+        "openstack": ("openstack_project", "openstack_project_id"),
+    }.get(cloud, ())
+    selected = []
+    project_selected = []
+    for entry in entries:
+        if (not isinstance(entry, dict) or entry.get("target_platform") != cloud
+                or entry.get("status") != "completed" or not entry.get("vm_name")
+                or not entry.get("clone_name")):
+            continue
+        selected.append(entry)
+        if project and project in {str(entry.get(field) or "") for field in project_fields}:
+            project_selected.append(entry)
+    if project_selected:
+        selected = project_selected
+    return sorted(selected,
+                  key=lambda entry: timestamp_sort_key(entry.get("migrated_at")),
+                  reverse=True)
+
+def catalog_migration_label(cloud, entry):
+    project_fields = {
+        "aws": ("aws_project", "aws_account_id"),
+        "azure": ("azure_subscription_id",),
+        "gcp": ("gcp_project",),
+        "openstack": ("openstack_project", "openstack_project_id"),
+    }.get(cloud, ())
+    project = next((str(entry.get(field)) for field in project_fields if entry.get(field)), "project unknown")
+    region_field = {"aws": "aws_region", "azure": "azure_location",
+                    "gcp": "gcp_import_location", "openstack": "openstack_region"}.get(cloud)
+    region = str(entry.get(region_field) or "region unknown")
+    source = str(entry.get("source_vcenter_key") or "source vCenter unknown")
+    date = str(entry.get("migrated_at") or "undated")[:10]
+    return " · ".join((str(entry.get("vm_name", "")), source,
+                       f"{project} / {region}", date,
+                       str(entry.get("clone_name", ""))))
+
 def target_key(cloud):
     return {"aws": "AWS_TARGET_PROJECT", "azure": "AZURE_TARGET_PROJECT", "gcp": "GCP_TARGET_PROJECT", "openstack": "OS_PROJECT_NAME"}[cloud]
 
@@ -349,7 +393,17 @@ def validate(mode, cloud, method, posted):
         if source:
             values["VCENTER_DATACENTER"] = ""
     else:
-        if values.get("VM_NAME") not in catalog_vms(cloud):
+        migration_id = values.get("MIGRATION_ID", "")
+        available_migrations = catalog_migrations(cloud, project)
+        selected_migration = next(
+            (entry for entry in available_migrations
+             if str(entry.get("clone_name")) == migration_id), None)
+        if migration_id:
+            if selected_migration is None:
+                errors.append("Select a completed migration for the chosen project.")
+            else:
+                values["VM_NAME"] = str(selected_migration["vm_name"])
+        elif values.get("VM_NAME") not in catalog_vms(cloud):
             errors.append("Select a VM with a completed migration in the catalog.")
         if project in allowed_targets:
             available, _, _ = launch_choices(cloud, project, values)
@@ -392,6 +446,27 @@ def enqueue(user, mode, cloud, method, values):
             (user, mode, cloud, method, values["VM_NAME"], values[target_key(cloud)], json.dumps(values)))
         return cur.lastrowid
 
+def cancel_queued_job(job_id):
+    """Cancel only a job the worker has not claimed yet."""
+    with db() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            raise ValueError("That job no longer exists.")
+        if row["status"] != "queued":
+            raise ValueError("Only a queued job can be cancelled. Running jobs may already have created cloud resources.")
+        log_path = STATE / f"job-{job_id}.log"
+        conn.execute(
+            "UPDATE jobs SET status='cancelled', finished=datetime('now'), log_path=? WHERE id=? AND status='queued'",
+            (str(log_path), job_id),
+        )
+    try:
+        with open(log_path, "wb") as stream:
+            os.chmod(log_path, 0o600)
+            stream.write(b"Cancelled before the worker started this job.\n")
+    except OSError:
+        pass
+
 def recovery_metadata(row):
     try:
         values = json.loads(row["values_json"])
@@ -420,8 +495,9 @@ def recovery_run_key(row, run_id):
 
 def resolved_discard_runs(conn):
     """Find runs a web discard later confirmed had no remaining artifacts."""
+    status_placeholders = ", ".join("?" for _ in TERMINAL_JOB_STATUSES)
     rows = conn.execute(
-        "SELECT * FROM jobs WHERE mode='migrate' AND status IN (?, ?, ?)",
+        f"SELECT * FROM jobs WHERE mode='migrate' AND status IN ({status_placeholders})",
         TERMINAL_JOB_STATUSES,
     ).fetchall()
     resolved = {}
@@ -823,6 +899,7 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
     if project not in targets(cloud, mode):
         return project_picker(mode, cloud, method, user, token, errors or (["Select an environment from the vault."] if project else []))
     choices, defaults, unavailable = launch_choices(cloud, project, posted) if mode == "launch" else ({}, {}, [])
+    migrations = catalog_migrations(cloud, project) if mode == "launch" else []
     sections = []
     for name in fields:
         if name == target_key(cloud):
@@ -834,8 +911,19 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
         options = None
         if name == "VSPHERE_TARGET_VCENTER":
             options = [(t, t) for t in vault_keys("vsphere.yml", "vsphere_projects")]
+        elif name == "VM_NAME" and mode == "launch" and migrations:
+            selected_id = posted.get("MIGRATION_ID") or str(migrations[0].get("clone_name", ""))
+            selected = next((row for row in migrations
+                             if str(row.get("clone_name", "")) == selected_id), migrations[0])
+            sections.append(f'<input type="hidden" id="VM_NAME" name="VM_NAME" value="{esc(selected.get("vm_name", ""))}">')
+            continue
         elif name == "VM_NAME" and mode == "launch":
             options = [(v, v) for v in catalog_vms(cloud)]
+        elif name == "MIGRATION_ID" and mode == "launch":
+            options = [(str(row.get("clone_name", "")),
+                        catalog_migration_label(cloud, row)) for row in migrations]
+            if not posted.get("MIGRATION_ID") and options:
+                value = options[0][0]
         elif meta.kind == "boolean":
             if name in ("AZURE_NO_PUBLIC_IP", "GCP_NO_ADDRESS"):
                 options = [("false", "Yes"), ("true", "No")]
@@ -854,6 +942,11 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
                 for v, label in suggested)
             chooser = f'<div class="choice-list" role="group" aria-label="{esc(meta.label)}">{picked}</div>' if suggested else ''
             control = chooser + f'<input id="{name}" name="{name}" type="text" value="{esc(value)}" autocomplete="off" aria-label="Manual JSON override"><small>Or enter a JSON array of names or IDs manually. A nonempty manual value overrides the selection.</small>'
+        elif name == "MIGRATION_ID" and mode == "launch" and options:
+            control = f'<select id="{name}" name="{name}" required>' + ''.join(
+                f'<option value="{esc(v)}" data-vm="{esc(migrations[index].get("vm_name", ""))}"'
+                f'{" selected" if value == v else ""}>{esc(label)}</option>'
+                for index, (v, label) in enumerate(options)) + '</select>'
         elif options is not None:
             placeholder = '<option value="">Select…</option>' if meta.required or name == target_key(cloud) else ''
             control = f'<select id="{name}" name="{name}">{placeholder}' + ''.join(
@@ -961,7 +1054,7 @@ class Handler(BaseHTTPRequestHandler):
                 csrf = secrets.token_urlsafe(24)
                 token = sign({"exp": int(time.time()) + 600, "csrf": csrf})
                 headers = {"Set-Cookie": self.session_cookie(token, 600)}
-            body = f'''<section class="login panel"><div class="eyebrow">CONTROLLER ACCESS</div><h1>Sign in</h1><p>Use a local account for this controller.</p><form method="post" action="/login">{csrf_input(csrf)}<label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="button">Sign in</button></form></section>'''
+            body = f'''<section class="login panel"><div class="eyebrow"><i></i>CONTROLLER ACCESS</div><h1>Sign in</h1><p>Use a local account for this controller.</p><form method="post" action="/login">{csrf_input(csrf)}<label>Username<input name="username" autocomplete="username" required></label><label>Password<input name="password" type="password" autocomplete="current-password" required></label><button class="button">Sign in</button></form></section>'''
             return self.send(200, page("Sign in", body), headers)
         if not self.require_auth():
             return
@@ -995,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/jobs":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 100").fetchall()
-            return self.send(200, page("Jobs", '<div class="page-heading"><div><div class="eyebrow"><i></i> VMWARE TO CLOUD / OPERATIONS</div><h1>Jobs</h1><p>Queued jobs run in submission order.</p></div></div>' + jobs_table(rows), user, csrf))
+            return self.send(200, page("Jobs", '<div class="page-heading"><div><div class="eyebrow"><i></i>VMWARE TO CLOUD / OPERATIONS</div><h1>Jobs</h1><p>Queued jobs run in submission order.</p></div></div>' + jobs_table(rows), user, csrf))
         if path == "/maintenance":
             return self.send(200, maintenance_home(user, csrf))
         if path == "/maintenance/catalog":
@@ -1033,6 +1126,9 @@ class Handler(BaseHTTPRequestHandler):
             <div class="job-summary panel"><span class="badge {esc(row['status'])}">{esc(row['status'])}</span><span>Created {esc(row['created'])} UTC</span><span>Started {esc(row['started'] or '—')}</span><span>Finished {esc(row['finished'] or '—')}</span></div>
             <h2>Output</h2><pre class="job-log">{esc(log or 'Waiting for output…')}</pre>
             <div class="job-footer"><a class="back" href="/jobs">← All jobs</a></div>'''
+            if row["status"] == "queued":
+                body += f'''<form method="post" action="/jobs/{job_id}/cancel" class="job-cancel-form">{csrf_input(csrf)}
+<button class="button danger-button" type="submit">Cancel queued job</button></form>'''
             if row["status"] in ("queued", "running"):
                 body += '<meta http-equiv="refresh" content="5">'
             return self.send(200, page(f"Job {row['id']}", body, user, csrf))
@@ -1099,6 +1195,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/logout":
             return self.redirect("/login", {"Set-Cookie": self.session_cookie("", 0)})
+        match = re.fullmatch(r"/jobs/(\d{1,18})/cancel", path)
+        if match:
+            job_id = int(match.group(1))
+            try:
+                cancel_queued_job(job_id)
+            except ValueError as error:
+                return self.send(400, page("Cannot cancel job", f'<div class="alert">{esc(error)}</div><a class="back" href="/jobs/{job_id}">Back to job</a>', self.user(), self.csrf()))
+            return self.redirect(f"/jobs/{job_id}")
         if path == "/maintenance/jobs/clear":
             if posted.get("confirm") != "yes":
                 return self.send(400, maintenance_jobs(

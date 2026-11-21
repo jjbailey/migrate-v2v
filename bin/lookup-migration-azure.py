@@ -49,6 +49,8 @@ def project(entry):
         "azure_data_snapshot_ids": entry.get("azure_data_snapshot_ids", []),
         "azure_hyper_v_generation": entry.get("azure_hyper_v_generation", ""),
         "migration_id": entry.get("clone_name", ""),
+        "source_vcenter_key": entry.get("source_vcenter_key", ""),
+        "source_guest_id": (entry.get("artifact_manifest") or {}).get("source_guest_id", ""),
     }
 
 if __name__ == "__main__":

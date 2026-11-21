@@ -20,6 +20,7 @@ def project(entry):
         "openstack_project_id": entry.get("openstack_project_id", ""),
         "artifact_manifest": entry["artifact_manifest"],
         "migration_id": entry.get("clone_name", ""),
+        "source_vcenter_key": entry.get("source_vcenter_key", ""),
     }
 
 def project_filter(args):

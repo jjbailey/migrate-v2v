@@ -37,6 +37,14 @@ else
     QUIESCE_SNAPSHOT=false
 fi
 
+preflight_default=no
+[ "${PREFLIGHT_ONLY:-false}" = true ] && preflight_default=yes
+if yesno "Run preflight checks only?\n\nChecks source access, target permissions, and local artifact space, then stops before migration setup." "$preflight_default" ; then
+    PREFLIGHT_ONLY=true
+else
+    PREFLIGHT_ONLY=false
+fi
+
 if [[ $MIGRATE_WRAPPER == *-vddk.sh ]] ; then
     cbt_default=no
     [ "${REQUIRE_CBT:-false}" = true ] && cbt_default=yes
@@ -122,7 +130,8 @@ summary="Migration summary for $VM_NAME$method
   Target..........: ${!MIGRATE_TARGET_VAR:-auto-select}
   Validate certs..: ${VALIDATE_CERTS:-vault default}
   Artifact root...: $ARTIFACT_ROOT
-  Quiesce snapshot: $QUIESCE_SNAPSHOT"
+  Quiesce snapshot: $QUIESCE_SNAPSHOT
+  Preflight only..: $PREFLIGHT_ONLY"
 [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || summary="$summary
   Compress images.: $COMPRESS
   Guest convert...: ${GUEST_CONVERT:-false}"
@@ -147,6 +156,7 @@ dialog_tmp_files+=("$file")
     printf 'export %s=%s\n' "$MIGRATE_TARGET_VAR" "$(quote "$target_value")"
     printf 'export VALIDATE_CERTS=%s\n' "$(quote "$VALIDATE_CERTS")"
     printf 'export QUIESCE_SNAPSHOT=%s\n' "$(quote "$QUIESCE_SNAPSHOT")"
+    printf 'export PREFLIGHT_ONLY=%s\n' "$(quote "$PREFLIGHT_ONLY")"
     [ "$MIGRATE_WRAPPER" != migrate-openstack-vm-vddk.sh ] || {
         printf 'export COMPRESS=%s\n' "$(quote "$COMPRESS")"
         printf 'export GUEST_CONVERT=%s\n' "$(quote "${GUEST_CONVERT:-false}")"

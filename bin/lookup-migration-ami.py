@@ -18,6 +18,8 @@ def project(entry):
         "migrated_at": entry["migrated_at"],
         "aws_region": entry["aws_region"],
         "aws_account_id": entry.get("aws_account_id", ""),
+        "migration_id": entry.get("clone_name", ""),
+        "source_vcenter_key": entry.get("source_vcenter_key", ""),
         # Older rows have no guest ID; the launch then prints root@.
         "source_guest_id": (entry.get("artifact_manifest") or {}).get("source_guest_id", ""),
     }

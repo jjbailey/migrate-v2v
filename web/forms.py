@@ -23,10 +23,15 @@ class Field:
 
 F = {
     "VM_NAME": Field("Source VM", required=True),
+    "MIGRATION_ID": Field("Completed migration run"),
+    "GUEST_PROBE": Field("Wait for SSH TCP port after launch", "boolean", "false",
+                          help="Checks TCP port 22 from this controller and records the result; it does not verify SSH authentication."),
     "VSPHERE_TARGET_VCENTER": Field("Source vCenter"),
     "VCENTER_DATACENTER": Field("Legacy datacenter override", help="Only used without a selected vCenter."),
     "VALIDATE_CERTS": Field("Validate vCenter certificates", "choice", choices=("", "true", "false")),
     "QUIESCE_SNAPSHOT": Field("Quiesce snapshot", "boolean", "true"),
+    "PREFLIGHT_ONLY": Field("Preflight only", "boolean", "false",
+                             help="Checks source access, target permissions, and local space, then stops before migration setup."),
     "REQUIRE_CBT": Field("Require source CBT", "boolean", "false",
                          help="Stop before transfer if Changed Block Tracking is unavailable."),
     "AWS_TARGET_PROJECT": Field("AWS account"),

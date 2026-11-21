@@ -43,6 +43,15 @@
     - name: Run GCP preflight checks
       ansible.builtin.import_tasks: tasks/migration/gcp/preflight.yml
 
+    - name: Report preflight-only completion
+      ansible.builtin.debug:
+        msg: Preflight checks completed. No migration snapshot or export was started.
+      when: preflight_only | bool
+
+    - name: Stop after preflight checks when requested
+      ansible.builtin.meta: end_play
+      when: preflight_only | bool
+
     - name: Initialize the GCP migration
       ansible.builtin.import_tasks: tasks/migration/gcp/initialize.yml
 

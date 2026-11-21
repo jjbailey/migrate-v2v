@@ -35,3 +35,6 @@
   failed_when: govc_check.rc != 0
   changed_when: false
 
+- name: Estimate local artifact space before migration
+  ansible.builtin.import_tasks: estimate-artifact-space.yml
+

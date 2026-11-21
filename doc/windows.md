@@ -1,31 +1,46 @@
 # Windows guests
 
-Windows needs special handling on one target only: **OpenStack**, through the
-datastore-direct migration with guest conversion. Everything else about
-migrating a VM is covered in the [README](../README.md) and
-[datastore-direct.md](datastore-direct.md); this page collects what is specific
-to Windows.
+This page describes the Windows-specific handling implemented by this
+repository. Its only in-repository Windows conversion is for **OpenStack**,
+through datastore-direct migration with guest conversion. The other migration
+playbooks do not run this conversion or inject the Fedora `virtio-win` drivers;
+their destination import workflows and Windows guest requirements differ.
+Everything else about migrating a VM is covered in the
+[README](../README.md) and [datastore-direct.md](datastore-direct.md).
 
 ## Support at a glance
 
-| Target                                                | Windows                                        | Notes                                                                                                                   |
-| ----------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| OpenStack, datastore-direct with `GUEST_CONVERT=true` | Supported, tested with **Windows 10 Pro** only | Drivers are injected during migration (below).                                                                          |
-| OpenStack, standard (OVF) path                        | Refused before the snapshot is taken           | No guest conversion is possible here, so the image would not boot. Use datastore-direct.                                |
-| OpenStack, datastore-direct without `GUEST_CONVERT`   | Not supported                                  | Refused before the snapshot is taken, because the image would not boot. Enable guest conversion.                        |
-| AWS, Azure, GCP                                       | Not handled by this tool                       | The playbooks do no Windows-specific work and do not need virtio drivers. Windows has not been tested on these targets. |
+| Target                                                | What this repository does                                                          | Validation status                                                                                     |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| OpenStack, datastore-direct with `GUEST_CONVERT=true` | Injects OpenStack virtio drivers and removes VMware tools (details below).         | Tested with **Windows 10 Pro** only.                                                                  |
+| OpenStack, standard (OVF) path                        | Refuses a Windows guest before taking a snapshot.                                  | Unsupported by this path because it cannot perform the required KVM driver conversion.                |
+| OpenStack, datastore-direct without `GUEST_CONVERT`   | Refuses a Windows guest before taking a snapshot.                                  | Unsupported without guest conversion because the resulting image would lack the required KVM drivers. |
+| AWS                                                   | Passes the OVA to EC2 VM Import/Export; the playbook does not inject `virtio-win`. | End-to-end Windows migration and launch have not been tested in this project.                         |
+| Azure                                                 | Converts and registers the VHD; the playbook does not modify Windows drivers.      | End-to-end Windows migration and launch have not been tested in this project.                         |
+| Google Cloud                                          | Uses Migrate to Virtual Machines image import; it does not inject `virtio-win`.    | End-to-end Windows migration and launch have not been tested in this project.                         |
 
-Only Windows 10 Pro on OpenStack has been tested. Other Windows versions
-(Server editions, Windows 11) use the same mechanism and may work, but are
-unverified.
+Only Windows 10 Pro on OpenStack has been tested end to end by this project.
+Other Windows versions and all three AWS, Azure, and Google Cloud paths remain
+unverified here. “Unverified” does not mean those providers reject Windows;
+their own import requirements and guest adaptations still apply.
 
 ## Why OpenStack needs drivers
 
-OpenStack on KVM presents virtio disks and network adapters. Windows does not
-ship with virtio drivers, so a VM migrated from vSphere (which uses VMware's
-SCSI and network hardware) cannot find its boot disk or network on KVM unless
-the drivers are installed first. The other targets present hardware that
-Windows already has drivers for, which is why they need no injection here.
+OpenStack on KVM presents virtio disks and network adapters. A Windows VM
+migrated from vSphere (which uses VMware's SCSI and network hardware) needs the
+OpenStack virtio drivers installed before it can boot and use its network.
+This repository injects those drivers only on the OpenStack conversion path.
+
+AWS and Google Cloud use provider-managed import adaptation for Windows:
+[EC2 VM Import/Export](https://docs.aws.amazon.com/vm-import/latest/userguide/import-modify-vm.html)
+modifies Windows boot settings, and [Google Migrate to Virtual Machines](https://cloud.google.com/migrate/virtual-machines/docs/5.0/resources/vm-adaptations)
+performs Windows OS adaptations during image import. Google Compute Engine
+also maintains its own Windows storage and network drivers, including
+VirtIO-based drivers; these are distinct from the Fedora `virtio-win` ISO used
+by this project's OpenStack conversion. The Azure path here creates an image
+directly and does not run Azure Migrate's guest adaptation workflow, so its
+Windows boot and guest-agent requirements have not been verified by this
+project.
 
 ## How the conversion works
 

@@ -7,6 +7,8 @@
 validate_certs: true
 datacenter: "Datacenter"
 # vm_name has no default: common/preflight*.yml asserts it was supplied.
+artifact_root: "/work/migrate-v2v"
+preflight_only: false
 quiesce_snapshot: true
 
 govc_url: "{{ GOVC_URL }}"

@@ -37,6 +37,8 @@
     launch_ssh_user: ""
     instance_name: "{{ vm_name }}"
     extra_tags: {}
+    guest_probe_enabled: false
+    guest_probe_timeout: 300
 
     catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
     migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
@@ -94,6 +96,8 @@
               - "{{ migration_catalog_path }}"
               - --vm-name
               - "{{ vm_name }}"
+              - --migration-id
+              - "{{ migration_id | default('') }}"
               - --project
               - "{{ aws_account_id if (aws_account_id | length > 0) else aws_target_project_name }}"
               - --region
@@ -183,6 +187,14 @@
       ansible.builtin.debug:
         msg: "{{ launch_result.instances[0] }}"
 
+    - name: Optionally check guest SSH reachability
+      ansible.builtin.include_tasks: tasks/probe-guest-ssh.yml
+      vars:
+        guest_probe_host: >-
+          {{ launch_result.instances[0].public_ip_address
+             | default(launch_result.instances[0].private_ip_address | default(''), true) }}
+        guest_probe_guest_id: "{{ source_guest_id | default('') }}"
+
     - name: Add the AWS deployment to the catalog
       block:
         - name: Build the AWS deployment catalog entry
@@ -199,6 +211,9 @@
               vpc_subnet_id: "{{ vpc_subnet_id }}"
               status: "{{ launch_result.instances[0].state.name | default('running') }}"
               launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+              guest_probe_status: "{{ guest_probe_status }}"
+              guest_probe_port: "{{ guest_probe_port }}"
+              guest_probe_checked_at: "{{ guest_probe_checked_at }}"
 
         - name: Add AWS account scope to the deployment catalog entry
           ansible.builtin.set_fact:

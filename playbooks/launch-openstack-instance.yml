@@ -42,6 +42,8 @@
     openstack_config_drive: false
     extra_metadata: {}
     launch_run_id: ""
+    guest_probe_enabled: false
+    guest_probe_timeout: 300
     catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
     migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
     deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
@@ -268,6 +270,8 @@
               - "{{ migration_catalog_path }}"
               - --vm-name
               - "{{ vm_name }}"
+                  - --migration-id
+                  - "{{ migration_id | default('') }}"
               - --project
               - "{{ openstack_target_project_name }}"
               - --region
@@ -795,6 +799,28 @@
       ansible.builtin.debug:
         msg: "{{ launch_result.server }}"
 
+    - name: Resolve the preferred OpenStack guest address
+      ansible.builtin.set_fact:
+        openstack_server_addrs: >-
+          {{ (launch_result.server.addresses | default({}, true)).values() | flatten }}
+
+    - name: Choose the OpenStack guest address for login and probing
+      ansible.builtin.set_fact:
+        openstack_ssh_host: >-
+          {{ launch_result.server.access_ipv4
+             | default((openstack_server_addrs | selectattr('OS-EXT-IPS:type', 'defined')
+                        | selectattr('OS-EXT-IPS:type', 'equalto', 'floating')
+                        | map(attribute='addr') | list
+                        + openstack_server_addrs | map(attribute='addr') | list
+                        + ['']) | first, true) }}
+
+    - name: Optionally check guest SSH reachability
+      ansible.builtin.include_tasks: tasks/probe-guest-ssh.yml
+      vars:
+        guest_probe_host: "{{ openstack_ssh_host }}"
+        guest_probe_guest_id: >-
+          {{ (source_artifact_manifest | default({}, true)).source_guest_id | default('') }}
+
     - name: Build the OpenStack deployment catalog entry
       ansible.builtin.set_fact:
         openstack_deployment_entry:
@@ -818,6 +844,9 @@
           openstack_data_volume_ids: "{{ data_volume_ids | default([]) }}"
           status: "{{ launch_result.server.status | default('ACTIVE') }}"
           launched_at: "{{ now(utc=true, fmt='%Y-%m-%dT%H:%M:%SZ') }}"
+          guest_probe_status: "{{ guest_probe_status }}"
+          guest_probe_port: "{{ guest_probe_port }}"
+          guest_probe_checked_at: "{{ guest_probe_checked_at }}"
 
     - name: Add the OpenStack deployment region when configured
       ansible.builtin.set_fact:
@@ -862,15 +891,7 @@
     - name: Show how to log in
       ansible.builtin.include_tasks: tasks/show-ssh-command.yml
       vars:
-        openstack_server_addrs: >-
-          {{ (launch_result.server.addresses | default({}, true)).values() | flatten }}
-        ssh_host: >-
-          {{ launch_result.server.access_ipv4
-             | default((openstack_server_addrs | selectattr('OS-EXT-IPS:type', 'defined')
-                        | selectattr('OS-EXT-IPS:type', 'equalto', 'floating')
-                        | map(attribute='addr') | list
-                        + openstack_server_addrs | map(attribute='addr') | list
-                        + ['']) | first, true) }}
+        ssh_host: "{{ openstack_ssh_host }}"
         ssh_user: "{{ launch_ssh_user }}"
         ssh_guest_id: "{{ (source_artifact_manifest | default({}, true)).source_guest_id | default('') }}"
 
