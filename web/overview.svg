@@ -11,7 +11,7 @@
       .nav{fill:#9eb5ba;font-size:14px;font-weight:600}
       .user{fill:#9eb5ba;font-size:13px}
       .eyebrow{fill:#9eb5ba;font-size:12px;font-weight:750;letter-spacing:2.4px}
-      .hero-title{fill:#fff;font-size:42px;font-weight:750;letter-spacing:-1.5px}
+      .hero-title{fill:#fff;font-size:42px;font-weight:700;letter-spacing:-1.5px}
       .hero-copy{fill:#b3c8ca;font-size:18px}
       .section{fill:#fff;font-size:24px;font-weight:750;letter-spacing:-.5px}
       .section-copy{fill:#9eb5ba;font-size:14px}
