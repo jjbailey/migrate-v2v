@@ -173,7 +173,9 @@
           - assign_public_ip: "{{ assign_public_ip }}"
         tags: "{{ {'MigratedFrom': vm_name, 'SourceImportTaskId': source_import_task_id} | combine(extra_tags) }}"
         region: "{{ aws_region }}"
-        state: running
+        # Wait for EC2 system and instance status checks before recording the
+        # deployment as launched. This still does not assert guest login.
+        state: started
         wait: true
       register: launch_result
 

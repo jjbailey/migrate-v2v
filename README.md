@@ -318,7 +318,7 @@ the AWS bootstrap is a one-time administrative step.
   - _Launch_: `ec2:RunInstances` and tagging, and read access to the images,
     subnets, and security groups you name.
 - **GCP** (`service_account_key`): in the project selected by `gcp_project`,
-  upload, list, and delete objects in `gcs_bucket`; create, read, and delete
+  list, upload, and delete objects in `gcs_bucket`; create, read, and delete
   Compute images; create, read, and delete VM Migration image imports (the
   Cloud Build service account used by the import needs its usual access to
   the bucket and Compute); and, for launches, create instances and disks,
@@ -581,6 +581,11 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
       service_account_key: |
         { ... JSON ... }
   ```
+
+  Create the staging bucket before migration. Preflight checks that the
+  configured bucket is accessible before taking a snapshot or exporting the
+  VM; it does not create the bucket. The bucket's location is independent of
+  `gcp_import_location`.
 
   `gcp_import_location` (default `us-central1` when the entry leaves it out)
   is the region the Migrate to Virtual Machines _import job_ runs in - the value passed to `gcloud compute migration image-imports
@@ -1107,6 +1112,9 @@ full matrix (DHCP-only, fixed-IP-only, multi-NIC, config-drive, and cleanup).
 `playbooks/migrate-gcp-vm.yml` exports the VM as an OVF package, uploads its
 VMDKs to Cloud Storage, and imports each disk through Migrate to Virtual
 Machines. The boot disk receives guest OS adaptation; data disks skip it.
+Before creating a snapshot or exporting, preflight verifies that the configured
+Cloud Storage staging bucket is accessible. The bucket must already exist; the
+workflow does not create it.
 Check the [supported guest OS list](https://docs.cloud.google.com/migrate/virtual-machines/docs/5.0/discover/supported-os-versions)
 before migrating. GCP starts imports for all disks before waiting for them. The guest must be
 on Google's supported list because M2VM adapts the boot disk for Compute

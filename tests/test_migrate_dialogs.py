@@ -106,22 +106,25 @@ class MigrateDialogTests(unittest.TestCase):
         for script, (target_var, wrapper) in self.SCRIPTS.items():
             with self.subTest(script=script):
                 files = self.run_dialog(script)
-                self.assertEqual(len(files), 1)
-                command = files[0].read_text()
-                self.assertIn("export VM_NAME='Web Server'\\''s 01'", command)
-                self.assertIn("export VCENTER_DATACENTER='Legacy DC'", command)
-                self.assertIn(f"export {target_var}='target one'", command)
-                self.assertIn("export VALIDATE_CERTS='true'", command)
-                self.assertIn("export QUIESCE_SNAPSHOT='true'", command)
-                self.assertIn(f"'{BIN / wrapper}'", command)
-                self.assertEqual("export COMPRESS='true'" in command,
-                                 script == "migrate-openstack-vddk-dialog.sh")
-                self.assertEqual("export GUEST_CONVERT='false'" in command,
-                                 script == "migrate-openstack-vddk-dialog.sh")
-                if script.endswith("-vddk-dialog.sh"):
-                    self.assertIn("export BACKEND='auto'", command)
-                    self.assertIn("export DISCARD_RUN_ID=''", command)
-                files[0].unlink()
+                try:
+                    self.assertEqual(len(files), 1)
+                    command = files[0].read_text()
+                    self.assertIn("export VM_NAME='Web Server'\\''s 01'", command)
+                    self.assertIn("export VCENTER_DATACENTER='Legacy DC'", command)
+                    self.assertIn(f"export {target_var}='target one'", command)
+                    self.assertIn("export VALIDATE_CERTS='true'", command)
+                    self.assertIn("export QUIESCE_SNAPSHOT='true'", command)
+                    self.assertIn(f"'{BIN / wrapper}'", command)
+                    self.assertEqual("export COMPRESS='true'" in command,
+                                     script == "migrate-openstack-vddk-dialog.sh")
+                    self.assertEqual("export GUEST_CONVERT='false'" in command,
+                                     script == "migrate-openstack-vddk-dialog.sh")
+                    if script.endswith("-vddk-dialog.sh"):
+                        self.assertIn("export BACKEND='auto'", command)
+                        self.assertIn("unset DISCARD_RUN_ID", command)
+                finally:
+                    for path in files:
+                        path.unlink(missing_ok=True)
 
     def test_cancel_on_yesno_stops_before_command_generation(self):
         files = self.run_dialog("migrate-aws-dialog.sh", TEST_CANCEL="1")

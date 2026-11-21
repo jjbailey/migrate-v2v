@@ -24,3 +24,19 @@
   failed_when: gcp_image_import_command_check.rc != 0
   changed_when: false
 
+- name: Confirm the GCS staging bucket is accessible
+  # List only the bucket's top-level entries. This uses the object-list
+  # permission already needed by staging and fails before snapshot/export if
+  # the bucket is missing or inaccessible.
+  ansible.builtin.command:
+    argv:
+      - gcloud
+      - storage
+      - ls
+      - "gs://{{ gcs_bucket }}/"
+      - "--project={{ gcp_project }}"
+  environment: "{{ gcp_gcloud_env }}"
+  register: gcp_staging_bucket_check
+  failed_when: gcp_staging_bucket_check.rc != 0
+  changed_when: false
+
