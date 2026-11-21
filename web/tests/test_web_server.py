@@ -205,7 +205,10 @@ class LoginTests(IsolatedState):
         def slow_verify(password, encoded):
             time.sleep(0.05)
             return False
-        with patch.object(app, "verify_password", side_effect=slow_verify):
+        # Give every worker a hash slot so this checks the account/IP limiter,
+        # not the separate defensive cap on concurrent scrypt operations.
+        with patch.object(app, "LOGIN_HASH_SLOTS", threading.BoundedSemaphore(15)), \
+                patch.object(app, "verify_password", side_effect=slow_verify):
             threads = [threading.Thread(target=lambda: results.append(
                 self.post_login("operator", WRONG_PASSWORD, ip="192.0.2.9").status)) for _ in range(15)]
             for thread in threads:

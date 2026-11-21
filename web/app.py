@@ -995,7 +995,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/jobs":
             with db() as conn:
                 rows = conn.execute("SELECT * FROM jobs ORDER BY id DESC LIMIT 100").fetchall()
-            return self.send(200, page("Jobs", '<div class="page-heading"><div><div class="eyebrow">OPERATIONS</div><h1>Jobs</h1><p>Queued jobs run in submission order.</p></div></div>' + jobs_table(rows), user, csrf))
+            return self.send(200, page("Jobs", '<div class="page-heading"><div><div class="eyebrow"><i></i> VMWARE TO CLOUD / OPERATIONS</div><h1>Jobs</h1><p>Queued jobs run in submission order.</p></div></div>' + jobs_table(rows), user, csrf))
         if path == "/maintenance":
             return self.send(200, maintenance_home(user, csrf))
         if path == "/maintenance/catalog":
@@ -1151,7 +1151,7 @@ def maintenance_home(user, token):
              and not item.get("pending_job_id"))
         for item in recovery_jobs()
     )
-    body = f'''<div class="page-heading"><div><div class="eyebrow">CONTROLLER</div><h1>Maintenance</h1>
+    body = f'''<div class="page-heading"><div><div class="eyebrow"><i></i> VMWARE TO CLOUD / CONTROLLER</div><h1>Maintenance</h1>
 <p>Review the catalogs, recover failed runs, or clear finished jobs.</p></div></div>
 <div class="maintenance-grid">
 <article class="maintenance-card panel"><div class="eyebrow">CATALOGS</div><h2>Migration and launch records</h2>

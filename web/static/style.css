@@ -16,10 +16,10 @@ a:hover{color:#e4ad3a}
 main{max-width:1200px;margin:0 auto;padding:48px 24px 88px;min-height:calc(100vh - 145px)}
 footer{border-top:1px solid #31545a;color:#729299;font-size:12px;text-align:center;padding:24px}
 footer span{color:#e4ad3a;margin:0 6px}
-.hero{padding:48px 0 54px;border-bottom:1px solid #31545a;margin-bottom:42px}
+.hero{padding:0 0 28px;border-bottom:1px solid #31545a;margin-bottom:24px}
 .eyebrow{font-size:12px;font-weight:750;letter-spacing:2.4px;color:#9eb5ba;text-transform:uppercase}
 .eyebrow i{display:inline-block;width:30px;height:4px;border-radius:3px;background:#e4ad3a;vertical-align:middle;margin-right:12px}
-.hero h1{color:#fff;font-size:clamp(42px,5.2vw,72px);line-height:1.08;letter-spacing:-2.7px;margin:26px 0 18px}
+.hero h1{color:#fff;font-size:42px;letter-spacing:-1.5px;margin:8px 0 3px}
 .hero p{font-size:18px;max-width:640px;color:#b3c8ca;margin:0}
 .section-title{display:flex;align-items:baseline;gap:17px;margin:40px 0 18px}
 .section-title h2{font-size:24px;letter-spacing:-.5px;color:#fff;margin:0}
@@ -85,7 +85,8 @@ footer span{color:#e4ad3a;margin:0 6px}
 .topbar nav{gap:12px}
 .account .user{display:none}
 main{padding:30px 18px 70px}
-.hero{padding:27px 0 35px}
+.hero{padding:0 0 20px}
+.hero h1{font-size:34px}
 .hero p{font-size:16px}
 .card-grid,.fields{grid-template-columns:1fr}
 .cloud-card{min-height:175px}
