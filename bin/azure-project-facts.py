@@ -119,8 +119,11 @@ def main(argv=None):
                         help="vault key or subscription ID "
                              "(omit for a single-entry vault)")
     parser.add_argument("--vault", default=str(default_vault_path("azure.yml")))
-    parser.add_argument("--keypairs", dest="list_keypairs", action="store_true",
-                        help="list SSH public key resources (the default)")
+    # Accepted for parity with aws/openstack-project-facts and the launch
+    # dialogs, which pass it; keypairs are Azure's only listing, so it is a no-op.
+    parser.add_argument("--keypairs", action="store_true",
+                        help="list SSH public key resources (the default and "
+                             "only listing; accepted for CLI parity)")
     parser.add_argument("--resource-group",
                         help="override the vault entry's resource_group")
     parser.add_argument("--json", dest="as_json", action="store_true",
