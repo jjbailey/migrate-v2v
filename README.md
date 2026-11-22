@@ -975,6 +975,16 @@ NICs, `openstack_nics` (wrapper: `OS_NICS_JSON`) takes precedence over both
 single-network settings, which are ignored with a note, so they need not be
 cleared.
 
+When the migration being launched recorded more than one source NIC
+(`artifact_manifest.source_mac_addresses` has two or more entries), the dialog
+and the web form show the NIC count and source MACs and ask whether to create
+that many NICs, with "Yes" preselected. Yes asks for a network per NIC (each
+may differ) and builds `openstack_nics` from the answers; fixed IPs and manual
+MACs must then list one entry per NIC. No keeps the single-NIC flow. Older
+catalog rows without MAC metadata skip the question. In the web form, use
+**Update choices** after selecting a different migration run. Which NIC an
+automatic floating IP attaches to is left to the OpenStack SDK.
+
 The launch refuses an `instance_name` (default: the VM name) that an existing
 server in the project already uses, before creating anything. If a later step
 fails, it deletes what that attempt created: the server first, then the
