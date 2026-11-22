@@ -43,6 +43,7 @@ import openstack
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from table_common import format_table  # noqa: E402
 from vault_common import default_vault_path, read_vault  # noqa: E402
 
 def select_vault_auth(vault, requested):
@@ -353,15 +354,7 @@ def print_table(title, rows, columns):
     if not rows:
         print("  <none>")
         return
-    cells = [[", ".join(v) if isinstance(v := row[c], list) else str(v if v is not None else "")
-              for c in columns] for row in rows]
-    widths = [max(len(c), *(len(r[i]) for r in cells))
-              for i, c in enumerate(columns)]
-    print("  " + "  ".join(c.upper().ljust(w)
-          for c, w in zip(columns, widths)).rstrip())
-    for row in cells:
-        print("  " + "  ".join(v.ljust(w)
-              for v, w in zip(row, widths)).rstrip())
+    print("\n".join(format_table(rows, columns)))
 
 def main():
     parser = argparse.ArgumentParser(

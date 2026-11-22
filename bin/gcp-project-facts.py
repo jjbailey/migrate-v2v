@@ -26,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from table_common import format_table  # noqa: E402
 from vault_common import default_vault_path, read_vault  # noqa: E402
 
 COMPUTE_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
@@ -151,20 +152,8 @@ def gather_subnetworks(session, project, region):
 
 def print_table(title, rows, columns):
     print(f"{title}: {len(rows)}")
-    if not rows:
-        return
-    widths = {column: len(column) for column in columns}
-    for row in rows:
-        for column in columns:
-            widths[column] = max(widths[column],
-                                 len(str(row.get(column, ""))))
-    header = "  " + "  ".join(
-        column.upper().ljust(widths[column]) for column in columns)
-    print(header)
-    for row in rows:
-        print("  " + "  ".join(
-            str(row.get(column, "")).ljust(widths[column])
-            for column in columns))
+    if rows:
+        print("\n".join(format_table(rows, columns)))
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

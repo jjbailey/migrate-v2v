@@ -32,6 +32,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from table_common import format_table  # noqa: E402
 from vault_common import default_vault_path, read_vault  # noqa: E402
 
 # Exported variables that select AWS credentials on purpose; boto3 reads them.
@@ -208,18 +209,8 @@ def print_subnets_table(subnets):
 
 def print_keypairs_table(pairs):
     print(f"Keypairs: {len(pairs)}")
-    if not pairs:
-        return
-    widths = {"name": 4, "type": 4, "fp": 11}
-    for pair in pairs:
-        widths["name"] = max(widths["name"], len(pair["name"]))
-        widths["type"] = max(widths["type"], len(pair["type"]))
-        widths["fp"] = max(widths["fp"], len(pair["fingerprint"]))
-    print(f"  {'NAME':<{widths['name']}}  {'TYPE':<{widths['type']}}  FINGERPRINT")
-    for pair in pairs:
-        print(f"  {pair['name']:<{widths['name']}}  "
-              f"{pair['type']:<{widths['type']}}  "
-              f"{pair['fingerprint']}")
+    if pairs:
+        print("\n".join(format_table(pairs, ["name", "type", "fingerprint"])))
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

@@ -21,7 +21,7 @@ from azure.mgmt.core.tools import parse_resource_id
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_common import (default_catalog_path, read_snapshot,
+from catalog_common import (add_reconcile_args, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -199,10 +199,7 @@ def candidate_count(migration_catalog, subscription, deployment_catalog=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--migration-catalog", type=Path,
-                        default=default_catalog_path("migration-catalog.json"))
-    parser.add_argument("--deployment-catalog", type=Path,
-                        default=default_catalog_path("deployment-catalog.json"))
+    add_reconcile_args(parser)
     parser.add_argument("--subscription", "--project", dest="subscription",
                         help="only reconcile this Azure subscription ID "
                              "(or vault key)")
@@ -210,10 +207,6 @@ def main(argv=None):
                         help="Azure vault for the service principal when AZURE_* is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/azure.yml, or "
                              "/work/migrate-v2v/vaults/azure.yml)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="report stale entries without writing either catalog")
-    parser.add_argument("--force", action="store_true",
-                        help="allow removal of more than half of the scoped entries")
     args = parser.parse_args(argv)
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")
