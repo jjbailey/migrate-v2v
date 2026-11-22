@@ -324,8 +324,8 @@ sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --va
 ```
 
 The migration preflight installs OpenVDDK automatically when nbdkit's VDDK
-plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.4
-user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.4),
+plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.5
+user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.5),
 checks its SHA-256, retains the kit's license and notice files, and installs it
 under `/work/migrate-v2v/tools/openvddk` by default. A host and a container can
 share that install through the existing `/work/migrate-v2v` bind mount. The kit

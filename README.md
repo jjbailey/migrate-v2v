@@ -134,7 +134,7 @@ the same path so artifacts remain available for resume.
   plugin is the fallback backend. The `vddk` plugin is an additional
   requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
   shows how to build it. When the plugin is present but no disk library loads,
-  preflight downloads the pinned OpenVDDK 0.7.4 user kit to
+  preflight downloads the pinned OpenVDDK 0.7.5 user kit to
   `/work/migrate-v2v/tools/openvddk` by default. This writable path works on a
   host or in a container using the `/work/migrate-v2v` bind mount; the kit is
   not bundled in the repository or container image. VDDK skips a thin disk's

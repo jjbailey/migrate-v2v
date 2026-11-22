@@ -117,7 +117,7 @@ when this recipe was added.
   workflows. Preserve the external download and persistent install model.
 - **OpenVDDK:** Keep its user kit out of the image and install it under the
   shared `/work/migrate-v2v/tools/` mount with `bin/install-openvddk.py`, which
-  pins release 0.7.4 and verifies its SHA-256. A future renamed or newer
+  pins release 0.7.5 and verifies its SHA-256. A future renamed or newer
   release would need its archive, checksum, library SONAME, and any changed
   configuration interface re-checked before the pin moves.
 - **`govc`:** Build `govc` from the pinned `v0.33.0` Go module. The Go module
