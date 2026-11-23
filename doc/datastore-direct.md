@@ -426,12 +426,17 @@ datastore:
   backend's images and from the `vddk` backend's compressed images.
 
 Not yet tested: resume after a failure, VMs that already have snapshots (`vddk`
-backend), and VMFS, vSAN, or vVol datastores. VixDiskLib's allocated-block query
-is used, but the NFS datastore reported every block allocated, so zeros were
-still read.
+backend), and VMFS, vSAN, or vVol datastores. VixDiskLib's allocated-block
+query is used, but the NFS datastore reported every block allocated, so
+zeros were still read.
 
-**Resume is therefore experimental.** The retention, `resume_run_id`, and
-`discard_run_id` paths are implemented and the backend used by a run is pinned
-in its manifest so a resume cannot silently read a disk differently, but a
-resumed datastore-direct run has not been exercised against a real vCenter.
-Prefer `discard_run_id` plus a fresh run until it has been.
+**Resume is therefore experimental.** The retention, `resume_run_id`,
+and `discard_run_id` paths are implemented and the backend used by a
+run is pinned in its manifest so a resume cannot silently read a disk
+differently, but a resumed datastore-direct run has not been exercised
+against a real vCenter.  `tests/test_vddk_resume.py` runs the real
+resume tasks against a stub `govc` and a fake Glance: a failed upload
+followed by a resume, snapshot and manifest checks, discard, and backend
+pinning. `tests/test_vddk_resume_azure.py` does the same for the Azure
+import and discard against a fake `azure.azcollection`. Neither replaces a
+real run. Prefer `discard_run_id` plus a fresh run until it has been.
