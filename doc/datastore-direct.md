@@ -21,9 +21,9 @@ quiesced snapshot of the source VM          (no clone)
   → per disk, one conversion ahead of the upload:
       nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
         → qemu-img convert -f raw -O qcow2  disks/disk-N.qcow2
-        → openstack.cloud.image  (QCOW2 → Glance)
-  → catalog entry (same schema as the OVF method)
-  → snapshot removed (only after success)
+        → openstack.cloud.image             (QCOW2 → Glance)
+  → catalog entry                           (same schema as the OVF method)
+  → snapshot removed                        (only after success)
 ```
 
 Disk 0, the boot disk, is the disk named first in the VM's configured boot order
@@ -77,8 +77,8 @@ drivers, and fixes the boot configuration. This is what a guest that lacks
 virtio in its initramfs, and every **Windows** guest, needs.
 
 ```text
-stream and convert every disk → disks/disk-N.qcow2      (uncompressed)
-  → virt-v2v-in-place -i disk disk-0.qcow2 disk-1.qcow2 …  (boot order)
+stream and convert every disk → disks/disk-N.qcow2          (uncompressed)
+  → virt-v2v-in-place -i disk disk-0.qcow2 disk-1.qcow2 …   (boot order)
   → [COMPRESS] qemu-img convert -c, per disk
   → openstack.cloud.image, per disk, as usual
 ```
@@ -152,10 +152,10 @@ compression runs after the in-place pass, because the pass rewrites clusters.
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
-GUEST_CONVERT=true VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # virtio and VMware tools
+GUEST_CONVERT=true VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh     # virtio and VMware tools
 GUEST_CONVERT=true VIRTIO_WIN=/iso/virtio-win.iso VM_NAME=my-win-vm ./bin/migrate-openstack-vm-vddk.sh
-BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backend
-./bin/migrate-openstack-vddk-dialog.sh                           # guided front end
+BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh           # force a backend
+./bin/migrate-openstack-vddk-dialog.sh                                  # guided front end
 ```
 
 The guided front end asks for the backend, whether to require source CBT,
@@ -227,12 +227,12 @@ be read (an untrusted certificate, a wrong URL, a refused login).
 ## Azure
 
 `playbooks/migrate-azure-vm-vddk.yml` (wrapper `bin/migrate-azure-vm-vddk.sh`)
-uses the same snapshot, manifest, backends, resume, and discard as the
-OpenStack playbook. Only the per-disk output differs: `qemu-img` writes each
-stream as the fixed-format VHD Azure requires
-(`-O vpc -o subformat=fixed,force_size=on`, so the virtual size stays exact),
-which is uploaded as a page blob. The boot disk becomes a managed image and
-data disks become managed snapshots, as in `migrate-azure-vm.yml`.
+uses the same snapshot, manifest, backends, resume, and discard as
+the OpenStack playbook. Only the per-disk output differs: `qemu-img`
+writes each stream as the fixed-format VHD Azure requires (`-O vpc -o
+subformat=fixed,force_size=on`, so the virtual size stays exact), which
+is uploaded as a page blob. The boot disk becomes a managed image and data
+disks become managed snapshots, as in `migrate-azure-vm.yml`.
 
 ```text
 nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
@@ -248,13 +248,13 @@ DISCARD_RUN_ID=<id> VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh     # give up o
 ```
 
 The wrapper takes the same environment variables as `bin/migrate-azure-vm.sh`
-plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`; there
-is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest records
-the source firmware, so the image's Hyper-V generation (V1 for BIOS, V2 for
-UEFI) follows the VM as with the OVF method. A discard removes the run's
-snapshot, run directory, staged blobs, managed image, and data snapshots, found by the
-run-ID-derived names. A fixed VHD is staged at the disk's full virtual size,
-written sparse, so it costs only the used blocks on the controller.
+plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`;
+there is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest
+records the source firmware, so the image's Hyper-V generation (V1 for BIOS,
+V2 for UEFI) follows the VM as with the OVF method. A discard removes the run's
+snapshot, run directory, staged blobs, managed image, and data snapshots, found
+by the run-ID-derived names. A fixed VHD is staged at the disk's full virtual
+size, written sparse, so it costs only the used blocks on the controller.
 
 The Azure path shares `initialize`, `prepare-disks`, `import`, and
 `import-disk` with the OVF method; `export_format: datastore` selects
@@ -265,13 +265,13 @@ not been exercised against Azure.
 
 A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
 26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
-files were removed after import. A `Standard_B2s_v2` VM launched without a
-public IP, and its serial console reached the guest login prompt. At the time of that test,
-Azure still reported `provisioningState=Creating` after 13 minutes, so the launch
-play was still waiting and no deployment catalog entry had been written. This
-confirms image import and guest boot, but not completed Azure provisioning;
-check the Azure guest setup requirement in the README before treating launch
-as validated.
+files were removed after import. A `Standard_B2s_v2` VM launched without
+a public IP, and its serial console reached the guest login prompt. At the
+time of that test, Azure still reported `provisioningState=Creating` after
+13 minutes, so the launch play was still waiting and no deployment catalog
+entry had been written. This confirms image import and guest boot, but not
+completed Azure provisioning; check the Azure guest setup requirement in
+the README before treating launch as validated.
 
 ## Requirements
 
@@ -324,14 +324,17 @@ sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --va
 ```
 
 The migration preflight installs OpenVDDK automatically when nbdkit's VDDK
-plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.4
-user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.4),
+plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.5
+user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.5),
 checks its SHA-256, retains the kit's license and notice files, and installs it
 under `/work/migrate-v2v/tools/openvddk` by default. A host and a container can
 share that install through the existing `/work/migrate-v2v` bind mount. The kit
 is not stored in this repository or included in a container image. Set
 `OPENVDDK_INSTALL_DIR` to choose a different writable location, or
 `OPENVDDK_ARCHIVE` to install from a previously downloaded kit.
+The installer never replaces a non-empty install directory. To upgrade from an
+earlier kit (such as 0.7.4), move or remove the old directory first, or point
+`OPENVDDK_INSTALL_DIR` at a new one.
 The pinned kit supports Linux x86-64 with glibc 2.28 or newer.
 `vddk_backend=auto` and `vddk_backend=vddk` may install it; explicitly selecting
 `vddk_backend=curl` skips the VDDK probe and download.
@@ -343,25 +346,26 @@ To install it before the first migration, run:
 nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
 ```
 
-The OpenVDDK kit's library is under `lib/`; nbdkit looks under `lib64/`, so
-the installer adds the required relative link there. Existing installations in
-other locations are still usable by setting `OPENVDDK_INSTALL_DIR` to that
-`libdir`. In a container, keep the nbdkit VDDK plugin in the image; the
-installer supplies only the library and its kit files.
+nbdkit looks for the OpenVDDK library under `lib64/`. Kits from 0.7.5 on
+ship `lib64 -> lib` themselves, and the installer only verifies that the
+link reaches `libvixDiskLib.so.8`; for older kits it creates the relative
+link. Existing installations in other locations are still usable by setting
+`OPENVDDK_INSTALL_DIR` to that `libdir`. In a container, keep the nbdkit VDDK
+plugin in the image; the installer supplies only the library and its kit files.
 
 The library tested is `libvixDiskLib.so.8.0.3` from OpenVDDK, an independent,
 read-only replacement for VMware's disk library (HotAdd, NBDSSL, and NBD
-transports). VMware's own VDDK, where you are licensed for it, works the same
-way through `libdir`.
+transports). VMware's own VDDK, where you are licensed for it, works the
+same way through `libdir`.
 
-With the OpenVDDK build that supports `OpenVDDK.nbd.sessions`, each disk uses
-**two parallel NFC sessions** over NBD/NBDSSL rather than the library's default
-of one. The conversion task writes `OpenVDDK.nbd.sessions = "2"` to a private
-per-disk configuration file and passes it to nbdkit's VDDK plugin with `config=`.
-This requires the OpenVDDK library to be installed in the selected `libdir`;
-the migration preflight installs it when it is missing. VMware's library does
-not implement this OpenVDDK-specific setting. The curl fallback and local-file
-tests are unchanged.
+With the OpenVDDK build that supports `OpenVDDK.nbd.sessions`, each disk
+uses **two parallel NFC sessions** over NBD/NBDSSL rather than the library's
+default of one. The conversion task writes `OpenVDDK.nbd.sessions = "2"` to a
+private per-disk configuration file and passes it to nbdkit's VDDK plugin with
+`config=`. This requires the OpenVDDK library to be installed in the selected
+`libdir`; the migration preflight installs it when it is missing. VMware's
+library does not implement this OpenVDDK-specific setting. The curl fallback
+and local-file tests are unchanged.
 
 ## CBT (Changed Block Tracking)
 
@@ -422,12 +426,17 @@ datastore:
   backend's images and from the `vddk` backend's compressed images.
 
 Not yet tested: resume after a failure, VMs that already have snapshots (`vddk`
-backend), and VMFS, vSAN, or vVol datastores. VixDiskLib's allocated-block query
-is used, but the NFS datastore reported every block allocated, so zeros were
-still read.
+backend), and VMFS, vSAN, or vVol datastores. VixDiskLib's allocated-block
+query is used, but the NFS datastore reported every block allocated, so
+zeros were still read.
 
-**Resume is therefore experimental.** The retention, `resume_run_id`, and
-`discard_run_id` paths are implemented and the backend used by a run is pinned
-in its manifest so a resume cannot silently read a disk differently, but a
-resumed datastore-direct run has not been exercised against a real vCenter.
-Prefer `discard_run_id` plus a fresh run until it has been.
+**Resume is therefore experimental.** The retention, `resume_run_id`,
+and `discard_run_id` paths are implemented and the backend used by a
+run is pinned in its manifest so a resume cannot silently read a disk
+differently, but a resumed datastore-direct run has not been exercised
+against a real vCenter.  `tests/test_vddk_resume.py` runs the real
+resume tasks against a stub `govc` and a fake Glance: a failed upload
+followed by a resume, snapshot and manifest checks, discard, and backend
+pinning. `tests/test_vddk_resume_azure.py` does the same for the Azure
+import and discard against a fake `azure.azcollection`. Neither replaces a
+real run. Prefer `discard_run_id` plus a fresh run until it has been.

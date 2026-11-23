@@ -30,6 +30,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from table_common import format_table  # noqa: E402
 from vault_common import default_vault_path, read_vault  # noqa: E402
 
 REQUIRED_KEYS = ("tenant_id", "subscription_id", "client_id",
@@ -96,20 +97,9 @@ def gather_keypairs(client, resource_group):
 
 def print_keypairs_table(pairs, resource_group):
     print(f"SSH public keys (resource group {resource_group}): {len(pairs)}")
-    if not pairs:
-        return
-    widths = {"name": 4, "type": 4, "fp": 11}
-    for pair in pairs:
-        widths["name"] = max(widths["name"], len(pair["name"]))
-        widths["type"] = max(widths["type"], len(pair["type"]))
-        widths["fp"] = max(widths["fp"], len(pair["fingerprint"]))
-    print(f"  {'NAME':<{widths['name']}}  {'TYPE':<{widths['type']}}  "
-          f"{'FINGERPRINT':<{widths['fp']}}  LOCATION")
-    for pair in pairs:
-        print(f"  {pair['name']:<{widths['name']}}  "
-              f"{pair['type']:<{widths['type']}}  "
-              f"{pair['fingerprint']:<{widths['fp']}}  "
-              f"{pair['location']}")
+    if pairs:
+        print("\n".join(format_table(
+            pairs, ["name", "type", "fingerprint", "location"])))
 
 def make_client(entry):
     try:
@@ -129,8 +119,11 @@ def main(argv=None):
                         help="vault key or subscription ID "
                              "(omit for a single-entry vault)")
     parser.add_argument("--vault", default=str(default_vault_path("azure.yml")))
-    parser.add_argument("--keypairs", dest="list_keypairs", action="store_true",
-                        help="list SSH public key resources (the default)")
+    # Accepted for parity with aws/openstack-project-facts and the launch
+    # dialogs, which pass it; keypairs are Azure's only listing, so it is a no-op.
+    parser.add_argument("--keypairs", action="store_true",
+                        help="list SSH public key resources (the default and "
+                             "only listing; accepted for CLI parity)")
     parser.add_argument("--resource-group",
                         help="override the vault entry's resource_group")
     parser.add_argument("--json", dest="as_json", action="store_true",

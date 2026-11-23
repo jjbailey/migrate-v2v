@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
+from catalog_common import (add_reconcile_args, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -268,10 +268,7 @@ def credentials_for(project_id, load_projects, vault, credentials_file=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--migration-catalog", type=Path,
-                        default=default_catalog_path("migration-catalog.json"))
-    parser.add_argument("--deployment-catalog", type=Path,
-                        default=default_catalog_path("deployment-catalog.json"))
+    add_reconcile_args(parser)
     parser.add_argument(
         "--project-id",
         help="GCP project; inferred from a single catalog project, a single "
@@ -284,10 +281,6 @@ def main():
                              "GOOGLE_APPLICATION_CREDENTIALS is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/gcp.yml, or "
                              "/work/migrate-v2v/vaults/gcp.yml)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="report stale entries without writing either catalog")
-    parser.add_argument("--force", action="store_true",
-                        help="allow removal of more than half of the scoped entries")
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")

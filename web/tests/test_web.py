@@ -152,6 +152,68 @@ class HttpTests(unittest.TestCase):
         self.assertFalse(errors)
         self.assertEqual(json.loads(values["AWS_SECURITY_GROUPS_JSON"]), ["sg-one", "sg-two"])
 
+    TWO_NIC_RUN = {"vm_name": "vm1", "clone_name": "run-1", "target_platform": "openstack",
+                   "artifact_manifest": {"source_mac_addresses": ["00:50:56:aa:00:01", "00:50:56:aa:00:02"]}}
+
+    def openstack_launch_post(self, **extra):
+        posted = {name: forms.F[name].default for name in forms.exported_fields("launch", "openstack")}
+        posted.update(OS_PROJECT_NAME="site", VM_NAME="vm1", MIGRATION_ID="run-1",
+                      OS_SECURITY_GROUPS_JSON='["default"]', OS_AUTO_IP="false")
+        posted.update(extra)
+        return posted
+
+    def validate_openstack_launch(self, posted, run=None):
+        with patch.object(app, "targets", return_value=["site"]), \
+             patch.object(app, "catalog_migrations", return_value=[run or self.TWO_NIC_RUN]), \
+             patch.object(app, "launch_choices", return_value=({"OS_SECURITY_GROUPS_JSON": [("default", "default")]}, {}, [])):
+            return app.validate("launch", "openstack", "standard", posted)
+
+    def test_two_nic_source_defaults_to_one_network_per_nic(self):
+        values, errors = self.validate_openstack_launch(self.openstack_launch_post(
+            _nic_network_1="net-a", _nic_network_2="net-b"))
+        self.assertFalse(errors)
+        self.assertEqual(json.loads(values["OS_NICS_JSON"]), [{"net-name": "net-a"}, {"net-name": "net-b"}])
+
+    def test_two_nic_source_requires_a_network_for_each_nic(self):
+        _, errors = self.validate_openstack_launch(self.openstack_launch_post(_nic_network_1="net-a"))
+        self.assertTrue(any("every NIC" in error for error in errors))
+
+    def test_two_nic_source_can_choose_a_single_nic(self):
+        values, errors = self.validate_openstack_launch(self.openstack_launch_post(_nic_multi="no"))
+        self.assertFalse(errors)
+        self.assertEqual(values["OS_NICS_JSON"], "")
+
+    def test_two_nic_source_checks_fixed_ip_count(self):
+        _, errors = self.validate_openstack_launch(self.openstack_launch_post(
+            _nic_network_1="net-a", _nic_network_2="net-b", OS_FIXED_IPS_JSON='["10.0.0.5"]'))
+        self.assertTrue(any("exactly 2" in error for error in errors))
+
+    def test_source_without_mac_metadata_keeps_single_nic_form(self):
+        run = {**self.TWO_NIC_RUN, "artifact_manifest": {}}
+        values, errors = self.validate_openstack_launch(self.openstack_launch_post(), run)
+        self.assertFalse(errors)
+        self.assertEqual(values["OS_NICS_JSON"], "")
+        with patch.object(app, "targets", return_value=["site"]), \
+             patch.object(app, "catalog_migrations", return_value=[run]), \
+             patch.object(app, "launch_choices", return_value=({}, {}, [])):
+            form = app.form_html("launch", "openstack", "standard", "token",
+                                 posted={"OS_PROJECT_NAME": "site"}, user="operator")
+        self.assertNotIn("_nic_multi", form)
+
+    def test_two_nic_source_form_offers_yes_preselected(self):
+        with patch.object(app, "targets", return_value=["site"]), \
+             patch.object(app, "catalog_migrations", return_value=[self.TWO_NIC_RUN]), \
+             patch.object(app, "launch_choices", return_value=({"OS_NETWORK": [("net-a", "net-a")]}, {}, [])):
+            form = app.form_html("launch", "openstack", "standard", "token",
+                                 posted={"OS_PROJECT_NAME": "site"}, user="operator")
+        self.assertIn("Source VM had 2 NICs", form)
+        self.assertIn('<option value="yes" selected>Yes - create 2 NICs</option>', form)
+        self.assertIn('name="_nic_network_1"', form)
+        self.assertIn('name="_nic_network_2"', form)
+        self.assertIn('id="_nic_network_1" name="_nic_network_1" type="text" value="Ext-Net"', form)
+        self.assertIn('id="_nic_network_2" name="_nic_network_2" type="text" value=""', form)
+        self.assertIn("00:50:56:aa:00:02", form)
+
     def test_login_and_pages(self):
         with tempfile.TemporaryDirectory() as temp:
             state = Path(temp)

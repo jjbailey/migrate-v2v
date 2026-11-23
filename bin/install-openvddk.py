@@ -24,18 +24,18 @@ import urllib.error
 import urllib.request
 from pathlib import Path, PurePosixPath
 
-VERSION = "0.7.4"
-COMMIT = "94926da2f764"
-FILENAME = f"openvddk-evalkit-{VERSION}-{COMMIT}.tar.gz"
+VERSION = "0.7.5"
+COMMIT = "d7262efa169c"
+FILENAME = f"openvddk-runtime-{VERSION}-{COMMIT}.tar.gz"
 DOWNLOAD_URL = (
     "https://github.com/openvddk/openvddk/releases/download/"
     f"v{VERSION}/{FILENAME}"
 )
 ARCHIVE_SHA256 = (
-    "4f50188fcfe9dc8c0e523a05359bee16c12f990f812332548f5b00a4c2252687"
+    "69d835a52dd88ac89e5ab55140476e3f4b6b74292eb7a589cbe3214445aae59e"
 )
 LIBRARY_SHA256 = (
-    "d39bf157aae96283c8f0ccfadc26b9aec104a5ef9708c4d15cc6945db1dc7daf"
+    "d8256c7a19712a27f53702402250c9c52c97a1231479b0b398f57be3f401443b"
 )
 DEFAULT_INSTALL_DIR = Path("/work/migrate-v2v/tools/openvddk")
 USER_AGENT = "migrate-v2v OpenVDDK installer"
@@ -171,14 +171,19 @@ def install_archive(archive, target_dir, temporary):
     staged_dir = temporary / "install"
     shutil.copytree(kit_dir, staged_dir, symlinks=True)
     lib64 = staged_dir / "lib64"
-    lib64.mkdir(exist_ok=True)
-    alias = lib64 / "libvixDiskLib.so.8"
-    if alias.is_symlink() and os.readlink(alias) == "../lib/libvixDiskLib.so.8":
-        pass
-    elif alias.exists() or alias.is_symlink():
-        raise SystemExit(f"Unexpected OpenVDDK compatibility path in archive: {alias}")
+    if lib64.is_symlink() and os.readlink(lib64) == "lib":
+        # Kits from 0.7.5 on ship lib64 -> lib themselves.
+        if not (lib64 / "libvixDiskLib.so.8").is_file():
+            raise SystemExit("OpenVDDK archive's lib64 link does not reach libvixDiskLib.so.8.")
     else:
-        alias.symlink_to("../lib/libvixDiskLib.so.8")
+        lib64.mkdir(exist_ok=True)
+        alias = lib64 / "libvixDiskLib.so.8"
+        if alias.is_symlink() and os.readlink(alias) == "../lib/libvixDiskLib.so.8":
+            pass
+        elif alias.exists() or alias.is_symlink():
+            raise SystemExit(f"Unexpected OpenVDDK compatibility path in archive: {alias}")
+        else:
+            alias.symlink_to("../lib/libvixDiskLib.so.8")
 
     existing_library = target_dir / "lib" / "libvixDiskLib.so.8.0.3"
     if existing_library.is_file() and sha256(existing_library) == LIBRARY_SHA256:

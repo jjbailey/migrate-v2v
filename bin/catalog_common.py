@@ -29,6 +29,17 @@ def default_catalog_path(filename):
     ).expanduser()
     return catalog_dir / filename
 
+def add_reconcile_args(parser):
+    """Catalog path, --dry-run, and --force options shared by every reconcile script."""
+    parser.add_argument("--migration-catalog", type=Path,
+                        default=default_catalog_path("migration-catalog.json"))
+    parser.add_argument("--deployment-catalog", type=Path,
+                        default=default_catalog_path("deployment-catalog.json"))
+    parser.add_argument("--dry-run", action="store_true",
+                        help="report stale entries without writing either catalog")
+    parser.add_argument("--force", action="store_true",
+                        help="allow removal of more than half of the scoped entries")
+
 def now_utc():
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

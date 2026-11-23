@@ -44,10 +44,13 @@ dropped. Where the web forms take files, see
 
 ## Setup
 
-These instructions cover a new 64-bit Ubuntu 24.04 host. Docker Engine, the
-Docker CLI, Buildx, and the Compose plugin are installed from Docker's signed
-APT repository. For other supported Ubuntu releases or distributions, use the
-matching [official Docker Engine instructions](https://docs.docker.com/engine/install/).
+[examples/compose-v2v.sh](../examples/compose-v2v.sh) automates steps 1 to 4
+below for a first-time LAN install; the steps explain what it does.
+
+These instructions cover a new x86_64 (amd64) Ubuntu 24.04 host. Install
+Docker Engine, the Docker CLI, Buildx, and the Compose plugin from Docker's
+signed APT repository. For other supported Ubuntu releases or distributions,
+follow the matching [official Docker Engine instructions](https://docs.docker.com/engine/install/).
 The examples use `sudo docker`; access to the Docker socket is root-equivalent,
 including membership in the `docker` group. This Compose deployment runs Caddy
 in a container, so it does not create a host `caddy` account or install Caddy
@@ -101,13 +104,15 @@ Verify the engine, Compose plugin, and storage location:
 sudo docker run --rm hello-world
 sudo docker compose version
 sudo docker info --format '{{.DockerRootDir}}'
+sudo grep '^root =' /etc/containerd/config.toml
 ```
 
 This is for a new Docker installation before it has image or container data.
-It puts Docker's image and container data under `/work/docker` and containerd's
-data under `/work/containerd`; ensure `/work` has several gigabytes free. If
-Docker has already been used, stop it and copy its existing data before
-changing either configured root.
+It puts Docker data under `/work/docker` and containerd image and snapshot data
+under `/work/containerd`; the last command verifies containerd's configured
+root. Ensure `/work` has several gigabytes free. If Docker has already been
+used, stop it and copy its existing data before changing either configured
+root.
 
 1. Prepare the persistent artifact directory and Compose environment. Use the
    account that will own the web state and artifacts; the container runs with
@@ -143,19 +148,16 @@ changing either configured root.
    defaults to `1` because Broadcom's page treats downloading, installing, or
    using the tool as agreement to its terms.
 
-3. Bootstrap the initial web account from the encrypted `caddy.yml` vault in
-   `ARTIFACT_ROOT_HOST/vaults/` (see [Vault layouts](../doc/vaults.md#web-controller-bootstrap-account)).
-   It must contain a `web_user` and a `web_password` of 12 to 16384 characters.
-   This creates an account only when the persistent account store is empty;
-   repeated runs leave existing accounts unchanged.
+3. Create the initial web account. You are prompted for a password of 12 to
+   16384 characters:
 
    ```sh
-   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm --no-deps controller python3 web/app.py user bootstrap
+   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm --no-deps controller python3 web/app.py user add operator
    ```
 
    The account is stored in the persistent web state directory and is separate
-   from the Linux account used to run Docker. To add or reset an account
-   interactively, run the same command with `user add NAME`; use `user delete
+   from the Linux account used to run Docker. To add another account or
+   reset a password, run the same command with a different `NAME`; use `user delete
 NAME` to remove one and `user list` to show the account names.
 
    The account file is `${ARTIFACT_ROOT_HOST}/web-state/users.json`; it contains

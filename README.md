@@ -134,7 +134,7 @@ the same path so artifacts remain available for resume.
   plugin is the fallback backend. The `vddk` plugin is an additional
   requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
   shows how to build it. When the plugin is present but no disk library loads,
-  preflight downloads the pinned OpenVDDK 0.7.4 user kit to
+  preflight downloads the pinned OpenVDDK 0.7.5 user kit to
   `/work/migrate-v2v/tools/openvddk` by default. This writable path works on a
   host or in a container using the `/work/migrate-v2v` bind mount; the kit is
   not bundled in the repository or container image. VDDK skips a thin disk's
@@ -388,7 +388,6 @@ chmod 600 "$HOME/.dib-vault-pass"
 ```bash
 ./bin/aws-vault.sh        # /work/migrate-v2v/vaults/aws.yml
 ./bin/azure-vault.sh      # /work/migrate-v2v/vaults/azure.yml
-./bin/caddy-vault.sh      # /work/migrate-v2v/vaults/caddy.yml
 ./bin/gcp-vault.sh        # /work/migrate-v2v/vaults/gcp.yml
 ./bin/openstack-vault.sh  # /work/migrate-v2v/vaults/openstack.yml
 ./bin/vsphere-vault.sh    # /work/migrate-v2v/vaults/vsphere.yml
@@ -974,6 +973,16 @@ provide `openstack_network_id` and
 NICs, `openstack_nics` (wrapper: `OS_NICS_JSON`) takes precedence over both
 single-network settings, which are ignored with a note, so they need not be
 cleared.
+
+When the migration being launched recorded more than one source NIC
+(`artifact_manifest.source_mac_addresses` has two or more entries), the dialog
+and the web form show the NIC count and source MACs and ask whether to create
+that many NICs, with "Yes" preselected. Yes asks for a network per NIC (each
+may differ) and builds `openstack_nics` from the answers; fixed IPs and manual
+MACs must then list one entry per NIC. No keeps the single-NIC flow. Older
+catalog rows without MAC metadata skip the question. In the web form, use
+**Update choices** after selecting a different migration run. Which NIC an
+automatic floating IP attaches to is left to the OpenStack SDK.
 
 The launch refuses an `instance_name` (default: the VM name) that an existing
 server in the project already uses, before creating anything. If a later step
@@ -1874,7 +1883,7 @@ migrate-v2v/
 │   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
 │   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
-│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py  # Shared helpers
+│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py, table_common.py  # Shared helpers
 │   ├── exec-with-stdin-env.sh   # Passes secrets to a child process on stdin
 │   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration

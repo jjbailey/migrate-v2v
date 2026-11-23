@@ -82,6 +82,7 @@ elif '--radiolist' in args:
         return answers[min(asked, len(answers) - 1)]
     choices = {
         'Which VM': '_other',
+        'Which completed': '_other',
         'Which security groups': security_group_mode() if 'Which security groups' in prompt else None,
         'Which instance type': '_blank',
         'How should the new instance get': 'dhcp',
@@ -102,6 +103,8 @@ elif '--yesno' in args:
             with open(os.environ['TEST_PUBLIC_IP_LOG'], 'w') as log:
                 log.write('default-no' if '--defaultno' in args else 'default-yes')
         sys.exit(1 if os.environ.get('TEST_PUBLIC_IP') == 'no' else 0)
+    if 'NICs on the source' in prompt:
+        sys.exit(1 if os.environ.get('TEST_NIC_CONFIRM') == 'no' else 0)
     sys.exit(0 if 'Use the shared launch network' in prompt or 'Request a floating' in prompt else 1)
 '''
 
@@ -225,6 +228,38 @@ class LaunchDialogTests(unittest.TestCase):
         nics = '[{"net-id":"abc"}]'
         files = self.run_dialog("openstack", TEST_NICS=nics)
         self.assertIn(f"export OS_NICS_JSON='{nics}'", files[0].read_text())
+
+    def write_two_nic_catalog(self, macs=("00:50:56:aa:00:01", "00:50:56:aa:00:02")):
+        row = {
+            "vm_name": "Web Server's 01", "target_platform": "openstack",
+            "status": "completed", "migrated_at": "2026-01-01T00:00:00Z",
+            "clone_name": "run-1", "openstack_project": "target one",
+            "openstack_image_ids": ["img"],
+            "artifact_manifest": {"source_mac_addresses": list(macs)},
+        }
+        (self.tmp / "catalogs" / "migration-catalog.json").write_text(
+            json.dumps({"schema_version": 1, "migrations": [row]}))
+
+    def test_openstack_source_with_two_nics_asks_a_network_per_nic(self):
+        self.write_two_nic_catalog()
+        files = self.run_dialog("openstack")
+        command = files[0].read_text()
+        self.assertIn(
+            """export OS_NICS_JSON='[{"net-name":"Ext-Net"},{"net-name":"Ext-Net"}]'""",
+            command)
+        self.assertIn("export OS_NETWORK_ID=''", command)
+
+    def test_openstack_two_nic_source_can_still_launch_one_nic(self):
+        self.write_two_nic_catalog()
+        files = self.run_dialog("openstack", TEST_NIC_CONFIRM="no")
+        command = files[0].read_text()
+        self.assertIn("export OS_NICS_JSON=''", command)
+        self.assertIn("export OS_NETWORK='Ext-Net'", command)
+
+    def test_openstack_source_without_mac_metadata_keeps_single_nic_flow(self):
+        self.write_two_nic_catalog(macs=())
+        files = self.run_dialog("openstack")
+        self.assertIn("export OS_NICS_JSON=''", files[0].read_text())
 
     def test_openstack_preserved_macs_require_a_security_group(self):
         # Preserved MACs use pre-created ports, which the playbook builds only

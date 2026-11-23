@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from catalog_common import (default_catalog_path, read_optional_snapshot, read_snapshot,
+from catalog_common import (add_reconcile_args, read_optional_snapshot, read_snapshot,
                             remove_deployment_entries, remove_migration_entries)
 from vault_common import (default_vault_path, environment_source, match_project,
                           vault_projects)
@@ -183,10 +183,7 @@ def session_for(account_id, load_projects, vault, profile=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--migration-catalog", type=Path,
-                        default=default_catalog_path("migration-catalog.json"))
-    parser.add_argument("--deployment-catalog", type=Path,
-                        default=default_catalog_path("deployment-catalog.json"))
+    add_reconcile_args(parser)
     parser.add_argument(
         "--region", help="only reconcile AWS entries in this region")
     parser.add_argument("--profile",
@@ -198,10 +195,6 @@ def main():
     parser.add_argument(
         "--project-id", "--account-id", dest="account_id",
         help="AWS account ID; verify and reconcile only this account")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="report stale entries without writing either catalog")
-    parser.add_argument("--force", action="store_true",
-                        help="allow removal of more than half of the scoped entries")
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")

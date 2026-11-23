@@ -286,6 +286,23 @@ def catalog_migrations(cloud, project=None):
                   key=lambda entry: timestamp_sort_key(entry.get("migrated_at")),
                   reverse=True)
 
+def launch_nic_macs(cloud, project, migration_id):
+    """MACs of the source VM's NICs, in device order, for a chosen migration run.
+
+    Empty when the count is unknown (no run chosen, or a catalog row written
+    before MAC metadata existed), which keeps the single-NIC form.
+    """
+    if cloud != "openstack" or not migration_id:
+        return []
+    for entry in catalog_migrations(cloud, project):
+        if str(entry.get("clone_name")) == migration_id:
+            manifest = entry.get("artifact_manifest")
+            macs = manifest.get("source_mac_addresses") if isinstance(manifest, dict) else None
+            if not isinstance(macs, list):
+                return []
+            return [mac.strip() for mac in macs if isinstance(mac, str) and mac.strip()]
+    return []
+
 def catalog_migration_label(cloud, entry):
     project_fields = {
         "aws": ("aws_project", "aws_account_id"),
@@ -332,6 +349,12 @@ def validate(mode, cloud, method, posted):
     allowed_targets = targets(cloud, mode)
     if not allowed_targets:
         errors.append(f"No {cloud_name(cloud)} entries could be read from the vault.")
+    # A source VM with several NICs is launched with one NIC per source NIC
+    # unless the operator chooses a single NIC ; the NIC list then replaces
+    # the single-network fields.
+    nic_macs = launch_nic_macs(cloud, posted.get(target_key(cloud), "").strip(),
+                               posted.get("MIGRATION_ID", "").strip()) if mode == "launch" else []
+    multi_nic = len(nic_macs) > 1 and posted.get("_nic_multi", "yes") == "yes"
     for name in fields:
         meta = F[name]
         value = posted.get(name, "").strip()
@@ -347,7 +370,7 @@ def validate(mode, cloud, method, posted):
             errors.append(f"Choose a value for {meta.label}.")
         if meta.kind == "choice" and value not in meta.choices:
             errors.append(f"Choose a valid {meta.label}.")
-        if meta.required and not value:
+        if meta.required and not value and not (multi_nic and name == "OS_NETWORK"):
             errors.append(f"{meta.label} is required.")
         if meta.kind == "json" and value:
             try:
@@ -416,6 +439,25 @@ def validate(mode, cloud, method, posted):
         elif cloud == "azure" and not values.get("AZURE_SSH_SOURCE_PREFIX"):
             errors.append("Allow SSH from is required when assigning a public IP.")
         if cloud == "openstack":
+            if posted.get("_nic_multi", "yes") not in ("yes", "no"):
+                errors.append("Choose whether to create one NIC per source NIC.")
+            if multi_nic:
+                nic_networks = [posted.get(f"_nic_network_{index + 1}", "").strip()
+                                for index in range(len(nic_macs))]
+                if not all(nic_networks) or any(len(net) > MAX_FIELD for net in nic_networks):
+                    errors.append("Choose a network for every NIC.")
+                elif values.get("OS_NICS_JSON") not in ("", "[]"):
+                    errors.append("Clear Custom NICs, or choose a single NIC: a network was already chosen for each source NIC.")
+                else:
+                    values["OS_NICS_JSON"] = json.dumps([{"net-name": net} for net in nic_networks],
+                                                        separators=(",", ":"))
+                for key in ("OS_FIXED_IPS_JSON", "OS_MAC_ADDRESSES_JSON"):
+                    try:
+                        count = len(json.loads(values.get(key) or "[]"))
+                    except ValueError:
+                        continue
+                    if count and count != len(nic_macs):
+                        errors.append(f"{F[key].label} must list exactly {len(nic_macs)} entries, one per NIC.")
             if values.get("OS_FIXED_IPS_JSON") not in ("", "[]") and values.get("OS_AUTO_IP") == "true":
                 errors.append("Fixed IPs and an automatic floating IP cannot be combined.")
             needs_ports = values.get("OS_FIXED_IPS_JSON") not in ("", "[]") or values.get("OS_PRESERVE_MAC") == "true"
@@ -891,6 +933,34 @@ def project_picker(mode, cloud, method, user, token, errors=()):
 <div class="form-actions"><span>{"Choices are loaded from the selected environment." if mode == "launch" else "The selected project will be used for this migration."}</span><button class="button">Continue</button></div></form>'''
     return page(f"Choose {mode} project", body, user, token)
 
+def nic_fields_html(macs, posted, suggested):
+    """Confirmation and one network per NIC for a multi-NIC source VM."""
+    count = len(macs)
+    multi = posted.get("_nic_multi", "yes")
+    options = ''.join(
+        f'<option value="{value}"{" selected" if multi == value else ""}>{esc(label)}</option>'
+        for value, label in (("yes", f"Yes - create {count} NICs"), ("no", "No - create a single NIC")))
+    listing = ', '.join(f'NIC {index + 1}: {mac}' for index, mac in enumerate(macs))
+    html = (f'<div class="field"><label for="_nic_multi">Source VM had {count} NICs</label>'
+            f'<select id="_nic_multi" name="_nic_multi">{options}</select>'
+            f'<small>{esc(listing)}. Choose No to use the single network below instead. '
+            'After choosing a different migration run, use Update choices.</small></div>')
+    for index, mac in enumerate(macs):
+        name = f"_nic_network_{index + 1}"
+        # Only NIC 1 gets the default network ; a later NIC left on it would
+        # silently share NIC 1's network, so the operator must choose.
+        value = posted.get(name, F["OS_NETWORK"].default if index == 0 else "")
+        datalist = ''
+        list_id = ''
+        if suggested:
+            list_id = f' list="choices_{name}"'
+            datalist = f'<datalist id="choices_{name}">' + ''.join(
+                f'<option value="{esc(v)}" label="{esc(label)}"></option>' for v, label in suggested) + '</datalist>'
+        html += (f'<div class="field"><label for="{name}">Network for NIC {index + 1}</label>'
+                 f'<input id="{name}" name="{name}" type="text" value="{esc(value)}" autocomplete="off"{list_id}>'
+                 f'{datalist}<small>Source MAC {esc(mac)}. Used when creating {count} NICs.</small></div>')
+    return html
+
 def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
     posted = posted or {}
     fields = exported_fields(mode, cloud, method)
@@ -900,12 +970,18 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
         return project_picker(mode, cloud, method, user, token, errors or (["Select an environment from the vault."] if project else []))
     choices, defaults, unavailable = launch_choices(cloud, project, posted) if mode == "launch" else ({}, {}, [])
     migrations = catalog_migrations(cloud, project) if mode == "launch" else []
+    nic_macs = []
+    if migrations:
+        nic_macs = launch_nic_macs(cloud, project,
+                                   posted.get("MIGRATION_ID") or str(migrations[0].get("clone_name", "")))
     sections = []
     for name in fields:
         if name == target_key(cloud):
             sections.append(f'<input type="hidden" name="{name}" value="{esc(project)}">')
             continue
         meta = F[name]
+        if name == "OS_NETWORK" and len(nic_macs) > 1:
+            sections.append(nic_fields_html(nic_macs, posted, choices.get("OS_NETWORK", [])))
         field_default = str(INPUT_DIR / "virtio-win.iso") if name == "VIRTIO_WIN" else meta.default
         value = posted.get(name, defaults.get(name, field_default))
         options = None
@@ -976,7 +1052,7 @@ def form_html(mode, cloud, method, token, posted=None, errors=(), user=None):
         sections.append(f'<div class="field"><label class="check-label"><input type="checkbox" name="_confirm_discard" value="yes"{checked}> Confirm discarding the failed run if a run ID is entered</label></div>')
     action = f'/new/{mode}/{cloud}/{method}'
     project_banner = f'<div class="project-banner panel"><span><small>{esc(F[target_key(cloud)].label)}</small><strong>{esc(project)}</strong></span><a href="{action}">Change project</a></div>'
-    refresh = '<button class="text-button" type="submit" name="_refresh" value="1" formnovalidate>Update choices</button>' if mode == "launch" and cloud in ("aws", "gcp") else ''
+    refresh = '<button class="text-button" type="submit" name="_refresh" value="1" formnovalidate>Update choices</button>' if mode == "launch" and cloud in ("aws", "gcp", "openstack") else ''
     return page(f'{mode.title()} to {cloud_name(cloud)}', f'''<div class="eyebrow">{esc(mode)} / {esc(cloud)} / {esc(method)}</div>
 <div class="page-heading"><div><h1>{esc(mode.title())} · {esc(cloud_name(cloud))}</h1><p>Review the values before adding this operation to the queue.</p></div><a class="back" href="/">← All environments</a></div>
 {project_banner}{error_html}<form class="panel form-panel" method="post" action="{action}">{csrf_input(token)}<div class="fields">{''.join(sections)}</div>
@@ -1605,47 +1681,6 @@ def add_user(name):
     save_users(entries)
     print(f"Saved local account {name}.")
 
-def bootstrap_user():
-    """Create the initial web account from caddy.yml, without replacing users."""
-    import fcntl
-
-    lock_path = STATE / "user-bootstrap.lock"
-    with open(lock_path, "a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        entries = users()
-        if entries:
-            print("A local web account already exists; bootstrap skipped.")
-            return
-
-        vault = VAULT_DIR / "caddy.yml"
-        if not vault.is_file():
-            raise SystemExit(f"Initial web account vault is missing: {vault}")
-        if not PASSFILE.is_file():
-            raise SystemExit(f"Vault password file is missing: {PASSFILE}")
-        try:
-            import yaml
-        except ImportError:
-            raise SystemExit("PyYAML is required to read the initial web account vault.")
-        try:
-            result = subprocess.run(
-                [ansible_vault_bin(), "view", str(vault), "--vault-password-file", str(PASSFILE)],
-                input=b"", capture_output=True, timeout=30, check=True)
-            data = yaml.safe_load(result.stdout)
-        except (OSError, subprocess.SubprocessError, ValueError, yaml.YAMLError):
-            raise SystemExit("Could not decrypt or parse the initial web account vault.")
-
-        if not isinstance(data, dict):
-            raise SystemExit("Initial web account vault must contain a YAML mapping.")
-        name = data.get("web_user")
-        password = data.get("web_password")
-        if not isinstance(name, str) or not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{2,31}", name):
-            raise SystemExit("caddy.yml web_user must be a valid 3–32 character username.")
-        if not isinstance(password, str) or not 12 <= len(password) <= MAX_LOGIN_PASSWORD:
-            raise SystemExit(
-                f"caddy.yml web_password must contain 12–{MAX_LOGIN_PASSWORD} characters.")
-        save_users({name: password_hash(password)})
-        print(f"Created initial local web account {name} from caddy.yml.")
-
 def main():
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1653,17 +1688,13 @@ def main():
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
     user_cmd = sub.add_parser("user")
-    user_cmd.add_argument("action", choices=("add", "bootstrap", "delete", "list"))
+    user_cmd.add_argument("action", choices=("add", "delete", "list"))
     user_cmd.add_argument("name", nargs="?")
     args = parser.parse_args()
     init_state()
     if args.command == "user":
         if args.action == "list":
             print("\n".join(sorted(users())))
-        elif args.action == "bootstrap":
-            if args.name:
-                parser.error("user bootstrap does not take a name")
-            bootstrap_user()
         elif not args.name:
             parser.error("user name required")
         elif args.action == "add":

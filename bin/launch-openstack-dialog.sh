@@ -24,6 +24,35 @@ looks_like_mac()
     [[ $1 =~ ^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$ ]]
 }
 
+# Print the MAC address of each NIC the source VM had, one per line, in device
+# order, from the migration the launch will use. Prints nothing when the count
+# is unknown (no catalog row, an older row without MAC metadata, or an
+# ambiguous lookup), so the caller keeps the single-NIC flow.
+source_nic_macs()
+{
+    local project=${1:-} args=()
+    [ -x "$script_dir/lookup-migration-openstack.py" ] || return 0
+    args=(--catalog "$MIGRATE_V2V_CATALOG_DIR/migration-catalog.json" --vm-name "$VM_NAME")
+    [ -z "${MIGRATION_ID:-}" ] || args+=(--migration-id "$MIGRATION_ID")
+    [ -z "$project" ] || args+=(--project "$project")
+    "$script_dir/lookup-migration-openstack.py" "${args[@]}" < /dev/null 2> /dev/null |
+        python3 -c '
+import json, sys
+try:
+    macs = json.load(sys.stdin)["artifact_manifest"].get("source_mac_addresses") or []
+except Exception:
+    raise SystemExit(0)
+for mac in macs:
+    if isinstance(mac, str) and mac.strip():
+        print(mac.strip())' 2> /dev/null || true
+}
+
+# Number of entries in a JSON array.
+json_array_length()
+{
+    python3 -c 'import json,sys ; print(len(json.loads(sys.argv[1])))' "$1"
+}
+
 # Query one openstack-project-facts.py section and format tag\item\status
 # lines for radio(). KIND selects the formatter (flavors|networks|keypairs) ;
 # CURRENT pre-selects the existing value, or is kept as a
@@ -161,6 +190,23 @@ if yesno "Wait for SSH TCP port 22 after launch?\n\nThis checks network reachabi
 fi
 INSTANCE_NAME=$(input "OpenStack server name (blank to use $VM_NAME):" "${INSTANCE_NAME:-}") || abort
 
+# A migrated VM that had several NICs gets the same number on the target only
+# if the operator confirms ; the source MACs are in the migration manifest.
+NIC_COUNT=1
+mapfile -t NIC_MACS < <(source_nic_macs "$PROJECT")
+if [ "${#NIC_MACS[@]}" -gt 1 ] ; then
+    nic_list=""
+    for nic_index in "${!NIC_MACS[@]}" ; do
+        nic_list+="\n  NIC $((nic_index + 1)): ${NIC_MACS[nic_index]}"
+    done
+    if dlg --yesno "${VM_NAME} had ${#NIC_MACS[@]} NICs on the source:${nic_list}\n\nYes - create ${#NIC_MACS[@]} NICs on the target (you choose a network for each).\nNo - create a single NIC." "$(height $((11 + ${#NIC_MACS[@]})))" "$COLS" ; then
+        NIC_COUNT=${#NIC_MACS[@]}
+    else
+        status=$?
+        [ "$status" -eq 1 ] || abort
+    fi
+fi
+
 FIXED_IPS_JSON=""
 addr_mode=$(radio "How should the new instance get its IP addresses?" \
     dhcp "DHCP - addresses assigned automatically (recommended)" ON \
@@ -178,10 +224,15 @@ if [ "$addr_mode" = static ] ; then
                 break
             }
         done
-        [ "$ok" -eq 1 ] && [ -n "$ips" ] && {
+        if [ "$ok" -eq 1 ] && [ -n "$ips" ] ; then
             FIXED_IPS_JSON=$(json_list "$ips")
-            break
-        }
+            if [ "$NIC_COUNT" -eq 1 ] || [ "$(json_array_length "$FIXED_IPS_JSON")" -eq "$NIC_COUNT" ] ; then
+                break
+            fi
+            bad "Enter exactly $NIC_COUNT addresses, one per NIC (got: $ips)." || true
+            FIXED_IPS_JSON=""
+            continue
+        fi
         bad "Each entry must be an IPv4 or IPv6 address (got: $ips)." || true
     done
 fi
@@ -208,10 +259,15 @@ case "$mac_mode" in
                     break
                 }
             done
-            [ "$ok" -eq 1 ] && [ -n "$macs" ] && {
+            if [ "$ok" -eq 1 ] && [ -n "$macs" ] ; then
                 MAC_JSON=$(json_list "$macs")
-                break
-            }
+                if [ "$NIC_COUNT" -eq 1 ] || [ "$(json_array_length "$MAC_JSON")" -eq "$NIC_COUNT" ] ; then
+                    break
+                fi
+                bad "Enter exactly $NIC_COUNT MAC addresses, one per NIC (got: $macs)." || true
+                MAC_JSON=""
+                continue
+            fi
             bad "Each entry must be a MAC address like aa:bb:cc:11:22:33 (got: $macs)." || true
         done
         ;;
@@ -369,25 +425,52 @@ while : ; do
     else
         KEY_NAME=$(pick_os_value "Which SSH key pair should the instance use?" "$PROJECT" "--keypairs" "keypairs" "$KEY_NAME" "cloud" "SSH key pair name registered in OpenStack:") || abort
     fi
-    NETWORK=$(pick_os_value "Which network should the instance attach to?" "$PROJECT" "--networks" "networks" "${OS_NETWORK:-${NETWORK:-}}" "Ext-Net" "OpenStack network name:") || abort
+    if [ "$NIC_COUNT" -gt 1 ] ; then
+        # One network per NIC, in source device order ; the networks need not
+        # match, and the source port group cannot be mapped automatically.
+        NETWORK=""
+        nic_networks=()
+        for nic_index in "${!NIC_MACS[@]}" ; do
+            nic_net=$(pick_os_value "Which network should NIC $((nic_index + 1)) of ${NIC_COUNT} attach to?\n(Source MAC ${NIC_MACS[nic_index]})" "$PROJECT" "--networks" "networks" "${NIC_NETWORKS_PREV[nic_index]:-}" "Ext-Net" "OpenStack network name for NIC $((nic_index + 1)):") || abort
+            nic_networks+=("$nic_net")
+        done
+        NIC_NETWORKS_PREV=("${nic_networks[@]}")
+    else
+        NETWORK=$(pick_os_value "Which network should the instance attach to?" "$PROJECT" "--networks" "networks" "${OS_NETWORK:-${NETWORK:-}}" "Ext-Net" "OpenStack network name:") || abort
+    fi
     # A blank name under "Use an OpenStack key pair" would silently launch
     # with no key; choosing "Do not attach a key pair" is the way to do that.
     if [ "$key_mode" = key ] && [ -z "$KEY_NAME" ] ; then
         bad "Enter a key pair name, or choose not to attach a key pair." || true
         continue
     fi
+    if [ "$NIC_COUNT" -gt 1 ] ; then
+        nics_ok=1
+        for nic_net in "${nic_networks[@]}" ; do
+            [ -n "$nic_net" ] || nics_ok=0
+        done
+        [ -n "$FLAVOR" ] && [ "$nics_ok" -eq 1 ] && break
+        bad "Flavor and every NIC's network cannot be empty." || true
+        continue
+    fi
     [ -n "$FLAVOR" ] && [ -n "$NETWORK" ] && break
     bad "Flavor and network cannot be empty." || true
 done
-NETWORK_ID=$(input "Network UUID (optional ; leave blank to use the name):" "") || abort
-while : ; do
-    OS_NICS_JSON=$(input "Custom NIC definitions as JSON array (optional ; overrides network selection):" "${OS_NICS_JSON:-}") || abort
-    [ -z "$OS_NICS_JSON" ] && break
-    if python3 -c 'import json,sys ; sys.exit(0 if isinstance(json.loads(sys.argv[1]), list) else 1)' "$OS_NICS_JSON" 2> /dev/null; then
-        break
-    fi
-    bad "That is not a valid JSON array." || true
-done
+if [ "$NIC_COUNT" -gt 1 ] ; then
+    # Network names are resolved to IDs by the playbook, one per NIC.
+    NETWORK_ID=""
+    OS_NICS_JSON=$(printf '%s\n' "${nic_networks[@]}" | python3 -c 'import json,sys ; print(json.dumps([{"net-name": line} for line in sys.stdin.read().splitlines()],separators=(",",":")))')
+else
+    NETWORK_ID=$(input "Network UUID (optional ; leave blank to use the name):" "") || abort
+    while : ; do
+        OS_NICS_JSON=$(input "Custom NIC definitions as JSON array (optional ; overrides network selection):" "${OS_NICS_JSON:-}") || abort
+        [ -z "$OS_NICS_JSON" ] && break
+        if python3 -c 'import json,sys ; sys.exit(0 if isinstance(json.loads(sys.argv[1]), list) else 1)' "$OS_NICS_JSON" 2> /dev/null; then
+            break
+        fi
+        bad "That is not a valid JSON array." || true
+    done
+fi
 
 say "Launch summary for ${VM_NAME}
 
@@ -403,7 +486,8 @@ say "Launch summary for ${VM_NAME}
   User data....: ${ud_mode}${USER_DATA_FILE:+ ($USER_DATA_FILE)}${OS_USER_DATA:+ (inline)}
   Flavor.......: ${FLAVOR}
   SSH key......: ${KEY_NAME:-none}
-  Network......: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}" 19
+  Network......: ${NETWORK}${NETWORK_ID:+ ($NETWORK_ID)}
+  NICs.........: ${NIC_COUNT}${OS_NICS_JSON:+ ($OS_NICS_JSON)}" 20
 
 file=$(mktemp "${TMPDIR:-/tmp}/launch-openstack.XXXXXX")
 dialog_tmp_files+=("$file")
