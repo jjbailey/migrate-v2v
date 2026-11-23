@@ -145,19 +145,16 @@ root.
    defaults to `1` because Broadcom's page treats downloading, installing, or
    using the tool as agreement to its terms.
 
-3. Bootstrap the initial web account from the encrypted `caddy.yml` vault in
-   `ARTIFACT_ROOT_HOST/vaults/` (see [Vault layouts](../doc/vaults.md#web-controller-bootstrap-account)).
-   It must contain a `web_user` and a `web_password` of 12 to 16384 characters.
-   This creates an account only when the persistent account store is empty;
-   repeated runs leave existing accounts unchanged.
+3. Create the initial web account. You are prompted for a password of 12 to
+   16384 characters:
 
    ```sh
-   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm --no-deps controller python3 web/app.py user bootstrap
+   sudo docker compose --env-file web/.env -f web/compose.yaml run --rm --no-deps controller python3 web/app.py user add operator
    ```
 
    The account is stored in the persistent web state directory and is separate
-   from the Linux account used to run Docker. To add or reset an account
-   interactively, run the same command with `user add NAME`; use `user delete
+   from the Linux account used to run Docker. To add another account or
+   reset a password, run the same command with a different `NAME`; use `user delete
 NAME` to remove one and `user list` to show the account names.
 
    The account file is `${ARTIFACT_ROOT_HOST}/web-state/users.json`; it contains
