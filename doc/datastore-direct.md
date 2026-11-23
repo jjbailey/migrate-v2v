@@ -265,13 +265,13 @@ not been exercised against Azure.
 
 A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
 26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
-files were removed after import. A `Standard_B2s_v2` VM launched without a
-public IP, and its serial console reached the guest login prompt. At the time of that test,
-Azure still reported `provisioningState=Creating` after 13 minutes, so the launch
-play was still waiting and no deployment catalog entry had been written. This
-confirms image import and guest boot, but not completed Azure provisioning;
-check the Azure guest setup requirement in the README before treating launch
-as validated.
+files were removed after import. A `Standard_B2s_v2` VM launched without
+a public IP, and its serial console reached the guest login prompt. At the
+time of that test, Azure still reported `provisioningState=Creating` after
+13 minutes, so the launch play was still waiting and no deployment catalog
+entry had been written. This confirms image import and guest boot, but not
+completed Azure provisioning; check the Azure guest setup requirement in
+the README before treating launch as validated.
 
 ## Requirements
 
@@ -332,6 +332,9 @@ share that install through the existing `/work/migrate-v2v` bind mount. The kit
 is not stored in this repository or included in a container image. Set
 `OPENVDDK_INSTALL_DIR` to choose a different writable location, or
 `OPENVDDK_ARCHIVE` to install from a previously downloaded kit.
+The installer never replaces a non-empty install directory. To upgrade from an
+earlier kit (such as 0.7.4), move or remove the old directory first, or point
+`OPENVDDK_INSTALL_DIR` at a new one.
 The pinned kit supports Linux x86-64 with glibc 2.28 or newer.
 `vddk_backend=auto` and `vddk_backend=vddk` may install it; explicitly selecting
 `vddk_backend=curl` skips the VDDK probe and download.
@@ -343,25 +346,26 @@ To install it before the first migration, run:
 nbdkit vddk libdir=/work/migrate-v2v/tools/openvddk --dump-plugin | grep vddk_library_version
 ```
 
-The OpenVDDK kit's library is under `lib/`; nbdkit looks under `lib64/`, so
-the installer adds the required relative link there. Existing installations in
-other locations are still usable by setting `OPENVDDK_INSTALL_DIR` to that
-`libdir`. In a container, keep the nbdkit VDDK plugin in the image; the
-installer supplies only the library and its kit files.
+nbdkit looks for the OpenVDDK library under `lib64/`. Kits from 0.7.5 on
+ship `lib64 -> lib` themselves, and the installer only verifies that the
+link reaches `libvixDiskLib.so.8`; for older kits it creates the relative
+link. Existing installations in other locations are still usable by setting
+`OPENVDDK_INSTALL_DIR` to that `libdir`. In a container, keep the nbdkit VDDK
+plugin in the image; the installer supplies only the library and its kit files.
 
 The library tested is `libvixDiskLib.so.8.0.3` from OpenVDDK, an independent,
 read-only replacement for VMware's disk library (HotAdd, NBDSSL, and NBD
-transports). VMware's own VDDK, where you are licensed for it, works the same
-way through `libdir`.
+transports). VMware's own VDDK, where you are licensed for it, works the
+same way through `libdir`.
 
-With the OpenVDDK build that supports `OpenVDDK.nbd.sessions`, each disk uses
-**two parallel NFC sessions** over NBD/NBDSSL rather than the library's default
-of one. The conversion task writes `OpenVDDK.nbd.sessions = "2"` to a private
-per-disk configuration file and passes it to nbdkit's VDDK plugin with `config=`.
-This requires the OpenVDDK library to be installed in the selected `libdir`;
-the migration preflight installs it when it is missing. VMware's library does
-not implement this OpenVDDK-specific setting. The curl fallback and local-file
-tests are unchanged.
+With the OpenVDDK build that supports `OpenVDDK.nbd.sessions`, each disk
+uses **two parallel NFC sessions** over NBD/NBDSSL rather than the library's
+default of one. The conversion task writes `OpenVDDK.nbd.sessions = "2"` to a
+private per-disk configuration file and passes it to nbdkit's VDDK plugin with
+`config=`. This requires the OpenVDDK library to be installed in the selected
+`libdir`; the migration preflight installs it when it is missing. VMware's
+library does not implement this OpenVDDK-specific setting. The curl fallback
+and local-file tests are unchanged.
 
 ## CBT (Changed Block Tracking)
 

@@ -6,7 +6,7 @@
 # have a vault password ready.
 # have a password for the operator ready.
 #
-# usage: VAULT_PASSWORD=... examples/compose-v2v.sh
+# usage: VAULT_PASSWORD=... examples/compose-v2v.sh   (from any directory)
 #   (if VAULT_PASSWORD is unset and stdin is a terminal, you are prompted)
 # refuses to overwrite ~/.dib-vault-pass or web/.env if they exist;
 # set FORCE=1 to overwrite them.
@@ -15,8 +15,9 @@ set -euo pipefail
 
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-CDPATH=.:..
-cd migrate-v2v > /dev/null || die "cannot find migrate-v2v directory"
+# run from the repository root, wherever the checkout lives and wherever the
+# script is invoked from
+cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." || die "cannot find the repository root"
 
 for cmd in docker ip awk sed sudo; do
     command -v "$cmd" > /dev/null || die "required command not found: $cmd"

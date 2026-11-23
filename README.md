@@ -1883,7 +1883,7 @@ migrate-v2v/
 │   ├── migrate-openstack-vm-vddk.sh      # Datastore-direct OpenStack migration wrapper
 │   ├── openstack-project-facts.py # Images, flavors, security groups, networks, keys, quotas for one project
 │   ├── reconcile-catalog-*.py   # Removes catalog entries gone from AWS, Azure, GCP, or OpenStack
-│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py  # Shared helpers
+│   ├── *-common.sh, catalog_common.py, vault_common.py, lookup_migration_common.py, table_common.py  # Shared helpers
 │   ├── exec-with-stdin-env.sh   # Passes secrets to a child process on stdin
 │   ├── run-playbook.sh          # Playbook runner (cd's to the repo, calls ansible-run.sh)
 │   ├── stage-v2v.sh             # Stages a CentOS 7 VM for DHCP before migration

@@ -44,6 +44,9 @@ dropped. Where the web forms take files, see
 
 ## Setup
 
+[examples/compose-v2v.sh](../examples/compose-v2v.sh) automates steps 1 to 4
+below for a first-time LAN install; the steps explain what it does.
+
 These instructions cover a new x86_64 (amd64) Ubuntu 24.04 host. Install
 Docker Engine, the Docker CLI, Buildx, and the Compose plugin from Docker's
 signed APT repository. For other supported Ubuntu releases or distributions,
