@@ -21,9 +21,9 @@ quiesced snapshot of the source VM          (no clone)
   → per disk, one conversion ahead of the upload:
       nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
         → qemu-img convert -f raw -O qcow2  disks/disk-N.qcow2
-        → openstack.cloud.image  (QCOW2 → Glance)
-  → catalog entry (same schema as the OVF method)
-  → snapshot removed (only after success)
+        → openstack.cloud.image             (QCOW2 → Glance)
+  → catalog entry                           (same schema as the OVF method)
+  → snapshot removed                        (only after success)
 ```
 
 Disk 0, the boot disk, is the disk named first in the VM's configured boot order
@@ -77,8 +77,8 @@ drivers, and fixes the boot configuration. This is what a guest that lacks
 virtio in its initramfs, and every **Windows** guest, needs.
 
 ```text
-stream and convert every disk → disks/disk-N.qcow2      (uncompressed)
-  → virt-v2v-in-place -i disk disk-0.qcow2 disk-1.qcow2 …  (boot order)
+stream and convert every disk → disks/disk-N.qcow2          (uncompressed)
+  → virt-v2v-in-place -i disk disk-0.qcow2 disk-1.qcow2 …   (boot order)
   → [COMPRESS] qemu-img convert -c, per disk
   → openstack.cloud.image, per disk, as usual
 ```
@@ -152,10 +152,10 @@ compression runs after the in-place pass, because the pass rewrites clusters.
 
 ```bash
 VM_NAME=my-vm VSPHERE_TARGET_VCENTER=my-vcenter ./bin/migrate-openstack-vm-vddk.sh
-GUEST_CONVERT=true VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # virtio and VMware tools
+GUEST_CONVERT=true VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh     # virtio and VMware tools
 GUEST_CONVERT=true VIRTIO_WIN=/iso/virtio-win.iso VM_NAME=my-win-vm ./bin/migrate-openstack-vm-vddk.sh
-BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh   # force a backend
-./bin/migrate-openstack-vddk-dialog.sh                           # guided front end
+BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh           # force a backend
+./bin/migrate-openstack-vddk-dialog.sh                                  # guided front end
 ```
 
 The guided front end asks for the backend, whether to require source CBT,
@@ -227,12 +227,12 @@ be read (an untrusted certificate, a wrong URL, a refused login).
 ## Azure
 
 `playbooks/migrate-azure-vm-vddk.yml` (wrapper `bin/migrate-azure-vm-vddk.sh`)
-uses the same snapshot, manifest, backends, resume, and discard as the
-OpenStack playbook. Only the per-disk output differs: `qemu-img` writes each
-stream as the fixed-format VHD Azure requires
-(`-O vpc -o subformat=fixed,force_size=on`, so the virtual size stays exact),
-which is uploaded as a page blob. The boot disk becomes a managed image and
-data disks become managed snapshots, as in `migrate-azure-vm.yml`.
+uses the same snapshot, manifest, backends, resume, and discard as
+the OpenStack playbook. Only the per-disk output differs: `qemu-img`
+writes each stream as the fixed-format VHD Azure requires (`-O vpc -o
+subformat=fixed,force_size=on`, so the virtual size stays exact), which
+is uploaded as a page blob. The boot disk becomes a managed image and data
+disks become managed snapshots, as in `migrate-azure-vm.yml`.
 
 ```text
 nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
@@ -248,13 +248,13 @@ DISCARD_RUN_ID=<id> VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh     # give up o
 ```
 
 The wrapper takes the same environment variables as `bin/migrate-azure-vm.sh`
-plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`; there
-is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest records
-the source firmware, so the image's Hyper-V generation (V1 for BIOS, V2 for
-UEFI) follows the VM as with the OVF method. A discard removes the run's
-snapshot, run directory, staged blobs, managed image, and data snapshots, found by the
-run-ID-derived names. A fixed VHD is staged at the disk's full virtual size,
-written sparse, so it costs only the used blocks on the controller.
+plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`;
+there is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest
+records the source firmware, so the image's Hyper-V generation (V1 for BIOS,
+V2 for UEFI) follows the VM as with the OVF method. A discard removes the run's
+snapshot, run directory, staged blobs, managed image, and data snapshots, found
+by the run-ID-derived names. A fixed VHD is staged at the disk's full virtual
+size, written sparse, so it costs only the used blocks on the controller.
 
 The Azure path shares `initialize`, `prepare-disks`, `import`, and
 `import-disk` with the OVF method; `export_format: datastore` selects
