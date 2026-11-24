@@ -2,10 +2,10 @@
 
 <!-- markdownlint-disable MD013 -->
 
-Migrate a vSphere VM to AWS, Azure, OpenStack, or GCP. The standard migration
+Migrate a vSphere VM to AWS, Azure, GCP, or OpenStack. The standard migration
 workflow uses a quiesced snapshot, a full clone, and an OVF/OVA export. Each
 target imports the resulting disk artifacts using its native image workflow.
-OpenStack and Azure also support a [datastore-direct workflow](doc/datastore-direct.md)
+Azure and OpenStack also support a [datastore-direct workflow](doc/datastore-direct.md)
 that streams snapshot disks without a clone or OVF/OVA export. Neither workflow
 powers off the source VM, though the datastore-direct curl backend cannot read
 a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
@@ -34,8 +34,8 @@ The [workflow diagram](doc/workflow.md) shows the shared stages.
 | ----------------------- | -------------------------------------------- | -------------------------------------------------------- | -------------------------------------------- |
 | [AWS](#aws)             | OVF/OVA to an AMI                            | —                                                        | EC2 instance                                 |
 | [Azure](#azure)         | OVF/VMDK to managed image and snapshots      | [VDDK or curl](#azure-datastore-direct-migration)        | Azure VM                                     |
-| [OpenStack](#openstack) | OVF/VMDK to Glance images                    | [VDDK or curl](#datastore-direct-migration-to-openstack) | Nova server and Cinder volumes               |
 | [GCP](#gcp)             | OVF/VMDK through Migrate to Virtual Machines | —                                                        | Compute Engine instance and persistent disks |
+| [OpenStack](#openstack) | OVF/VMDK to Glance images                    | [VDDK or curl](#datastore-direct-migration-to-openstack) | Nova server and Cinder volumes               |
 
 The standard method takes a source snapshot, makes a full clone, and exports
 its disks. Datastore-direct snapshots the VM and streams its disks without a
@@ -129,7 +129,7 @@ the same path so artifacts remain available for resume.
   the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
-- For the datastore-direct OpenStack and Azure migrations
+- For the datastore-direct Azure and OpenStack migrations
   ([doc/datastore-direct.md](doc/datastore-direct.md)): `nbdkit`, whose `curl`
   plugin is the fallback backend. The `vddk` plugin is an additional
   requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
@@ -189,8 +189,8 @@ python -m pip install \
 Target-specific Ubuntu packages are:
 
 ```bash
-sudo apt-get install -y qemu-utils       # OpenStack or Azure
-sudo apt-get install -y nbdkit           # datastore-direct OpenStack or Azure
+sudo apt-get install -y qemu-utils       # Azure or OpenStack
+sudo apt-get install -y nbdkit           # datastore-direct Azure or OpenStack
 sudo apt-get install -y dialog           # interactive dialogs (or install whiptail)
 ```
 
@@ -241,7 +241,7 @@ The vault helpers (`bin/*-vault.sh`) prefer the `ansible-vault` in
 
 ### Artifact Root
 
-AWS, Azure, OpenStack, and GCP migrations write their run directories under
+AWS, Azure, GCP, and OpenStack migrations write their run directories under
 one artifact root, `/work/migrate-v2v` by default, laid out as
 `<artifact-root>/<target>/<vm-name>/<run-id>/` (for example
 `/work/migrate-v2v/openstack/my-vm/<run-id>/`). The workspace also holds tools
@@ -337,14 +337,6 @@ the AWS bootstrap is a one-time administrative step.
     resulting image and snapshot.
   - _Launch_: `ec2:RunInstances` and tagging, and read access to the images,
     subnets, and security groups you name.
-- **GCP** (`service_account_key`): in the project selected by `gcp_project`,
-  list, upload, and delete objects in `gcs_bucket`; create, read, and delete
-  Compute images; create, read, and delete VM Migration image imports (the
-  Cloud Build service account used by the import needs its usual access to
-  the bucket and Compute); and, for launches, create instances and disks,
-  attach disks, and act as the instance's service account. Predefined roles
-  that cover this include Storage Object Admin, Compute Image User/Admin,
-  Compute Instance Admin (v1), VM Migration Admin, and Service Account User.
 - **Azure** (the `azure_projects` entry): in the subscription selected by
   `azure_target_project`, create the staging storage account when it is
   missing, create blob containers, write and delete page blobs in them, and
@@ -353,6 +345,14 @@ the AWS bootstrap is a one-time administrative step.
   security groups, public IPs, NICs, managed disks, and VMs. Contributor
   on the resource group covers all of it. The resource group must already
   exist, and an existing storage account is used exactly as it is configured.
+- **GCP** (`service_account_key`): in the project selected by `gcp_project`,
+  list, upload, and delete objects in `gcs_bucket`; create, read, and delete
+  Compute images; create, read, and delete VM Migration image imports (the
+  Cloud Build service account used by the import needs its usual access to
+  the bucket and Compute); and, for launches, create instances and disks,
+  attach disks, and act as the instance's service account. Predefined roles
+  that cover this include Storage Object Admin, Compute Image User/Admin,
+  Compute Instance Admin (v1), VM Migration Admin, and Service Account User.
 - **OpenStack** (the `openstack_projects` entry): within the target project,
   create, upload, and delete Glance images; create and delete Cinder volumes;
   read networks and security groups; and create Neutron ports and Nova servers.
@@ -434,60 +434,89 @@ exposure remains: the vCenter password in the `ovftool` export URL, readable
 in `ps` for the whole export. On a shared host, mount `/proc` with
 `hidepid=2`.
 
-- **`vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
-  a vCenter entry: `vcenter_hostname`, `vcenter_username`, `vcenter_password`,
-  optional `datacenter` (falls back to the pre-existing `datacenter`
-  variable, default `"Datacenter"`), and optional `validate_certs`
-  (default `true`) - one TLS knob per entry governing the `community.vmware`
-  modules, `ovftool`, and govc (`GOVC_INSECURE` follows it unless an
-  optional `govc_insecure` override is set). One run targets one vCenter,
-  selected with `-e vsphere_target_vcenter=<key-or-hostname>`; the selector
-  (`playbooks/tasks/migration/common/select-vcenter.yml`) matches a vault
-  key or a `vcenter_hostname`, auto-selects a single-entry map, and fails
-  loud listing available keys. A legacy vault holding only the flat
-  `vcenter_hostname`/`vcenter_username`/`vcenter_password` still works
-  unmodified: with no explicit `-e vsphere_target_vcenter` the legacy
-  credentials are used as-is even when `vsphere_projects` is also present
-  (the same rule as `openstack_auth`). Legacy `GOVC_URL`, `GOVC_USERNAME`,
-  and `GOVC_PASSWORD` values are derived from the selected entry. A legacy
-  flat vault may still set `GOVC_INSECURE` to override the value derived from
-  `validate_certs`; update it through the flat block only.
+- **`aws.yml`** - `aws_projects`, a mapping of AWS account/project key to
+  `aws_region`, `s3_bucket`, `vmimport_role_name`, and optionally
+  `aws_account_id`, `aws_profile`, `aws_access_key_id`, `aws_secret_access_key`,
+  and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
+  a single entry is selected automatically. There is no separate default-account
+  setting; a one-entry map is the default. A legacy flat mapping remains supported.
+  Loaded by all three playbooks. The `amazon.aws` modules receive explicit
+  credential parameters through `module_defaults`; the keys stay out of task
+  environments and process command lines. The AWS CLI upload path receives its
+  credentials over stdin. If the vault keys are empty, boto3 can use a local
+  `~/.aws` configuration or an instance profile, and the playbooks warn when
+  nothing resolves.
 
   ```yaml
-  vsphere_projects:
-    example:
-      vcenter_hostname: "vc.example.com"
-      vcenter_username: "administrator@example.com"
-      vcenter_password: "my-password"
-      datacenter: "Datacenter"
-      validate_certs: false
-    other-site:
-      vcenter_hostname: "vc.other.example.com"
-      vcenter_username: "administrator@other.example.com"
-      vcenter_password: "my-password"
-      datacenter: "Other-DC"
-      validate_certs: true
+  aws_projects:
+    "123456789012":
+      aws_account_id: "123456789012"
+      aws_region: "my-region"
+      s3_bucket: "my-bucket"
+      vmimport_role_name: "vmimport-role"
+      # Optional: aws_profile, aws_access_key_id,
+      # aws_secret_access_key, aws_session_token
   ```
 
-  The shared vault may also contain DIB7 Content Library defaults. This repo
-  does not read these optional values; they are shown here to document the
-  shared vault shape:
+- **`azure.yml`** - `azure_projects`, a mapping of subscription key to
+  one service principal (`tenant_id`, `subscription_id`, `client_id`,
+  `client_secret`) plus where its migrations land: `resource_group` (must
+  already exist), `location`, `storage_account` (3-24 lowercase letters and
+  digits), and optional `storage_container` (default
+  `migrate-v2v-images`). One run targets one subscription, selected with
+  `-e azure_target_project=<key-or-subscription-id>`; a single-entry map is
+  selected automatically. This is the same file and schema `dib7` uses,
+  so the two repositories can share one vault. See
+  [doc/vaults.md](doc/vaults.md) for the full layout.
+
+- **`gcp.yml`** - `gcp_projects`, a mapping of project key to
+  `gcp_project`, `gcs_bucket`, an optional `gcp_import_location` (default
+  `us-central1`), and a `service_account_key` JSON document for a service account with GCS, Compute,
+  Cloud Build, and M2VM permissions. One run targets one project, selected with
+  `-e gcp_target_project=<key-or-project-id>`; a single-entry map is selected
+  automatically. A legacy flat mapping with `gcp_project`, `gcs_bucket`,
+  optional `gcp_import_location`, and `service_account_key` remains supported. For
+  example:
 
   ```yaml
-  vsphere_content_library: "my-content-library"
-  vsphere_template_name: "inventory-item-base.tmpl"
+  gcp_projects:
+    my-project-a:
+      gcp_project: "my-project-a"
+      gcs_bucket: "my-bucket-a"
+      gcp_import_location: "us-central1"
+      service_account_key: |
+        { ... JSON ... }
+    my-project-b:
+      gcp_project: "my-project-b"
+      gcs_bucket: "my-bucket-b"
+      gcp_import_location: "us-east1"
+      service_account_key: |
+        { ... JSON ... }
   ```
 
-  The migration catalog records `source_vcenter_key` (the vault key, or
-  `legacy` when the flat credentials were used) alongside `source_vcenter`
-  so each entry names the vCenter it came from. The reconcile and lookup
-  tools ignore it today; match on it manually when a VM exists on more than
-  one vCenter.
-  The `bin/migrate-*.sh` wrappers pass `VSPHERE_TARGET_VCENTER` through
-  when set - the selected entry then supplies the datacenter, and
-  `VCENTER_DATACENTER` is ignored (it is a legacy single-vCenter override
-  that only applies when no target is selected). `VALIDATE_CERTS` is
-  forwarded only when explicitly set (the vault entry decides otherwise).
+  Create the staging bucket before migration. Preflight checks that the
+  configured bucket is accessible before taking a snapshot or exporting the
+  VM; it does not create the bucket. The bucket's location is independent of
+  `gcp_import_location`.
+
+  `gcp_import_location` (default `us-central1` when the entry leaves it out)
+  is the region the Migrate to Virtual Machines _import job_ runs in - the value passed to `gcloud compute migration image-imports
+--location`. It does **not** control where `gcs_bucket` lives (fixed when
+  the bucket is created; the import reads the staged VMDK across regions) or
+  where the finished image lives (a GCE Compute image is a _global_ resource).
+  It only picks which region does the conversion, so it can be changed freely,
+  including to route around a regional outage:
+
+  ```bash
+  ./bin/migrate-gcp-vm.sh -e vm_name=my-vm -e gcp_import_location=us-east1
+  ```
+
+  On 2026-08-12 the import service in `us-central1` failed four consecutive
+  times at the `loadingSourceFiles` step with `code 13`, "Internal migration
+  service error", while the byte-identical staged object imported cleanly in
+  `us-east1`. If an import fails with an internal error and no useful detail,
+  retrying in another region is the fastest way to tell a bad artifact apart
+  from a bad region.
 
 - **`openstack.yml`** - `openstack_projects`, a mapping of project key
   to an OpenStack authentication mapping: `auth_url`, `username`, `password`,
@@ -546,89 +575,60 @@ in `ps` for the whole export. On a shared host, mount `/proc` with
   back to the matching OpenStack vault entry (see "OpenStack Catalog
   Reconciliation" below).
 
-- **`aws.yml`** - `aws_projects`, a mapping of AWS account/project key to
-  `aws_region`, `s3_bucket`, `vmimport_role_name`, and optionally
-  `aws_account_id`, `aws_profile`, `aws_access_key_id`, `aws_secret_access_key`,
-  and `aws_session_token`. Select one with `-e aws_target_project=<key-or-account-id>`;
-  a single entry is selected automatically. There is no separate default-account
-  setting; a one-entry map is the default. A legacy flat mapping remains supported.
-  Loaded by all three playbooks. The `amazon.aws` modules receive explicit
-  credential parameters through `module_defaults`; the keys stay out of task
-  environments and process command lines. The AWS CLI upload path receives its
-  credentials over stdin. If the vault keys are empty, boto3 can use a local
-  `~/.aws` configuration or an instance profile, and the playbooks warn when
-  nothing resolves.
+- **`vsphere.yml`** - `vsphere_projects`, a mapping of vCenter key to
+  a vCenter entry: `vcenter_hostname`, `vcenter_username`, `vcenter_password`,
+  optional `datacenter` (falls back to the pre-existing `datacenter`
+  variable, default `"Datacenter"`), and optional `validate_certs`
+  (default `true`) - one TLS knob per entry governing the `community.vmware`
+  modules, `ovftool`, and govc (`GOVC_INSECURE` follows it unless an
+  optional `govc_insecure` override is set). One run targets one vCenter,
+  selected with `-e vsphere_target_vcenter=<key-or-hostname>`; the selector
+  (`playbooks/tasks/migration/common/select-vcenter.yml`) matches a vault
+  key or a `vcenter_hostname`, auto-selects a single-entry map, and fails
+  loud listing available keys. A legacy vault holding only the flat
+  `vcenter_hostname`/`vcenter_username`/`vcenter_password` still works
+  unmodified: with no explicit `-e vsphere_target_vcenter` the legacy
+  credentials are used as-is even when `vsphere_projects` is also present
+  (the same rule as `openstack_auth`). Legacy `GOVC_URL`, `GOVC_USERNAME`,
+  and `GOVC_PASSWORD` values are derived from the selected entry. A legacy
+  flat vault may still set `GOVC_INSECURE` to override the value derived from
+  `validate_certs`; update it through the flat block only.
 
   ```yaml
-  aws_projects:
-    "123456789012":
-      aws_account_id: "123456789012"
-      aws_region: "my-region"
-      s3_bucket: "my-bucket"
-      vmimport_role_name: "vmimport-role"
-      # Optional: aws_profile, aws_access_key_id,
-      # aws_secret_access_key, aws_session_token
+  vsphere_projects:
+    example:
+      vcenter_hostname: "vc.example.com"
+      vcenter_username: "administrator@example.com"
+      vcenter_password: "my-password"
+      datacenter: "Datacenter"
+      validate_certs: false
+    other-site:
+      vcenter_hostname: "vc.other.example.com"
+      vcenter_username: "administrator@other.example.com"
+      vcenter_password: "my-password"
+      datacenter: "Other-DC"
+      validate_certs: true
   ```
 
-- **`gcp.yml`** - `gcp_projects`, a mapping of project key to
-  `gcp_project`, `gcs_bucket`, an optional `gcp_import_location` (default
-  `us-central1`), and a `service_account_key` JSON document for a service account with GCS, Compute,
-  Cloud Build, and M2VM permissions. One run targets one project, selected with
-  `-e gcp_target_project=<key-or-project-id>`; a single-entry map is selected
-  automatically. A legacy flat mapping with `gcp_project`, `gcs_bucket`,
-  optional `gcp_import_location`, and `service_account_key` remains supported. For
-  example:
+  The shared vault may also contain DIB7 Content Library defaults. This repo
+  does not read these optional values; they are shown here to document the
+  shared vault shape:
 
   ```yaml
-  gcp_projects:
-    my-project-a:
-      gcp_project: "my-project-a"
-      gcs_bucket: "my-bucket-a"
-      gcp_import_location: "us-central1"
-      service_account_key: |
-        { ... JSON ... }
-    my-project-b:
-      gcp_project: "my-project-b"
-      gcs_bucket: "my-bucket-b"
-      gcp_import_location: "us-east1"
-      service_account_key: |
-        { ... JSON ... }
+  vsphere_content_library: "my-content-library"
+  vsphere_template_name: "inventory-item-base.tmpl"
   ```
 
-  Create the staging bucket before migration. Preflight checks that the
-  configured bucket is accessible before taking a snapshot or exporting the
-  VM; it does not create the bucket. The bucket's location is independent of
-  `gcp_import_location`.
-
-  `gcp_import_location` (default `us-central1` when the entry leaves it out)
-  is the region the Migrate to Virtual Machines _import job_ runs in - the value passed to `gcloud compute migration image-imports
---location`. It does **not** control where `gcs_bucket` lives (fixed when
-  the bucket is created; the import reads the staged VMDK across regions) or
-  where the finished image lives (a GCE Compute image is a _global_ resource).
-  It only picks which region does the conversion, so it can be changed freely,
-  including to route around a regional outage:
-
-  ```bash
-  ./bin/migrate-gcp-vm.sh -e vm_name=my-vm -e gcp_import_location=us-east1
-  ```
-
-  On 2026-08-12 the import service in `us-central1` failed four consecutive
-  times at the `loadingSourceFiles` step with `code 13`, "Internal migration
-  service error", while the byte-identical staged object imported cleanly in
-  `us-east1`. If an import fails with an internal error and no useful detail,
-  retrying in another region is the fastest way to tell a bad artifact apart
-  from a bad region.
-
-- **`azure.yml`** - `azure_projects`, a mapping of subscription key to
-  one service principal (`tenant_id`, `subscription_id`, `client_id`,
-  `client_secret`) plus where its migrations land: `resource_group` (must
-  already exist), `location`, `storage_account` (3-24 lowercase letters and
-  digits), and optional `storage_container` (default
-  `migrate-v2v-images`). One run targets one subscription, selected with
-  `-e azure_target_project=<key-or-subscription-id>`; a single-entry map is
-  selected automatically. This is the same file and schema `dib7` uses,
-  so the two repositories can share one vault. See
-  [doc/vaults.md](doc/vaults.md) for the full layout.
+  The migration catalog records `source_vcenter_key` (the vault key, or
+  `legacy` when the flat credentials were used) alongside `source_vcenter`
+  so each entry names the vCenter it came from. The reconcile and lookup
+  tools ignore it today; match on it manually when a VM exists on more than
+  one vCenter.
+  The `bin/migrate-*.sh` wrappers pass `VSPHERE_TARGET_VCENTER` through
+  when set - the selected entry then supplies the datacenter, and
+  `VCENTER_DATACENTER` is ignored (it is a legacy single-vCenter override
+  that only applies when no target is selected). `VALIDATE_CERTS` is
+  forwarded only when explicitly set (the vault entry decides otherwise).
 
 Precedence is: `-e`/`--extra-vars` > vault files > playbook defaults. No
 secrets flow through `.env` files or unencrypted repository files;
@@ -810,6 +810,118 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   continues.
 - The launch is recorded in
   `/work/migrate-v2v/catalogs/deployment-catalog.json`.
+
+### GCP
+
+#### GCP Migration
+
+`playbooks/migrate-gcp-vm.yml` exports the VM as an OVF package, uploads its
+VMDKs to Cloud Storage, and imports each disk through Migrate to Virtual
+Machines. The boot disk receives guest OS adaptation; data disks skip it.
+Before creating a snapshot or exporting, preflight verifies that the configured
+Cloud Storage staging bucket is accessible. The bucket must already exist; the
+workflow does not create it.
+Check the [supported guest OS list](https://docs.cloud.google.com/migrate/virtual-machines/docs/5.0/discover/supported-os-versions)
+before migrating. GCP starts imports for all disks before waiting for them. The guest must be
+on Google's supported list because M2VM adapts the boot disk for Compute
+Engine. Image names embed the run ID and are truncated to Compute Engine's
+63-character limit. The staged VMDKs live at
+`gs://<gcs_bucket>/migrate-v2v/<run-id>/` and are deleted after success or
+retained for debugging after failure. Existing same-named images are replaced
+by default (`gcp_replace_existing_image=true`).
+
+```bash
+./bin/run-playbook.sh playbooks/migrate-gcp-vm.yml \
+  -e vm_name=my-vm -e datacenter=Datacenter
+```
+
+Imports for a multi-disk VM run concurrently, so total import time is
+bounded by the slowest disk instead of the sum of them.
+
+A clean Ubuntu 24.04.5 controller migrated a one-disk, 40 GiB UEFI Ubuntu
+26.04.1 VM to GCP. The 1.65 GiB stream-optimized VMDK uploaded to the configured
+Cloud Storage bucket at 3.5 MiB/s; M2VM OS adaptation and image creation
+succeeded, and the controller removed the staging object, local export,
+snapshot, and clone after cataloging the image.
+
+#### GCP Launch
+
+`playbooks/launch-gcp-instance.yml` launches a Compute Engine instance from
+the newest completed GCP migration and attaches persistent disks made from
+the data images.
+
+```bash
+./bin/run-playbook.sh playbooks/launch-gcp-instance.yml \
+  -e vm_name=my-vm \
+  -e gcp_target_project=my-project-a \
+  -e gcp_zone=us-central1-a \
+  -e gcp_machine_type=e2-standard-2 \
+  -e gcp_network=default
+```
+
+GCP uses the selected VPC network and subnet. It has no named key-pair
+resource: project or instance `ssh-keys` metadata supplies access. Migrated
+images do not have `google-guest-agent`, so use ordinary `ssh` with an
+inherited key; `gcloud compute ssh` and the Console's temporary-key flow
+depend on that agent. A launch retry reuses an instance only when its metadata
+identifies the same VM and migration and its disks come from the selected
+images. Launch accepts `gcp_disk_type` and network and tag options.
+The wrapper reads `GCP_TARGET_PROJECT`, `GCP_SUBNETWORK` and `GCP_TAGS_JSON` (a
+JSON array of network tags).
+Set `GCP_NO_ADDRESS=true` to create an instance without an external IP. The
+clean-controller test launched `gcp-controller-test-ubuntu26041` as an
+`e2-standard-2` in `us-central1-a` this way; its private IP was `10.128.0.17`,
+and the serial console reached the Ubuntu login prompt. SSH was not tested from
+the controller because the instance has no external IP.
+
+#### GCP SSH Access
+
+Register the standing key once at project level, the way an AWS or OpenStack
+keypair is registered once in the cloud. Every launched instance then inherits
+it and no per-launch key argument is needed:
+
+```bash
+# merge, do not overwrite: this metadata key holds every project SSH key.
+# Each step runs only if the previous one succeeded, and nothing is written
+# unless the existing keys were read back one per line.
+keys=$(mktemp) &&
+gcloud compute project-info describe --project=my-project \
+  --format='value(commonInstanceMetadata.items.filter("key:ssh-keys").extract(value).flatten())' \
+  > "$keys" &&
+grep -q . "$keys" &&
+printf 'cloudinit:%s\n' "$(cat ~/.ssh/id_ed25519.pub)" >> "$keys" &&
+gcloud compute project-info add-metadata --project=my-project \
+  --metadata-from-file=ssh-keys="$keys"
+rm -f "$keys"
+```
+
+Keep `.flatten()`: without it `value()` prints the key list as one
+Python-style `['...\n...']` string, and writing that back replaces every
+project key, including the `cloudinit:` entry, with an unusable value. The
+`grep -q .` guard stops when no existing keys were read (a failed or
+mistyped `describe`). Only if the project genuinely has no `ssh-keys` yet,
+write the new `cloudinit:` line to the file yourself and run just the
+`add-metadata` step.
+
+The `cloudinit:` prefix is required. cloud-init's GCE datasource accepts only
+`cloudinit` or the image's own default user (`debian`, `ubuntu`) and **silently
+discards every other prefix**, including `root`, leaving an empty
+`authorized_keys` with no error anywhere but the serial console. Entries for
+real usernames are honored only by `google-guest-agent`, which migrated images
+do not have. Where the image sets `disable_root: false`, cloud-init applies the
+key to both the image's default user and `root`.
+
+To add an extra key for a single launch, set `gcp_ssh_public_key_file`
+(wrapper: `GCP_SSH_KEY_FILE`) to a public key file. It is injected as instance
+`ssh-keys` metadata and cloud-init merges it with the inherited project keys
+rather than replacing them. `gcp_ssh_user` (wrapper: `GCP_SSH_USER`) sets its
+prefix and defaults to `cloudinit`.
+
+Keys are applied by cloud-init's `cc_ssh` module, whose frequency is
+`PER_INSTANCE`. Changing project or instance metadata therefore has no effect
+on an already-launched instance, and neither does a reboot or `instances reset`:
+the instance ID is unchanged, so the module does not re-run. To change an
+instance's keys, delete and relaunch it.
 
 ### OpenStack
 
@@ -1128,124 +1240,12 @@ VM_NAME=my-vm \
 See [examples/README.md](examples/README.md#openstack-launch-matrix) for the
 full matrix (DHCP-only, fixed-IP-only, multi-NIC, config-drive, and cleanup).
 
-### GCP
-
-#### GCP Migration
-
-`playbooks/migrate-gcp-vm.yml` exports the VM as an OVF package, uploads its
-VMDKs to Cloud Storage, and imports each disk through Migrate to Virtual
-Machines. The boot disk receives guest OS adaptation; data disks skip it.
-Before creating a snapshot or exporting, preflight verifies that the configured
-Cloud Storage staging bucket is accessible. The bucket must already exist; the
-workflow does not create it.
-Check the [supported guest OS list](https://docs.cloud.google.com/migrate/virtual-machines/docs/5.0/discover/supported-os-versions)
-before migrating. GCP starts imports for all disks before waiting for them. The guest must be
-on Google's supported list because M2VM adapts the boot disk for Compute
-Engine. Image names embed the run ID and are truncated to Compute Engine's
-63-character limit. The staged VMDKs live at
-`gs://<gcs_bucket>/migrate-v2v/<run-id>/` and are deleted after success or
-retained for debugging after failure. Existing same-named images are replaced
-by default (`gcp_replace_existing_image=true`).
-
-```bash
-./bin/run-playbook.sh playbooks/migrate-gcp-vm.yml \
-  -e vm_name=my-vm -e datacenter=Datacenter
-```
-
-Imports for a multi-disk VM run concurrently, so total import time is
-bounded by the slowest disk instead of the sum of them.
-
-A clean Ubuntu 24.04.5 controller migrated a one-disk, 40 GiB UEFI Ubuntu
-26.04.1 VM to GCP. The 1.65 GiB stream-optimized VMDK uploaded to the configured
-Cloud Storage bucket at 3.5 MiB/s; M2VM OS adaptation and image creation
-succeeded, and the controller removed the staging object, local export,
-snapshot, and clone after cataloging the image.
-
-#### GCP Launch
-
-`playbooks/launch-gcp-instance.yml` launches a Compute Engine instance from
-the newest completed GCP migration and attaches persistent disks made from
-the data images.
-
-```bash
-./bin/run-playbook.sh playbooks/launch-gcp-instance.yml \
-  -e vm_name=my-vm \
-  -e gcp_target_project=my-project-a \
-  -e gcp_zone=us-central1-a \
-  -e gcp_machine_type=e2-standard-2 \
-  -e gcp_network=default
-```
-
-GCP uses the selected VPC network and subnet. It has no named key-pair
-resource: project or instance `ssh-keys` metadata supplies access. Migrated
-images do not have `google-guest-agent`, so use ordinary `ssh` with an
-inherited key; `gcloud compute ssh` and the Console's temporary-key flow
-depend on that agent. A launch retry reuses an instance only when its metadata
-identifies the same VM and migration and its disks come from the selected
-images. Launch accepts `gcp_disk_type` and network and tag options.
-The wrapper reads `GCP_TARGET_PROJECT`, `GCP_SUBNETWORK` and `GCP_TAGS_JSON` (a
-JSON array of network tags).
-Set `GCP_NO_ADDRESS=true` to create an instance without an external IP. The
-clean-controller test launched `gcp-controller-test-ubuntu26041` as an
-`e2-standard-2` in `us-central1-a` this way; its private IP was `10.128.0.17`,
-and the serial console reached the Ubuntu login prompt. SSH was not tested from
-the controller because the instance has no external IP.
-
-#### GCP SSH Access
-
-Register the standing key once at project level, the way an AWS or OpenStack
-keypair is registered once in the cloud. Every launched instance then inherits
-it and no per-launch key argument is needed:
-
-```bash
-# merge, do not overwrite: this metadata key holds every project SSH key.
-# Each step runs only if the previous one succeeded, and nothing is written
-# unless the existing keys were read back one per line.
-keys=$(mktemp) &&
-gcloud compute project-info describe --project=my-project \
-  --format='value(commonInstanceMetadata.items.filter("key:ssh-keys").extract(value).flatten())' \
-  > "$keys" &&
-grep -q . "$keys" &&
-printf 'cloudinit:%s\n' "$(cat ~/.ssh/id_ed25519.pub)" >> "$keys" &&
-gcloud compute project-info add-metadata --project=my-project \
-  --metadata-from-file=ssh-keys="$keys"
-rm -f "$keys"
-```
-
-Keep `.flatten()`: without it `value()` prints the key list as one
-Python-style `['...\n...']` string, and writing that back replaces every
-project key, including the `cloudinit:` entry, with an unusable value. The
-`grep -q .` guard stops when no existing keys were read (a failed or
-mistyped `describe`). Only if the project genuinely has no `ssh-keys` yet,
-write the new `cloudinit:` line to the file yourself and run just the
-`add-metadata` step.
-
-The `cloudinit:` prefix is required. cloud-init's GCE datasource accepts only
-`cloudinit` or the image's own default user (`debian`, `ubuntu`) and **silently
-discards every other prefix**, including `root`, leaving an empty
-`authorized_keys` with no error anywhere but the serial console. Entries for
-real usernames are honored only by `google-guest-agent`, which migrated images
-do not have. Where the image sets `disable_root: false`, cloud-init applies the
-key to both the image's default user and `root`.
-
-To add an extra key for a single launch, set `gcp_ssh_public_key_file`
-(wrapper: `GCP_SSH_KEY_FILE`) to a public key file. It is injected as instance
-`ssh-keys` metadata and cloud-init merges it with the inherited project keys
-rather than replacing them. `gcp_ssh_user` (wrapper: `GCP_SSH_USER`) sets its
-prefix and defaults to `cloudinit`.
-
-Keys are applied by cloud-init's `cc_ssh` module, whose frequency is
-`PER_INSTANCE`. Changing project or instance metadata therefore has no effect
-on an already-launched instance, and neither does a reboot or `instances reset`:
-the instance ID is unchanged, so the module does not re-run. To change an
-instance's keys, delete and relaunch it.
-
 ## Operate and Recover
 
 ### Running Playbooks and Wrappers
 
-Credentials (vCenter host/user/password, OpenStack authentication, AWS
-region/bucket/role and access keys, and GCP project/service-account settings)
+Credentials (vCenter host/user/password, AWS region/bucket/role and access
+keys, GCP project/service-account settings, and OpenStack authentication)
 come from the encrypted runtime vaults - see
 [Secrets](#secrets). Extra variables passed with `-e` override vault values;
 for example, `-e aws_region=...` still works. Select a vCenter with
@@ -1294,8 +1294,8 @@ Nothing runs until you confirm at the end.
 | `bin/migrate-openstack-dialog.sh`      | `bin/migrate-openstack-vm.sh`      |
 | `bin/migrate-openstack-vddk-dialog.sh` | `bin/migrate-openstack-vm-vddk.sh` |
 | `bin/launch-aws-dialog.sh`             | `bin/launch-aws-instance.sh`       |
-| `bin/launch-gcp-dialog.sh`             | `bin/launch-gcp-instance.sh`       |
 | `bin/launch-azure-dialog.sh`           | `bin/launch-azure-instance.sh`     |
+| `bin/launch-gcp-dialog.sh`             | `bin/launch-gcp-instance.sh`       |
 | `bin/launch-openstack-dialog.sh`       | `bin/launch-openstack-instance.sh` |
 
 Requirements: `dialog` (preferred) or `whiptail`, and an interactive terminal
@@ -1362,7 +1362,7 @@ examples are collected in
 
 ### Resume and Discard
 
-After an Azure, OpenStack, or GCP OVF run fails, the package, manifest,
+After an Azure, GCP, or OpenStack OVF run fails, the package, manifest,
 and referenced VMDKs are retained for resume. Azure also retains staged VHD
 blobs. AWS retains its OVA in S3 according to its existing flow.
 
@@ -1509,7 +1509,7 @@ parameter.
 
 ### Migration Catalog
 
-Every successful AWS, Azure, OpenStack, or GCP migration run appends one record to
+Every successful AWS, Azure, GCP, or OpenStack migration run appends one record to
 `/work/migrate-v2v/catalogs/migration-catalog.json` via
 `bin/append-migration-catalog.py`:
 `vm_name`, source vCenter/datacenter, `clone_name`, `snapshot_name`, the
@@ -1628,7 +1628,7 @@ the prior server and its ports were removed; ports already attached to a
 server cannot be reused, and their MACs remain reserved until the ports are
 deleted.
 
-Every successful AWS, Azure, OpenStack, or GCP launch appends one
+Every successful AWS, Azure, GCP, or OpenStack launch appends one
 record to `/work/migrate-v2v/catalogs/deployment-catalog.json` via
 `bin/append-deployment-catalog.py`. AWS records contain `vm_name`,
 `target_platform`, `ami_id`, the `import_task_id` it came from, `instance_id`,
@@ -1648,7 +1648,7 @@ remaining port IDs as orphans when it removes a deployment whose server is
 already gone. GCP records contain the instance name, project, zone, machine
 type, boot image, attached data-disk names, status, and `launched_at`.
 Deployment `status` is recorded as each cloud reports it, so its casing is
-per platform: OpenStack `ACTIVE`, AWS `running`, Azure and GCP `RUNNING`.
+per platform: AWS `running`, Azure and GCP `RUNNING`, OpenStack `ACTIVE`.
 Only the lowercase `retired` left by older reconciliation runs is shared.
 Compare `status` case-insensitively when filtering across platforms.
 Same accumulate-not-supersede reasoning as the migration catalog - the same
@@ -1666,8 +1666,8 @@ first. The scripts do not delete cloud resources.
 | ----------- | ------------------------------------ | ------------------ |
 | AWS         | `bin/reconcile-catalog-aws.py`       | Account and region |
 | Azure       | `bin/reconcile-catalog-azure.py`     | Subscription       |
-| OpenStack   | `bin/reconcile-catalog-openstack.py` | Project and region |
 | GCP         | `bin/reconcile-catalog-gcp.py`       | Project            |
+| OpenStack   | `bin/reconcile-catalog-openstack.py` | Project and region |
 
 #### AWS Catalog Reconciliation
 
@@ -1917,7 +1917,7 @@ The tree shows the main files, not every one.
 The migration playbooks are thin target entry points. Shared vSphere
 preflight, snapshot, clone, export, manifest inspection, catalog append, and
 cleanup tasks live under `playbooks/tasks/migration/common/`. Target-specific
-tasks live under the sibling `aws/`, `azure/`, `openstack/`, and `gcp/`
+tasks live under the sibling `aws/`, `azure/`, `gcp/`, and `openstack/`
 directories. Shared defaults are in `playbooks/vars/migration-common.yml`.
 
 ### Development and Validation

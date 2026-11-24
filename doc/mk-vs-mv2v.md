@@ -10,14 +10,14 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 
 - **Migratekit:** Near-zero-downtime VMware-to-OpenStack migration, using
   online sync cycles followed by a cutover. ([README: how it works][mk-how])
-- **migrate-v2v:** Migrate a vSphere VM to AWS, Azure, OpenStack, or GCP. The
-  standard workflow exports disk artifacts; OpenStack and Azure also have
+- **migrate-v2v:** Migrate a vSphere VM to AWS, Azure, GCP, or OpenStack. The
+  standard workflow exports disk artifacts; Azure and OpenStack also have
   datastore-direct streaming workflows. ([README][mv-readme])
 
 ## Destination support
 
 - **Migratekit:** OpenStack only. ([README][mk])
-- **migrate-v2v:** AWS, Azure, OpenStack, and GCP, with provider-specific
+- **migrate-v2v:** AWS, Azure, GCP, and OpenStack, with provider-specific
   migration and launch playbooks. ([README: flow and project
   structure][mv-flow])
 

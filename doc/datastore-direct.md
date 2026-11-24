@@ -1,17 +1,18 @@
-# Datastore-Direct Migration (OpenStack and Azure)
+# Datastore-Direct Migration (Azure and OpenStack)
 
 <!-- markdownlint-disable MD013 -->
 
-`playbooks/migrate-openstack-vm-vddk.yml` is a second way to migrate a running
-vSphere VM to OpenStack. It does not clone the VM and does not export an OVF/OVA
-package. It takes a quiesced snapshot of the source VM, streams each frozen disk
-straight from the datastore, converts it to QCOW2, and uploads it to Glance. The
-existing `migrate-openstack-vm.yml` is unchanged; the two methods share the
-catalog format, so launch, lookup, and reconcile work on either.
-
-`playbooks/migrate-azure-vm-vddk.yml` does the same for Azure; see
-[Azure](#azure) below. Everything in this document applies to both targets
-unless that section says otherwise.
+The datastore-direct playbooks are a second way to migrate a running vSphere VM
+to [Azure](#azure) or [OpenStack](#openstack-usage). They do not clone the VM and
+do not export an OVF/OVA package. Each takes a quiesced snapshot of the source
+VM and streams each frozen disk straight from the datastore. For Azure,
+`playbooks/migrate-azure-vm-vddk.yml` converts each disk to a fixed VHD and
+uploads it as a page blob. For OpenStack,
+`playbooks/migrate-openstack-vm-vddk.yml` converts each disk to QCOW2 and
+uploads it to Glance. The existing `migrate-azure-vm.yml` and
+`migrate-openstack-vm.yml` are unchanged; the two methods share the catalog
+format, so launch, lookup, and reconcile work on either. Everything in this
+document applies to both targets unless a section says otherwise.
 
 ## How it works
 
@@ -148,6 +149,55 @@ compression runs after the in-place pass, because the pass rewrites clusters.
   use a stand-in `virt-v2v-in-place`; a Linux guest that lacks virtio still
   needs an end-to-end check.
 
+## Azure
+
+`playbooks/migrate-azure-vm-vddk.yml` (wrapper `bin/migrate-azure-vm-vddk.sh`)
+uses the same snapshot, manifest, backends, resume, and discard as
+the OpenStack playbook ([OpenStack Usage](#openstack-usage)). Only the per-disk output differs: `qemu-img`
+writes each stream as the fixed-format VHD Azure requires (`-O vpc -o
+subformat=fixed,force_size=on`, so the virtual size stays exact), which
+is uploaded as a page blob. The boot disk becomes a managed image and data
+disks become managed snapshots, as in `migrate-azure-vm.yml`.
+
+```text
+nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
+  → qemu-img convert -f raw -O vpc (fixed)  disks/disk-N.vhd
+  → page blob in the staging container → boot image or data snapshot
+```
+
+```bash
+VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/migrate-azure-vm-vddk.sh
+BACKEND=curl VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh            # force a backend
+DISCARD_RUN_ID=<id> VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh     # give up on a failed run
+./bin/migrate-azure-vddk-dialog.sh                                   # guided front end
+```
+
+The wrapper takes the same environment variables as `bin/migrate-azure-vm.sh`
+plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`;
+there is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest
+records the source firmware, so the image's Hyper-V generation (V1 for BIOS,
+V2 for UEFI) follows the VM as with the OVF method. A discard removes the run's
+snapshot, run directory, staged blobs, managed image, and data snapshots, found
+by the run-ID-derived names. A fixed VHD is staged at the disk's full virtual
+size, written sparse, so it costs only the used blocks on the controller.
+
+The Azure path shares `initialize`, `prepare-disks`, `import`, and
+`import-disk` with the OVF method; `export_format: datastore` selects
+`azure/convert-disk-vddk.yml` instead of `convert-disk.yml` and skips the OVF
+VMDK checks. Tested end to end with the `vddk` backend on the same two-disk
+Debian VM (UEFI, so a V2 image); resume, discard, and the `curl` backend have
+not been exercised against Azure.
+
+A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
+26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
+files were removed after import. A `Standard_B2s_v2` VM launched without
+a public IP, and its serial console reached the guest login prompt. At the
+time of that test, Azure still reported `provisioningState=Creating` after
+13 minutes, so the launch play was still waiting and no deployment catalog
+entry had been written. This confirms image import and guest boot, but not
+completed Azure provisioning; check the Azure guest setup requirement in
+the README before treating launch as validated.
+
 ## OpenStack Usage
 
 ```bash
@@ -223,55 +273,6 @@ signalled, so a stale pidfile cannot stop an unrelated process.
 Each disk's nbdkit log is kept in the run directory as `nbdkit-disk-<N>.log`,
 and a failed conversion quotes it, so the failure says why the disk could not
 be read (an untrusted certificate, a wrong URL, a refused login).
-
-## Azure
-
-`playbooks/migrate-azure-vm-vddk.yml` (wrapper `bin/migrate-azure-vm-vddk.sh`)
-uses the same snapshot, manifest, backends, resume, and discard as
-the OpenStack playbook. Only the per-disk output differs: `qemu-img`
-writes each stream as the fixed-format VHD Azure requires (`-O vpc -o
-subformat=fixed,force_size=on`, so the virtual size stays exact), which
-is uploaded as a page blob. The boot disk becomes a managed image and data
-disks become managed snapshots, as in `migrate-azure-vm.yml`.
-
-```text
-nbdkit -r  vddk | curl   → read-only NBD export on a Unix socket
-  → qemu-img convert -f raw -O vpc (fixed)  disks/disk-N.vhd
-  → page blob in the staging container → boot image or data snapshot
-```
-
-```bash
-VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/migrate-azure-vm-vddk.sh
-BACKEND=curl VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh            # force a backend
-DISCARD_RUN_ID=<id> VM_NAME=my-vm ./bin/migrate-azure-vm-vddk.sh     # give up on a failed run
-./bin/migrate-azure-vddk-dialog.sh                                   # guided front end
-```
-
-The wrapper takes the same environment variables as `bin/migrate-azure-vm.sh`
-plus `BACKEND`, `REQUIRE_CBT`, `DISCARD_RUN_ID`, and `VCENTER_CA_BUNDLE`;
-there is no `COMPRESS` (Azure needs an uncompressed fixed VHD). The manifest
-records the source firmware, so the image's Hyper-V generation (V1 for BIOS,
-V2 for UEFI) follows the VM as with the OVF method. A discard removes the run's
-snapshot, run directory, staged blobs, managed image, and data snapshots, found
-by the run-ID-derived names. A fixed VHD is staged at the disk's full virtual
-size, written sparse, so it costs only the used blocks on the controller.
-
-The Azure path shares `initialize`, `prepare-disks`, `import`, and
-`import-disk` with the OVF method; `export_format: datastore` selects
-`azure/convert-disk-vddk.yml` instead of `convert-disk.yml` and skips the OVF
-VMDK checks. Tested end to end with the `vddk` backend on the same two-disk
-Debian VM (UEFI, so a V2 image); resume, discard, and the `curl` backend have
-not been exercised against Azure.
-
-A clean Ubuntu 24.04.5 controller also migrated a one-disk, 40 GiB UEFI Ubuntu
-26.04.1 VM with VDDK to a V2 Azure image. The snapshot and controller staging
-files were removed after import. A `Standard_B2s_v2` VM launched without
-a public IP, and its serial console reached the guest login prompt. At the
-time of that test, Azure still reported `provisioningState=Creating` after
-13 minutes, so the launch play was still waiting and no deployment catalog
-entry had been written. This confirms image import and guest boot, but not
-completed Azure provisioning; check the Azure guest setup requirement in
-the README before treating launch as validated.
 
 ## Requirements
 
@@ -394,8 +395,12 @@ implemented: they would also need the snapshot's change ID saved in the catalog.
 
 | File                                                                                                      | Role                                                                                    |
 | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `playbooks/migrate-azure-vm-vddk.yml`, `bin/migrate-azure-vm-vddk.sh`, `bin/migrate-azure-vddk-dialog.sh` | Azure entry playbook, wrapper, and guided front end                                     |
+| `playbooks/tasks/migration/azure/{preflight,convert-disk,discard}-vddk.yml`                               | Azure preflight, per-disk stream to fixed VHD, and discard lookup                       |
 | `playbooks/migrate-openstack-vm-vddk.yml`                                                                 | entry playbook and settings                                                             |
 | `bin/migrate-openstack-vm-vddk.sh`, `bin/migrate-openstack-vddk-dialog.sh`                                | wrapper and guided front end                                                            |
+| `playbooks/tasks/migration/openstack/{initialize,preflight,import,import-disk,convert-disk}-vddk.yml`     | OpenStack per-disk stream, convert, and upload                                          |
+| `playbooks/tasks/migration/openstack/guest-convert*-vddk.yml`                                             | optional virt-v2v-in-place setup, pre-snapshot checks, disk conversion, and compression |
 | `bin/inspect-vm.py`                                                                                       | builds the disk manifest from `govc vm.info -json`; refuses unsupported disks           |
 | `bin/enable-cbt.py`                                                                                       | optional CBT helper                                                                     |
 | `playbooks/tasks/migration/common/prepare-source-manifest.yml`                                            | snapshot and manifest                                                                   |
@@ -403,10 +408,6 @@ implemented: they would also need the snapshot's change ID saved in the catalog.
 | `playbooks/tasks/migration/common/{preflight,resume,cleanup}-vddk.yml`                                    | copies of the OVF method's tasks without the OVF/clone assumptions                      |
 | `playbooks/tasks/migration/common/check-curl-disks-vddk.yml`                                              | the `curl` backend's disk checks, run before the snapshot and again on a `curl` resume  |
 | `playbooks/tasks/migration/common/{select-backend,stop-streams}-vddk.yml`                                 | nbdkit and backend choice; stopping streams after a failure                             |
-| `playbooks/tasks/migration/openstack/{initialize,preflight,import,import-disk,convert-disk}-vddk.yml`     | OpenStack per-disk stream, convert, and upload                                          |
-| `playbooks/tasks/migration/openstack/guest-convert*-vddk.yml`                                             | optional virt-v2v-in-place setup, pre-snapshot checks, disk conversion, and compression |
-| `playbooks/migrate-azure-vm-vddk.yml`, `bin/migrate-azure-vm-vddk.sh`, `bin/migrate-azure-vddk-dialog.sh` | Azure entry playbook, wrapper, and guided front end                                     |
-| `playbooks/tasks/migration/azure/{preflight,convert-disk,discard}-vddk.yml`                               | Azure preflight, per-disk stream to fixed VHD, and discard lookup                       |
 
 The `-vddk` task files are deliberate copies of their OVF counterparts, so each
 method can change without touching the other. A fix to the shared upload or

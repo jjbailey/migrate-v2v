@@ -29,8 +29,8 @@ requirements, Ansible collections, govc, AWS CLI, and Google Cloud CLI.
 - **CA trust and download tools:** `ca-certificates` and `curl`. GnuPG and
   `unzip` are used to verify and install AWS CLI during the image build, then
   removed from the final image.
-- **Disk conversion:** `qemu-utils` (`qemu-img`) for OpenStack and Azure.
-- **Datastore-direct:** `nbdkit` for OpenStack and Azure direct workflows.
+- **Disk conversion:** `qemu-utils` (`qemu-img`) for Azure and OpenStack.
+- **Datastore-direct:** `nbdkit` for Azure and OpenStack direct workflows.
 - **Guest conversion:** the image includes `virt-v2v`, `libguestfs-tools`, and
   `rhsrvany`. It stores the fixed appliance as a sparse-aware xz archive and
   unpacks it to `/tmp/libguestfs-appliance` at container startup. The build

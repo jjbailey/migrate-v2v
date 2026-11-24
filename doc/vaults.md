@@ -89,6 +89,43 @@ Without exported AWS credentials, `bin/reconcile-catalog-aws.py` uses the
 entry whose key or `aws_account_id` matches the catalog's account (see
 [Credentials for the bin/ Tools](#credentials-for-the-bin-tools)).
 
+## Azure Vault
+
+azure.yml
+
+```yaml
+azure_projects:
+  my-subscription:
+    tenant_id: "00000000-0000-0000-0000-000000000000"
+    subscription_id: "11111111-1111-1111-1111-111111111111"
+    client_id: "22222222-2222-2222-2222-222222222222"
+    client_secret: "client-secret"
+    resource_group: "my-rg"
+    location: "westus2"
+    storage_account: "mystorageaccount"
+    # Optional: storage_container (defaults to migrate-v2v-images)
+```
+
+Each entry holds one service principal and where its migration lands: the
+subscription the principal works in, the resource group the managed images
+are created in (it must already exist), the location for images and the
+staging storage account, and the storage account VHDs are staged in (3-24
+lowercase letters and digits; created when missing, used as-is when it
+exists). Select a subscription with `-e
+azure_target_project=<vault-key-or-subscription-id>`; a single-entry map is
+auto-selected. This is the same file and schema `dib7` uses, so the two
+repositories can share one vault.
+
+Credentials reach the `azure.azcollection` modules through `module_defaults`,
+not the environment, so the secret never appears in `ps` during an upload.
+`bin/reconcile-catalog-azure.py` and `bin/azure-project-facts.py` decrypt
+this vault and use the matching entry's service principal, so a personal
+`az login` (which Entra ID security defaults may block) is not needed.
+Exported `AZURE_TENANT`/`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
+`AZURE_SECRET`/`AZURE_CLIENT_SECRET` override the vault for
+`reconcile-catalog-azure.py`; `az login` is tried only when neither has
+credentials for the subscription.
+
 ## GCP Vault
 
 gcp.yml
@@ -230,40 +267,3 @@ entry; unset values fall back to the inventory, ssh-agent, or `~/.ssh/config`.
 Each migration catalog row records the selected vCenter key as
 `source_vcenter_key` (or `legacy` for the flat mapping) alongside
 `source_vcenter`, so a row names the vCenter it came from.
-
-## Azure Vault
-
-azure.yml
-
-```yaml
-azure_projects:
-  my-subscription:
-    tenant_id: "00000000-0000-0000-0000-000000000000"
-    subscription_id: "11111111-1111-1111-1111-111111111111"
-    client_id: "22222222-2222-2222-2222-222222222222"
-    client_secret: "client-secret"
-    resource_group: "my-rg"
-    location: "westus2"
-    storage_account: "mystorageaccount"
-    # Optional: storage_container (defaults to migrate-v2v-images)
-```
-
-Each entry holds one service principal and where its migration lands: the
-subscription the principal works in, the resource group the managed images
-are created in (it must already exist), the location for images and the
-staging storage account, and the storage account VHDs are staged in (3-24
-lowercase letters and digits; created when missing, used as-is when it
-exists). Select a subscription with `-e
-azure_target_project=<vault-key-or-subscription-id>`; a single-entry map is
-auto-selected. This is the same file and schema `dib7` uses, so the two
-repositories can share one vault.
-
-Credentials reach the `azure.azcollection` modules through `module_defaults`,
-not the environment, so the secret never appears in `ps` during an upload.
-`bin/reconcile-catalog-azure.py` and `bin/azure-project-facts.py` decrypt
-this vault and use the matching entry's service principal, so a personal
-`az login` (which Entra ID security defaults may block) is not needed.
-Exported `AZURE_TENANT`/`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and
-`AZURE_SECRET`/`AZURE_CLIENT_SECRET` override the vault for
-`reconcile-catalog-azure.py`; `az login` is tried only when neither has
-credentials for the subscription.
