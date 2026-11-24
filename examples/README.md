@@ -20,6 +20,15 @@ Prerequisites for every example:
 
 ---
 
+## Docker Compose install
+
+For a first-time web controller install on a LAN host, run
+`examples/compose-v2v.sh`. It builds the image, adds the `operator` account,
+and starts the stack. See [web/docker.md](../web/docker.md#setup) for the steps
+it automates.
+
+---
+
 ## OpenStack Launch Matrix
 
 At the playbook and environment-variable wrapper layers, OpenStack networking

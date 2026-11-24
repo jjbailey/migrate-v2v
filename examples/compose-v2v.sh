@@ -10,6 +10,12 @@
 #   (if VAULT_PASSWORD is unset and stdin is a terminal, you are prompted)
 # refuses to overwrite ~/.dib-vault-pass or web/.env if they exist;
 # set FORCE=1 to overwrite them.
+#
+# this is a LAN install: it detects the host IPv4 address, sets WEB_ADDRESS to
+# it, and always uses web/compose.lan.yaml.
+# it creates the artifact root (ARTIFACT_ROOT, default /work/migrate-v2v)
+# owned by the invoking user and sets HOST_UID/HOST_GID from that user.
+# the encrypted vaults must already be in $ARTIFACT_ROOT/vaults.
 
 set -euo pipefail
 
@@ -44,7 +50,18 @@ fi
 (umask 077; printf '%s\n' "$VAULT_PASSWORD" > "$VAULT_PASS_FILE")
 chmod 600 "$VAULT_PASS_FILE"
 
-sed "s,^\(VAULT_PASSWORD_FILE_HOST\)=.*,\1=$VAULT_PASS_FILE," web/.env.example > web/.env
+ARTIFACT_ROOT=${ARTIFACT_ROOT:-/work/migrate-v2v}
+sudo install -d -o "$(id -u)" -g "$(id -g)" -m 0750 "$ARTIFACT_ROOT"
+mkdir -p "$ARTIFACT_ROOT/vaults"
+[ -n "$(ls -A "$ARTIFACT_ROOT/vaults")" ] ||
+    echo "WARNING: $ARTIFACT_ROOT/vaults is empty; copy the encrypted vaults there" >&2
+
+sed -e "s,^\(VAULT_PASSWORD_FILE_HOST\)=.*,\1=$VAULT_PASS_FILE," \
+    -e "s,^\(ARTIFACT_ROOT_HOST\)=.*,\1=$ARTIFACT_ROOT," \
+    -e "s/^\(HOST_UID\)=.*/\1=$(id -u)/" \
+    -e "s/^\(HOST_GID\)=.*/\1=$(id -g)/" \
+    web/.env.example > web/.env
+chmod 600 web/.env
 
 WEB_ADDRESS=$(ip -4 route get 1.1.1.1 2> /dev/null |
     awk '{for (i=1 ; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}') || true
@@ -58,6 +75,6 @@ compose_lan=("${compose[@]}" -f web/compose.lan.yaml)
 
 "${compose_lan[@]}" run --rm --no-deps controller python3 web/app.py user add operator
 
-"${compose_lan[@]}" up -d --force-recreate
+"${compose_lan[@]}" up -d
 
 echo "Done. WEB_ADDRESS=$WEB_ADDRESS (see web/.env)"
