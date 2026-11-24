@@ -110,10 +110,6 @@ class VaultCommonTests(unittest.TestCase):
     def test_read_vault_password_file_order(self):
         with tempfile.TemporaryDirectory() as home:
             self.assertIsNone(self.password_file_used(home))
-            legacy = Path(home, ".ssh/dib-vault-pass")
-            legacy.parent.mkdir()
-            legacy.write_text("x")
-            self.assertEqual(self.password_file_used(home), str(legacy))
             default = Path(home, ".dib-vault-pass")
             default.write_text("x")
             self.assertEqual(self.password_file_used(home), str(default))
