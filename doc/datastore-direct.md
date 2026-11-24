@@ -324,12 +324,14 @@ sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --va
 ```
 
 The migration preflight installs OpenVDDK automatically when nbdkit's VDDK
-plugin is present but cannot load a VixDiskLib. It downloads the pinned 0.7.5
-user kit from the [official GitHub release](https://github.com/openvddk/openvddk/releases/tag/v0.7.5),
-checks its SHA-256, retains the kit's license and notice files, and installs it
-under `/work/migrate-v2v/tools/openvddk` by default. A host and a container can
-share that install through the existing `/work/migrate-v2v` bind mount. The kit
-is not stored in this repository or included in a container image. Set
+plugin is present but cannot load a VixDiskLib. It downloads the fixed-name
+runtime kit from the [official latest release asset](https://github.com/openvddk/openvddk/releases/latest/download/openvddk-runtime.tar.gz),
+checks its SHA-256 against the pinned 0.7.5 kit, retains the kit's license and
+notice files, and installs it under `/work/migrate-v2v/tools/openvddk` by
+default. If upstream moves `latest` to a different kit, the checksum check
+fails until the new version and checksum are reviewed. A host and a container
+can share that install through the existing `/work/migrate-v2v` bind mount. The
+kit is not stored in this repository or included in a container image. Set
 `OPENVDDK_INSTALL_DIR` to choose a different writable location, or
 `OPENVDDK_ARCHIVE` to install from a previously downloaded kit.
 The installer never replaces a non-empty install directory. To upgrade from an
@@ -434,7 +436,7 @@ zeros were still read.
 and `discard_run_id` paths are implemented and the backend used by a
 run is pinned in its manifest so a resume cannot silently read a disk
 differently, but a resumed datastore-direct run has not been exercised
-against a real vCenter.  `tests/test_vddk_resume.py` runs the real
+against a real vCenter. `tests/test_vddk_resume.py` runs the real
 resume tasks against a stub `govc` and a fake Glance: a failed upload
 followed by a resume, snapshot and manifest checks, discard, and backend
 pinning. `tests/test_vddk_resume_azure.py` does the same for the Azure

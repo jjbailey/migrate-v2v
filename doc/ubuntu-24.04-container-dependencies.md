@@ -117,9 +117,10 @@ when this recipe was added.
   workflows. Preserve the external download and persistent install model.
 - **OpenVDDK:** Keep its user kit out of the image and install it under the
   shared `/work/migrate-v2v/tools/` mount with `bin/install-openvddk.py`, which
-  pins release 0.7.5 and verifies its SHA-256. A future renamed or newer
-  release would need its archive, checksum, library SONAME, and any changed
-  configuration interface re-checked before the pin moves.
+  downloads the upstream `latest` runtime asset and verifies it against the
+  pinned 0.7.5 SHA-256. If upstream moves `latest`, the new archive, checksum,
+  library SONAME, and any changed configuration interface must be re-checked
+  before updating the pin.
 - **`govc`:** Build `govc` from the pinned `v0.33.0` Go module. The Go module
   checksum database verifies downloaded source.
 - **AWS CLI v2:** Install version `2.35.21` from the versioned Linux archive;

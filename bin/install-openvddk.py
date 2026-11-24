@@ -25,11 +25,10 @@ import urllib.request
 from pathlib import Path, PurePosixPath
 
 VERSION = "0.7.5"
-COMMIT = "d7262efa169c"
-FILENAME = f"openvddk-runtime-{VERSION}-{COMMIT}.tar.gz"
+FILENAME = "openvddk-runtime.tar.gz"
 DOWNLOAD_URL = (
-    "https://github.com/openvddk/openvddk/releases/download/"
-    f"v{VERSION}/{FILENAME}"
+    "https://github.com/openvddk/openvddk/releases/latest/download/"
+    + FILENAME
 )
 ARCHIVE_SHA256 = (
     "69d835a52dd88ac89e5ab55140476e3f4b6b74292eb7a589cbe3214445aae59e"
