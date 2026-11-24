@@ -134,15 +134,15 @@ the same path so artifacts remain available for resume.
   plugin is the fallback backend. The `vddk` plugin is an additional
   requirement; some nbdkit packages, including Ubuntu's, omit it, and the doc
   shows how to build it. When the plugin is present but no disk library loads,
-  preflight downloads OpenVDDK's fixed-name `latest` runtime asset, currently
-  pinned to version 0.7.5 by its SHA-256 check, to
+  preflight downloads OpenVDDK's fixed-name `latest` runtime asset and checks it
+  against the SHA-256 published with that release, to
   `/work/migrate-v2v/tools/openvddk` by default. This writable path works on a
   host or in a container using the `/work/migrate-v2v` bind mount; the kit is
   not bundled in the repository or container image. VDDK skips a thin disk's
   unallocated space and can read a powered-on VM on VMFS. OpenVDDK is an
   independent, read-only replacement for VMware's disk library; VMware's own
   VDDK also works where you are licensed for it. Run
-  `./bin/install-openvddk.py` to install the pinned kit ahead of time; the
+  `./bin/install-openvddk.py` to install the latest kit ahead of time; the
   same script runs automatically from preflight when needed. See
   [Installing the vddk backend](doc/datastore-direct.md#installing-the-vddk-backend)
   for `OPENVDDK_INSTALL_DIR` and `OPENVDDK_ARCHIVE` options.
@@ -1870,7 +1870,7 @@ migrate-v2v/
 │   ├── gcp-project-facts.py     # Zones, machine types, networks, subnetworks for one GCP project
 │   ├── inspect-ova.py           # OVA inspection
 │   ├── inspect-vm.py            # Disk manifest from a source VM (datastore-direct)
-│   ├── install-openvddk.py      # Installs the pinned OpenVDDK user kit on demand
+│   ├── install-openvddk.py      # Installs the latest OpenVDDK runtime kit on demand
 │   ├── install-ovftool.py       # Downloads and installs VMware OVF Tool 5.1.0
 │   ├── launch-{aws,azure,gcp,openstack}-instance.sh  # Environment-aware launch wrappers
 │   ├── launch-*-dialog.sh       # Interactive front ends for the launch wrappers

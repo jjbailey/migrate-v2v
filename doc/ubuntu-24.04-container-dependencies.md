@@ -117,10 +117,10 @@ when this recipe was added.
   workflows. Preserve the external download and persistent install model.
 - **OpenVDDK:** Keep its user kit out of the image and install it under the
   shared `/work/migrate-v2v/tools/` mount with `bin/install-openvddk.py`, which
-  downloads the upstream `latest` runtime asset and verifies it against the
-  pinned 0.7.5 SHA-256. If upstream moves `latest`, the new archive, checksum,
-  library SONAME, and any changed configuration interface must be re-checked
-  before updating the pin.
+  downloads the upstream `latest` runtime asset and checks it against the
+  SHA-256 published in that release's `SHA256SUMS`. The installer expects the
+  VixDiskLib 8 SONAME and the runtime kit's `lib`/`lib64` layout; changes to
+  those interfaces require an installer update.
 - **`govc`:** Build `govc` from the pinned `v0.33.0` Go module. The Go module
   checksum database verifies downloaded source.
 - **AWS CLI v2:** Install version `2.35.21` from the versioned Linux archive;
@@ -140,9 +140,10 @@ dependencies do not enter the final image. The OpenVDDK user kit remains a
 separate, checksum-verified on-demand install under the shared artifact root.
 
 OpenVDDK is a separate runtime library loaded by this plugin. It should not be
-compiled into or copied into the image. If the pinned kit changes,
-check that its library still exports the VixDiskLib ABI and expected SONAME;
-if those change, the plugin or installer may need an update as well.
+compiled into or copied into the image. Since the installer follows the latest
+release, check that a new kit still exports the VixDiskLib ABI and supports the
+`OpenVDDK.nbd.sessions` setting used by datastore-direct; changes to these
+interfaces may require a plugin or installer update.
 
 ## Runtime Inputs
 

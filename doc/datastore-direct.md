@@ -326,18 +326,20 @@ sudo install -m 0755 plugins/vddk/.libs/nbdkit-vddk-plugin.so "$(pkg-config --va
 The migration preflight installs OpenVDDK automatically when nbdkit's VDDK
 plugin is present but cannot load a VixDiskLib. It downloads the fixed-name
 runtime kit from the [official latest release asset](https://github.com/openvddk/openvddk/releases/latest/download/openvddk-runtime.tar.gz),
-checks its SHA-256 against the pinned 0.7.5 kit, retains the kit's license and
-notice files, and installs it under `/work/migrate-v2v/tools/openvddk` by
-default. If upstream moves `latest` to a different kit, the checksum check
-fails until the new version and checksum are reviewed. A host and a container
-can share that install through the existing `/work/migrate-v2v` bind mount. The
-kit is not stored in this repository or included in a container image. Set
-`OPENVDDK_INSTALL_DIR` to choose a different writable location, or
-`OPENVDDK_ARCHIVE` to install from a previously downloaded kit.
+downloads that release's `SHA256SUMS` file, and checks the archive against its
+published hash. This follows upstream's latest version without a version
+constant in the installer. The installer retains the kit's license and notice
+files and installs it under `/work/migrate-v2v/tools/openvddk` by default. A
+host and a container can share that install through the existing
+`/work/migrate-v2v` bind mount. The kit is not stored in this repository or
+included in a container image. Set `OPENVDDK_INSTALL_DIR` to choose a different
+writable location, or `OPENVDDK_ARCHIVE` to install a previously downloaded
+copy of the current latest runtime asset; the installer still fetches the
+release checksum manifest for verification.
 The installer never replaces a non-empty install directory. To upgrade from an
-earlier kit (such as 0.7.4), move or remove the old directory first, or point
+existing kit, move or remove the old directory first, or point
 `OPENVDDK_INSTALL_DIR` at a new one.
-The pinned kit supports Linux x86-64 with glibc 2.28 or newer.
+The latest kit supports Linux x86-64 with glibc 2.28 or newer.
 `vddk_backend=auto` and `vddk_backend=vddk` may install it; explicitly selecting
 `vddk_backend=curl` skips the VDDK probe and download.
 
