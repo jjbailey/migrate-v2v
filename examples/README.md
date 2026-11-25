@@ -20,6 +20,75 @@ Prerequisites for every example:
 
 ---
 
+## Docker Compose install
+
+For a first-time web controller install on a LAN host, run
+`examples/compose-v2v.sh`. It builds the image, adds the `operator` account,
+and starts the stack. See [web/docker.md](../web/docker.md#setup) for the steps
+it automates.
+
+---
+
+## AWS
+
+```bash
+# One-time per account/region (bucket + vmimport role)
+./bin/run-playbook.sh playbooks/bootstrap-aws-import.yml
+
+# Migrate
+VM_NAME=my-vm VCENTER_DATACENTER=Datacenter ./bin/migrate-aws-vm.sh
+
+./bin/run-playbook.sh playbooks/migrate-aws-vm.yml \
+  -e vm_name=my-vm \
+  -e datacenter=Datacenter
+
+# Launch (guided: ./bin/launch-aws-dialog.sh)
+VM_NAME=my-vm \
+  AWS_SUBNET_ID=subnet-0123456789abcdef0 \
+  AWS_SECURITY_GROUPS_JSON='["sg-0123456789abcdef0"]' \
+  AWS_KEY_NAME=my-ssh-key \
+  ./bin/launch-aws-instance.sh
+
+./bin/run-playbook.sh playbooks/launch-aws-instance.yml \
+  -e vm_name=my-vm \
+  -e vpc_subnet_id=subnet-0123456789abcdef0 \
+  -e '{"security_groups": ["sg-0123456789abcdef0"]}' \
+  -e key_name=my-ssh-key \
+  -e assign_public_ip=true
+```
+
+`AWS_KEY_NAME` defaults to an EC2 key pair named `cloud`, which must already
+exist in the region; the playbook's `key_name` has no default.
+
+---
+
+## GCP
+
+```bash
+# Migrate (M2VM image import; boot disk gets OS adaptation)
+VM_NAME=my-vm VCENTER_DATACENTER=Datacenter ./bin/migrate-gcp-vm.sh
+
+./bin/run-playbook.sh playbooks/migrate-gcp-vm.yml \
+  -e vm_name=my-vm \
+  -e datacenter=Datacenter
+
+# Launch (guided: ./bin/launch-gcp-dialog.sh)
+./bin/run-playbook.sh playbooks/launch-gcp-instance.yml \
+  -e vm_name=my-vm \
+  -e gcp_zone=us-central1-a \
+  -e gcp_machine_type=e2-standard-2 \
+  -e gcp_network=default
+
+# Wrapper
+VM_NAME=my-vm \
+  GCP_ZONE=us-central1-a \
+  GCP_MACHINE_TYPE=e2-standard-2 \
+  GCP_NETWORK=default \
+  ./bin/launch-gcp-instance.sh
+```
+
+---
+
 ## OpenStack Launch Matrix
 
 At the playbook and environment-variable wrapper layers, OpenStack networking
@@ -408,66 +477,6 @@ BACKEND=curl VM_NAME=my-vm ./bin/migrate-openstack-vm-vddk.sh
 DISCARD_RUN_ID=<migration-run-id> VM_NAME=my-vm \
   VSPHERE_TARGET_VCENTER=my-vcenter OS_PROJECT_NAME=my-project-a \
   ./bin/migrate-openstack-vm-vddk.sh
-```
-
----
-
-## AWS
-
-```bash
-# One-time per account/region (bucket + vmimport role)
-./bin/run-playbook.sh playbooks/bootstrap-aws-import.yml
-
-# Migrate
-VM_NAME=my-vm VCENTER_DATACENTER=Datacenter ./bin/migrate-aws-vm.sh
-
-./bin/run-playbook.sh playbooks/migrate-aws-vm.yml \
-  -e vm_name=my-vm \
-  -e datacenter=Datacenter
-
-# Launch (guided: ./bin/launch-aws-dialog.sh)
-VM_NAME=my-vm \
-  AWS_SUBNET_ID=subnet-0123456789abcdef0 \
-  AWS_SECURITY_GROUPS_JSON='["sg-0123456789abcdef0"]' \
-  AWS_KEY_NAME=my-ssh-key \
-  ./bin/launch-aws-instance.sh
-
-./bin/run-playbook.sh playbooks/launch-aws-instance.yml \
-  -e vm_name=my-vm \
-  -e vpc_subnet_id=subnet-0123456789abcdef0 \
-  -e '{"security_groups": ["sg-0123456789abcdef0"]}' \
-  -e key_name=my-ssh-key \
-  -e assign_public_ip=true
-```
-
-`AWS_KEY_NAME` defaults to an EC2 key pair named `cloud`, which must already
-exist in the region; the playbook's `key_name` has no default.
-
----
-
-## GCP
-
-```bash
-# Migrate (M2VM image import; boot disk gets OS adaptation)
-VM_NAME=my-vm VCENTER_DATACENTER=Datacenter ./bin/migrate-gcp-vm.sh
-
-./bin/run-playbook.sh playbooks/migrate-gcp-vm.yml \
-  -e vm_name=my-vm \
-  -e datacenter=Datacenter
-
-# Launch (guided: ./bin/launch-gcp-dialog.sh)
-./bin/run-playbook.sh playbooks/launch-gcp-instance.yml \
-  -e vm_name=my-vm \
-  -e gcp_zone=us-central1-a \
-  -e gcp_machine_type=e2-standard-2 \
-  -e gcp_network=default
-
-# Wrapper
-VM_NAME=my-vm \
-  GCP_ZONE=us-central1-a \
-  GCP_MACHINE_TYPE=e2-standard-2 \
-  GCP_NETWORK=default \
-  ./bin/launch-gcp-instance.sh
 ```
 
 ---

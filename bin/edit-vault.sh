@@ -12,8 +12,7 @@
 #
 # ansible-vault comes from $DIB7_VENV_BIN (default ~/.dib7/bin) if present,
 # else PATH. The vault password is looked up in this order:
-# $VAULT_PASSWORD_FILE, then ~/.dib-vault-pass, then the old
-# ~/.ssh/dib-vault-pass, then a prompt.
+# $VAULT_PASSWORD_FILE, then ~/.dib-vault-pass, then a prompt.
 
 set -eu
 
@@ -51,15 +50,12 @@ mkdir -p -- "$(dirname -- "$VAULT")"
 # Vault password lookup: explicit file, default file, then prompt.
 pass_args=()
 if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ ! -s "$VAULT_PASSWORD_FILE" ] ; then
-    echo "$invoked_as: warning: VAULT_PASSWORD_FILE=$VAULT_PASSWORD_FILE is missing or empty; trying the default password files" >&2
+    echo "$invoked_as: warning: VAULT_PASSWORD_FILE=$VAULT_PASSWORD_FILE is missing or empty; trying the default password file" >&2
 fi
 if [ -n "${VAULT_PASSWORD_FILE:-}" ] && [ -s "$VAULT_PASSWORD_FILE" ] ; then
     pass_args=(--vault-password-file "$VAULT_PASSWORD_FILE")
 elif [ -s "$HOME/.dib-vault-pass" ] ; then
     pass_args=(--vault-password-file "$HOME/.dib-vault-pass")
-elif [ -s "$HOME/.ssh/dib-vault-pass" ] ; then
-    # The old default location, kept as a fallback.
-    pass_args=(--vault-password-file "$HOME/.ssh/dib-vault-pass")
 fi
 
 if [ -s "$VAULT" ] ; then

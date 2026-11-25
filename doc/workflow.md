@@ -2,7 +2,7 @@
 
 <!-- markdownlint-disable MD013 -->
 
-Each standard AWS, Azure, OpenStack, or GCP migration is a separate run that
+Each standard AWS, Azure, GCP, or OpenStack migration is a separate run that
 performs its own VMware snapshot, clone, OVF/OVA export, and manifest
 generation. The target playbooks reuse the same task implementation for those
 stages, then import the run's exported disks using the selected cloud's native
@@ -52,7 +52,7 @@ disks. Launch creates an OS disk and managed data disks from those artifacts.
 The migration catalog records each completed target artifact and its provenance.
 The launch playbooks select the newest completed migration for a VM unless an
 artifact is supplied explicitly. Successful runs remove temporary VMware,
-cloud-staging, and local artifacts. Failed Azure, OpenStack, and GCP runs
+cloud-staging, and local artifacts. Failed Azure, GCP, and OpenStack runs
 retain resumable artifacts; datastore-direct failures also retain the source
 snapshot for resume or discard. Failed AWS imports retain the staged OVA in
 S3 for a follow-up import. Retained artifacts are deleted when

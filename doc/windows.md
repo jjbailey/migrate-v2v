@@ -12,12 +12,12 @@ Everything else about migrating a VM is covered in the
 
 | Target                                                | What this repository does                                                          | Validation status                                                                                     |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| OpenStack, datastore-direct with `GUEST_CONVERT=true` | Injects OpenStack virtio drivers and removes VMware tools (details below).         | Tested with **Windows 10 Pro** only.                                                                  |
-| OpenStack, standard (OVF) path                        | Refuses a Windows guest before taking a snapshot.                                  | Unsupported by this path because it cannot perform the required KVM driver conversion.                |
-| OpenStack, datastore-direct without `GUEST_CONVERT`   | Refuses a Windows guest before taking a snapshot.                                  | Unsupported without guest conversion because the resulting image would lack the required KVM drivers. |
 | AWS                                                   | Passes the OVA to EC2 VM Import/Export; the playbook does not inject `virtio-win`. | End-to-end Windows migration and launch have not been tested in this project.                         |
 | Azure                                                 | Converts and registers the VHD; the playbook does not modify Windows drivers.      | End-to-end Windows migration and launch have not been tested in this project.                         |
 | Google Cloud                                          | Uses Migrate to Virtual Machines image import; it does not inject `virtio-win`.    | End-to-end Windows migration and launch have not been tested in this project.                         |
+| OpenStack, datastore-direct with `GUEST_CONVERT=true` | Injects OpenStack virtio drivers and removes VMware tools (details below).         | Tested with **Windows 10 Pro** only.                                                                  |
+| OpenStack, standard (OVF) path                        | Refuses a Windows guest before taking a snapshot.                                  | Unsupported by this path because it cannot perform the required KVM driver conversion.                |
+| OpenStack, datastore-direct without `GUEST_CONVERT`   | Refuses a Windows guest before taking a snapshot.                                  | Unsupported without guest conversion because the resulting image would lack the required KVM drivers. |
 
 Only Windows 10 Pro on OpenStack has been tested end to end by this project.
 Other Windows versions and all three AWS, Azure, and Google Cloud paths remain

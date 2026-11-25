@@ -10,14 +10,14 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 
 - **Migratekit:** Near-zero-downtime VMware-to-OpenStack migration, using
   online sync cycles followed by a cutover. ([README: how it works][mk-how])
-- **migrate-v2v:** Migrate a vSphere VM to AWS, Azure, OpenStack, or GCP. The
-  standard workflow exports disk artifacts; OpenStack and Azure also have
+- **migrate-v2v:** Migrate a vSphere VM to AWS, Azure, GCP, or OpenStack. The
+  standard workflow exports disk artifacts; Azure and OpenStack also have
   datastore-direct streaming workflows. ([README][mv-readme])
 
 ## Destination support
 
 - **Migratekit:** OpenStack only. ([README][mk])
-- **migrate-v2v:** AWS, Azure, OpenStack, and GCP, with provider-specific
+- **migrate-v2v:** AWS, Azure, GCP, and OpenStack, with provider-specific
   migration and launch playbooks. ([README: flow and project
   structure][mv-flow])
 
@@ -75,10 +75,11 @@ summarizes documented scope and behavior; it is not a performance benchmark.
 - **Migratekit:** Requires VMware VDDK 8.0.2, downloaded separately from
   Broadcom and accepted under its EULA. ([README: installing VDDK][mk-vddk])
 - **migrate-v2v:** The standard export path requires OVF Tool 5.1.0, which is
-  not redistributed. Datastore-direct supports OpenVDDK 0.7.5 (library 8.0.3), an independent
-  read-only replacement. `bin/install-openvddk.py` installs the pinned kit on
-  demand; it is not bundled in the repository or container image. A properly
-  licensed VMware VDDK can also be used.
+  not redistributed. Datastore-direct uses OpenVDDK's latest runtime kit, an
+  independent read-only replacement. `bin/install-openvddk.py` downloads the
+  fixed-name release asset and verifies it against the release's `SHA256SUMS`;
+  it is not bundled in the repository or container image. A properly licensed
+  VMware VDDK can also be used.
   ([README: prerequisites][mv-prereq], [datastore-direct: installing
   VDDK][mv-dd-vddk])
 

@@ -38,14 +38,18 @@ The build context is the repository root. `.dockerignore` leaves out local
 credentials, vaults, runtime data, private local scripts, and tests; those stay
 on the host or in the mounted artifact directory.
 
-The supplied Compose service runs as the host UID with all capabilities
-dropped. Where the web forms take files, see
+The supplied `controller` service runs as the host UID with all capabilities
+dropped; the `https` (Caddy) service adds back only `NET_BIND_SERVICE`. Where the web forms take files, see
 [Files selected in the forms](README.md#files-selected-in-the-forms).
 
 ## Setup
 
 [examples/compose-v2v.sh](../examples/compose-v2v.sh) automates steps 1 to 4
-below for a first-time LAN install; the steps explain what it does.
+below for a first-time LAN install; the steps explain what it does. It
+detects the host IPv4 address, sets `WEB_ADDRESS` to it, and always uses
+`compose.lan.yaml`. It creates `/work/migrate-v2v` (or `$ARTIFACT_ROOT`) owned
+by the invoking user and sets `HOST_UID` and `HOST_GID` from that user. You
+must still place the encrypted vaults in `vaults/` there.
 
 These instructions cover a new x86_64 (amd64) Ubuntu 24.04 host. Install
 Docker Engine, the Docker CLI, Buildx, and the Compose plugin from Docker's
