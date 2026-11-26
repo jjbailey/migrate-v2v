@@ -73,7 +73,9 @@ ENV DEBIAN_FRONTEND=noninteractive \
   LIBGUESTFS_PATH=/tmp/libguestfs-appliance \
   OVFTOOL_ACCEPT_LICENSE=1 \
   PIP_DISABLE_PIP_VERSION_CHECK=1 \
-  PYTHONDONTWRITEBYTECODE=1
+  PYTHONDONTWRITEBYTECODE=1 \
+  AZURE_CORE_COLLECT_TELEMETRY=false \
+  CLOUDSDK_CORE_DISABLE_USAGE_REPORTING=true
 
 COPY web/aws-cli-signing-key.asc /tmp/aws-cli-signing-key.asc
 COPY --chmod=0755 container-entrypoint.sh /usr/local/bin/migrate-v2v-entrypoint
