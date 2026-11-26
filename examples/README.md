@@ -13,7 +13,9 @@ Prerequisites for every example:
 
 - Vaults under `/work/migrate-v2v/vaults/` are populated and encrypted (see
   README "Secrets").
+
 - Collections from `requirements.yml` are installed.
+
 - For OpenStack launches, a completed OpenStack migration for `vm_name` already
   exists in `/work/migrate-v2v/catalogs/migration-catalog.json` (or you pass
   image IDs explicitly).
@@ -29,7 +31,7 @@ it automates. By default, it detects the LAN address from the default route;
 set `WEB_ADDRESS` to an address assigned to the host to override that choice.
 A relative `ARTIFACT_ROOT` is resolved from the repository root.
 
-## Host controller install
+## Host Controller Install
 
 On the project's Ubuntu 24.04 host baseline, run this for a direct host install
 with a LAN web site:
@@ -142,14 +144,18 @@ fixed IP):
 - Supply at least one security group (name or ID). Groups are applied on the
   port at create time; server-level groups are not retrofitted onto pre-made
   ports.
+
 - The source VMware MAC must be free on the target network (power off or remove
   the source VM from that L2 domain first).
+
 - Creating a port with an explicit MAC needs Neutron `create_port:mac_address`
   permission (project member on a self-owned network, or admin / relaxed policy
   on a shared external network such as `Ext-Net`).
+
 - Pre-created ports are **not** deleted when the server is deleted later. Remove
   them before reusing the MAC or fixed IP (`openstack port delete ...`, or check
   `bin/reconcile-catalog-openstack.py --dry-run` for orphan port IDs).
+
 - Fixed IPs are never discovered from the guest; you must pass them explicitly.
 
 Playbook option names and `bin/launch-openstack-instance.sh` environment
@@ -468,9 +474,10 @@ VM_NAME=my-vm \
 
 ## OpenStack Migrate, datastore-direct
 
-No clone and no OVF export: snapshots the running VM and streams its disks from
-the datastore (see [../doc/datastore-direct.md](../doc/datastore-direct.md)). Writes the
-same catalog entry, so the launch examples above apply unchanged.
+No clone and no OVF export: snapshots the running
+VM and streams its disks from the datastore (see
+[../doc/datastore-direct.md](../doc/datastore-direct.md)). Writes the same
+catalog entry, so the launch examples above apply unchanged.
 
 ```bash
 # Wrapper (VixDiskLib when installed, else the curl fallback)
@@ -554,12 +561,16 @@ The files in `examples/` show the manual service options:
 - `caddy.service` — runs Caddy using `/etc/caddy/Caddyfile` as the `caddy`
   account. Copy this project's `web/Caddyfile` there and adjust the service
   account or paths if needed.
+
 - `caddy-api.service` — runs Caddy with `--resume` and no Caddyfile; configure
   it through Caddy's API instead. This is an alternative to `caddy.service`.
+
 - `migrate-v2v-web.service` — runs the app on `127.0.0.1:8080`. Edit its
   account, group, Python environment, checkout path and vault password file.
+
 - `migrate-v2v-caddy.service` — a concrete LAN unit with host-specific paths
   and address values. Edit those values before using it on another host.
+
 - `run-caddy-example.sh` — runs the web app and Caddy in the foreground for
   testing.
 
@@ -620,7 +631,9 @@ file and write `ARTIFACT_ROOT`.
   (`security_groups`) and GCP (`gcp_tags`) launch plays normalise the same way,
   so both forms work on all three targets; a value that is neither a list nor
   list-shaped JSON fails the play's assertion rather than reaching the module.
+
 - `tests/validate.sh` is the static gate (syntax, vaults, unit tests). It does
   not talk to vSphere or any cloud.
+
 - Deeper networking notes live in the README section
   [OpenStack Launch Networking](../README.md#openstack-launch-networking).

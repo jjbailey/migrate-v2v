@@ -40,6 +40,7 @@ its login cookie is `Secure`. Two choices are independent of each other:
 - **Where the app runs.** In a container, from the Compose stack in
   [docker.md](docker.md), which bundles every runtime dependency. Or directly on
   the Ansible control host, below.
+
 - **Where Caddy runs.** In the Compose stack, or on the control host (as a
   script for testing or as a systemd service). See [caddy.md](caddy.md).
 

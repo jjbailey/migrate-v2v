@@ -111,6 +111,7 @@ the same path so artifacts remain available for resume.
   ```
 
 - Network access from the control host to vCenter and the selected cloud APIs.
+
 - Ansible, the `amazon.aws`, `azure.azcollection`, `community.vmware`, and
   `openstack.cloud` collections; `govc`, `gcloud` (installed on demand by the
   GCP plays if missing), the AWS CLI (`aws`),
@@ -129,6 +130,7 @@ the same path so artifacts remain available for resume.
   the exact versions the workflows are verified against.
   `govc` should be installed as `/usr/local/bin/govc` or otherwise available
   on `PATH`.
+
 - For the datastore-direct Azure and OpenStack migrations
   ([doc/datastore-direct.md](doc/datastore-direct.md)): `nbdkit`, whose `curl`
   plugin is the fallback backend. The `vddk` plugin is an additional
@@ -146,9 +148,11 @@ the same path so artifacts remain available for resume.
   same script runs automatically from preflight when needed. See
   [Installing the vddk backend](doc/datastore-direct.md#installing-the-vddk-backend)
   for `OPENVDDK_INSTALL_DIR` and `OPENVDDK_ARCHIVE` options.
+
 - `dialog` or `whiptail` is required only for the interactive dialogs
   (`bin/*-dialog.sh`; see [Interactive Dialogs](#interactive-dialogs)) and
   should be available on `PATH`.
+
 - Azure migrations use the service principal in the Azure vault under
   `/work/migrate-v2v/vaults/` by default, and the
   `azure.azcollection` collection (pinned in
@@ -284,13 +288,16 @@ Notes:
 - The directory must be writable by the user running the playbook and have
   room for the largest exported disk set (see [OpenStack Migration](#openstack-migration));
   it is created on first use.
+
 - A relative `ARTIFACT_ROOT` given to a wrapper is resolved against the
   directory you ran the wrapper from, not the repository.
+
 - Resume (`resume_run_id`) and discard (`discard_failed_artifacts`,
   `DISCARD_RUN_ID`) look for the run under the current artifact root, so use
   the same `ARTIFACT_ROOT` / `artifact_root` (or the same `migration_run_dir`)
   as the original run. If you change the root between attempts, move the
   existing `<target>/<vm-name>/<run-id>` tree to the new root first.
+
 - In a container, bind-mount the chosen root at the same path inside the
   container so resume finds the runs from either side.
 
@@ -338,6 +345,7 @@ the AWS bootstrap is a one-time administrative step.
   and source snapshot; review cleanup warnings for anything left behind.
   Datastore-direct migration does not create a clone and retains its snapshot
   after a failed run until the run is successfully resumed or explicitly discarded.
+
 - **AWS**:
   - _Bootstrap_ (`bootstrap-aws-import.yml`, once): create the S3 staging
     bucket and the `vmimport` IAM role and its inline policy
@@ -348,6 +356,7 @@ the AWS bootstrap is a one-time administrative step.
     resulting image and snapshot.
   - _Launch_: `ec2:RunInstances` and tagging, and read access to the images,
     subnets, and security groups you name.
+
 - **Azure** (the `azure_projects` entry): in the subscription selected by
   `azure_target_project`, create the staging storage account when it is
   missing, create blob containers, write and delete page blobs in them, and
@@ -356,6 +365,7 @@ the AWS bootstrap is a one-time administrative step.
   security groups, public IPs, NICs, managed disks, and VMs. Contributor
   on the resource group covers all of it. The resource group must already
   exist, and an existing storage account is used exactly as it is configured.
+
 - **GCP** (`service_account_key`): in the project selected by `gcp_project`,
   list, upload, and delete objects in `gcs_bucket`; create, read, and delete
   Compute images; create, read, and delete VM Migration image imports (the
@@ -364,12 +374,14 @@ the AWS bootstrap is a one-time administrative step.
   attach disks, and act as the instance's service account. Predefined roles
   that cover this include Storage Object Admin, Compute Image User/Admin,
   Compute Instance Admin (v1), VM Migration Admin, and Service Account User.
+
 - **OpenStack** (the `openstack_projects` entry): within the target project,
   create, upload, and delete Glance images; create and delete Cinder volumes;
   read networks and security groups; and create Neutron ports and Nova servers.
   Creating ports with explicit MAC addresses (`openstack_preserve_mac=true`)
   is restricted to administrators by default Neutron policy, so that option
   needs either an admin-capable account or a relaxed policy.
+
 - **Control host**: write access to `artifact_root` with enough free space for
   the exported OVA and converted disks, and network reach to vCenter and the
   cloud APIs.
@@ -783,6 +795,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   each data snapshot is copied into a new managed disk (`<vm>-data-<n>`)
   attached at LUN `n-1`, so several launches of one migration never share a
   disk.
+
 - The images are generalized, so Azure provisions the VM: cloud-init with the
   Azure datasource creates `AZURE_ADMIN_USERNAME` (default `azureuser`) with
   an SSH key, which every launch needs. A guest without it fails with
@@ -790,6 +803,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   still reports `provisioningState=Creating`; the launch task waits for Azure's
   provisioning state before it records the deployment. Migration does not
   install or configure cloud-init in the source guest.
+
 - Like the AWS and OpenStack key pairs, the key is an Azure SSH public key
   resource, `AZURE_SSH_KEY_NAME` (default `cloud`), in the vault's resource
   group. A missing key stops the launch before anything is created. Register
@@ -799,6 +813,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   `./bin/azure-project-facts.py <subscription>` lists the key resources with
   their SHA256 fingerprints (as `ssh-keygen -l` prints them), and the launch
   dialog offers them as a picker.
+
 - Networking lives in the vault's resource group: the VNet
   `migrate-v2v-vnet` (`10.80.0.0/16`), subnet `migrate-v2v-subnet`, and NSG
   `migrate-v2v-nsg` (SSH allowed from `azure_ssh_source_prefix`) are created
@@ -810,6 +825,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   rules, so the prefix is required only when a public-IP launch has to
   create the NSG. Each VM gets its
   own NIC and, unless `AZURE_NO_PUBLIC_IP=true`, a static Standard public IP.
+
 - `AZURE_VM_SIZE` defaults to `Standard_B2s_v2`. The VM name follows
   `INSTANCE_NAME` or `VM_NAME`, lowercased to letters, digits, and hyphens.
   An existing VM of that name is reused only when its tags mark it as a
@@ -819,6 +835,7 @@ VM_NAME=my-vm AZURE_TARGET_PROJECT=my-sub ./bin/launch-azure-instance.sh
   them in place of fresh copies of the snapshots;
   `-e azure_replace_stale_disks=true` deletes the unattached ones and
   continues.
+
 - The launch is recorded in
   `/work/migrate-v2v/catalogs/deployment-catalog.json`.
 
@@ -1171,6 +1188,7 @@ The playbook still supports custom cloud-init user-data for other
 initialization tasks. Set exactly one of:
 
 - `-e openstack_user_data_file=path/to/cloud-config.yml` for your own file;
+
 - `-e openstack_user_data='#cloud-config ...'` for inline content.
 
 The two explicit sources are mutually exclusive. `openstack_dhcp_user_data`
@@ -1328,6 +1346,7 @@ What each kind asks:
   QCOW2 images (`COMPRESS`, default no; yes if `COMPRESS=true` is already set)
   and whether to run `virt-v2v-in-place` on the guest (`GUEST_CONVERT`, default
   no; with an optional `VIRTIO_WIN` path for Windows).
+
 - **Launch dialogs** pick the target project the same way and offer the
   migrated VM from the runtime migration catalog (newest completed
   migration for that platform first; a name can also be typed). They then ask
@@ -1477,6 +1496,7 @@ differ by method:
   `capacity_bytes`, `populated_size_bytes` when provided, `format`,
   `ovf_position` (where the descriptor lists the disk), and the OVF attachment
   metadata (`disk_id`, `instance_id`, `address_on_parent`, `parent`).
+
 - **Datastore-direct** (`bin/inspect-vm.py`): `artifact_type` `datastore`, and
   per disk the datastore `path`, `capacity_bytes`, `thin_provisioned`,
   `snapshot_chain_depth` (how many parent files the disk has; the `curl` backend
@@ -1814,46 +1834,61 @@ Common failures:
 
 - Missing AWS `vmimport` role or staging bucket: run
   `playbooks/bootstrap-aws-import.yml` first.
+
 - GCP M2VM rejects the guest OS: verify the source OS is on Google's supported
   list.
+
 - Snapshot quiescing fails because VMware Tools are unavailable: use
   `-e quiesce_snapshot=false`.
+
 - A VM name matches more than one vSphere object: use a unique VM name.
+
 - A retained resume artifact is reported incomplete: remove that disk artifact
   from the run directory and resume; it will be recreated atomically.
+
 - An OpenStack resume fails because an existing Glance image is not `active`
   (an interrupted upload left it `queued`, `saving`, or `killed`): delete that
   image and resume again.
+
 - A migration stops with "disk order is not usable" or "out of manifest disk
   order": the manifest's disks must be numbered 0..n-1 with only disk 0 as the
   boot disk, and imported image names must end `-disk-<index>` in that order.
+
 - AWS refuses to upload because the boot disk is not first in the OVF: see
   `aws_allow_boot_order_mismatch` above.
+
 - Datastore-direct: "nbdkit's vddk plugin is not installed" or "found no
   VixDiskLib" (with `BACKEND=vddk`, or in `auto`'s fall-back-to-curl message):
   build the plugin or link the library as
   [doc/datastore-direct.md](doc/datastore-direct.md) describes, or use
   `BACKEND=curl`.
+
 - Datastore-direct: "vCenter would not serve ... (HTTP 500)" with the curl
   backend: the VM is powered on and its disks are on VMFS, which ESXi locks.
   Power it off, or install the `vddk` backend.
+
 - Datastore-direct: "already has snapshots ... the curl backend cannot read
   them": delete or consolidate the VM's snapshots, or use the `vddk` backend.
+
 - Datastore-direct: a failed run keeps its migration snapshot on the source VM
   as the resume checkpoint. Resume with the printed `resume_run_id`, or discard
   the run (snapshot, run directory, uploaded images) with
   `-e discard_run_id=<id>` (wrapper: `DISCARD_RUN_ID`); a retained snapshot keeps
   growing.
+
 - Datastore-direct with `validate_certs: true`: "Could not verify the
   certificate": install the vCenter's CA on the control host, or pass its SHA-1
   thumbprint with `-e vddk_thumbprint=<thumbprint>`.
+
 - Azure: "not a multiple of 1 MiB": Azure cannot image a disk whose virtual
   size is not a whole number of MiB. Resize the source disk to a whole MiB
   multiple and migrate again.
+
 - Azure: "Storage account ... is in `<region>`, but images are created in
   `<region>`": point the vault's `storage_account` at an account in the same
   region as `location`, because Azure only creates an image from a VHD staged
   in the image's region.
+
 - Azure: an imported UEFI guest will not boot from its Gen1 image: the source
   VM's firmware decides the Hyper-V generation; override it for one run with
   `-e azure_hyper_v_generation=V2` (or `V1` for a BIOS guest).
@@ -1952,19 +1987,30 @@ operations are performed. Run it before submitting changes.
 ### Documentation
 
 - [web/README.md](web/README.md) - controller website, local accounts, and job queue
+
 - [doc/windows.md](doc/windows.md) - Windows guests: OpenStack guest conversion and virtio-win drivers
+
 - [web/docker.md](web/docker.md) - running the controller in Docker Compose
+
 - [web/caddy.md](web/caddy.md) - HTTPS with Caddy, in the container or on the control host
+
 - [doc/vaults.md](doc/vaults.md) - vault file layouts in one place
+
 - [doc/workflow.md](doc/workflow.md) - illustrated migration workflow
   ([SVG](doc/workflow.svg))
+
 - [doc/datastore-direct.md](doc/datastore-direct.md) - the datastore-direct OpenStack
   and Azure migrations: how they work, requirements, limits
+
 - [doc/ubuntu-24.04-container-dependencies.md](doc/ubuntu-24.04-container-dependencies.md)
   Pinned runtime-image recipe for the web controller
+
 - [doc/mk-vs-mv2v.md](doc/mk-vs-mv2v.md) - how migrate-v2v differs from Migratekit
+
 - [MAINTENANCE-TERMS.md](MAINTENANCE-TERMS.md) - maintenance and support terms
+
 - [migrate-v2v presentation](doc/migrate_v2v_presentation.pptx) - project presentation slides
+
 - [migrate-v2v presentation video](doc/migrate_v2v_presentation.mp4) - recorded video of the project presentation
 
 ## License
