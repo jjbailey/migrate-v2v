@@ -25,7 +25,35 @@ Prerequisites for every example:
 For a first-time web controller install on a LAN host, run
 `examples/compose-v2v.sh`. It builds the image, adds the `operator` account,
 and starts the stack. See [web/docker.md](../web/docker.md#setup) for the steps
-it automates.
+it automates. By default, it detects the LAN address from the default route;
+set `WEB_ADDRESS` to an address assigned to the host to override that choice.
+A relative `ARTIFACT_ROOT` is resolved from the repository root.
+
+## Host controller install
+
+On the project's Ubuntu 24.04 host baseline, run this for a direct host install
+with a LAN web site:
+`examples/controller-v2v.sh`. It installs the pinned Python requirements and
+Ansible collections into `~/.dib7`, prepares the artifact root, creates the
+`operator` web account, and enables systemd services for the web app and Caddy.
+If Caddy is missing, it installs Caddy from the official
+[Debian/Ubuntu package repository](https://caddyserver.com/docs/install).
+When it installs Caddy, it disables the package's generic `caddy.service` and
+uses the generated `migrate-v2v-caddy.service` with this project's Caddyfile.
+The script covers the shared controller and web setup; install any remaining
+host migration tools listed in the top-level README. Encrypted vaults must
+already be in `$ARTIFACT_ROOT/vaults`.
+
+The script runs as the account that should own the artifacts and web state.
+The systemd services point to this checkout, so keep it at its current path.
+It prompts for the vault password and the `operator` sign-in password. If the
+password file or either generated systemd unit already exists, remove it or
+rerun with `FORCE=1` to replace it after stopping the services. You can set
+`ARTIFACT_ROOT` to move persistent files; relative paths are resolved from the
+repository root. Set `WEB_ADDRESS` to an IPv4 address assigned to the host to
+select the LAN interface explicitly. Open `https://<controller-ip>:8443`; trust
+the Caddy root certificate printed by the script on each client. TCP port
+8443 must be free for Caddy.
 
 ---
 
@@ -513,27 +541,37 @@ source ~/my-project-a-openrc.sh
 
 ## Caddy on the Ansible Control Host
 
-Caddy can be run on the ansible control host as a reverse proxy / TLS
-terminator in front of the migration web app. The `examples/` directory
-provides example systemd unit files and a test script. See
-[web/caddy.md](../web/caddy.md) for the Caddyfile variables, TLS names and
-certificate trust, which apply wherever Caddy runs:
+Caddy can run on the control host as the HTTPS reverse proxy for the migration
+web app. For a first-time host setup, `examples/controller-v2v.sh` installs
+Caddy from its official Debian/Ubuntu package repository if needed, then
+generates and enables `migrate-v2v-web.service` and
+`migrate-v2v-caddy.service`. When it installs Caddy, it disables the package's
+generic `caddy.service` and uses the project-specific unit instead. The script
+does not install or copy the unit files kept in `examples/`.
 
-- `caddy.service.example` — runs Caddy from the repository's
-  `web/Caddyfile`. Suitable when you manage the config file directly.
-- `caddy-api.service.example` — runs Caddy with its API and `--resume`, so
-  configuration changes made through the API persist across restarts. It
-  loads no Caddyfile; you supply the config through the API.
-- `migrate-v2v-web.service.example` — runs the web app itself
-  (`web/app.py serve` on `127.0.0.1:8080`). Neither Caddy unit starts it.
-- `run-caddy-example.sh` — example script for running Caddy plus the web app
-  in the foreground on the ansible controller for testing purposes.
+The files in `examples/` show the manual service options:
 
-`caddy.service.example` sets `PROJECT_HOME` to the repository checkout with
-`Environment="PROJECT_HOME=/path/to/repo"` and loads
-`${PROJECT_HOME}/web/Caddyfile`. Edit that path; systemd has no shell-style
-defaults such as `${VAR:-default}`, and a variable inside a longer word must
-be written with braces (`${PROJECT_HOME}/web`, not `$PROJECT_HOME/web`).
+- `caddy.service` — runs Caddy using `/etc/caddy/Caddyfile` as the `caddy`
+  account. Copy this project's `web/Caddyfile` there and adjust the service
+  account or paths if needed.
+- `caddy-api.service` — runs Caddy with `--resume` and no Caddyfile; configure
+  it through Caddy's API instead. This is an alternative to `caddy.service`.
+- `migrate-v2v-web.service` — runs the app on `127.0.0.1:8080`. Edit its
+  account, group, Python environment, checkout path and vault password file.
+- `migrate-v2v-caddy.service` — a concrete LAN unit with host-specific paths
+  and address values. Edit those values before using it on another host.
+- `run-caddy-example.sh` — runs the web app and Caddy in the foreground for
+  testing.
+
+Use only one Caddy service for this site. `caddy.service` and
+`caddy-api.service` are alternatives. Do not run either alongside
+`migrate-v2v-caddy.service`; they can contend for the same listener on port 8443. Stop and disable the previous Caddy unit before switching methods.
+
+See [web/caddy.md](../web/caddy.md) for Caddyfile variables, TLS names and
+certificate trust. The checked-in `caddy.service` uses Caddy's standard
+`/etc/caddy/Caddyfile`; the manual instructions below copy this project's
+Caddyfile there. Add `CADDY_HOSTS` and `CADDY_DEFAULT_SNI` to the unit when
+serving clients over the LAN.
 
 `web/Caddyfile` serves only `localhost`, `127.0.0.1` and `[::1]` on port
 8443 unless `CADDY_HOSTS` is set. To reach the site from other machines, add
@@ -546,18 +584,29 @@ Serve the site over HTTPS only: the login cookie is `Secure`, so a plain
 `http://` site cannot sign anyone in. Use a `redir` to the HTTPS address if
 you want port 80 to answer.
 
-Install both units, adjust the paths and accounts in each, then enable them:
+For the manual service setup, install the web unit and either the Caddyfile
+unit or the API unit. Adjust paths and accounts in both selected units, then
+create the local web login and enable them. The `operator` in
+`migrate-v2v-web.service` is a Unix account, separate from the site's local
+web login; replace it with the account that owns the artifact root, or create
+that account. See [web/README.md](../web/README.md#on-the-control-host) for
+creating the web login with the service environment. For a Caddyfile service:
 
 ```bash
-sudo cp examples/caddy.service.example /etc/systemd/system/caddy.service
-sudo cp examples/migrate-v2v-web.service.example /etc/systemd/system/migrate-v2v-web.service
+sudo cp examples/caddy.service /etc/systemd/system/caddy.service
+sudo cp examples/migrate-v2v-web.service /etc/systemd/system/migrate-v2v-web.service
+sudo cp web/Caddyfile /etc/caddy/Caddyfile
 sudo systemctl daemon-reload
-sudo systemctl enable --now migrate-v2v-web caddy
+sudo systemctl enable migrate-v2v-web caddy
+sudo systemctl restart migrate-v2v-web caddy
 ```
 
-Install Caddy first (https://caddyserver.com/docs/install). The Caddy unit's
-user needs to read the Caddyfile and keeps its certificates and local CA
-under its own home. The web unit's user needs to read the vault password
+For the API-managed alternative, copy `examples/caddy-api.service` to
+`/etc/systemd/system/caddy.service` instead. Do not enable both Caddy variants.
+Install Caddy first for this manual path using
+[Caddy's install guide](https://caddyserver.com/docs/install). The Caddy
+unit's user needs to read the Caddyfile and keeps its certificates and local
+CA under its own home. The web unit's user needs to read the vault password
 file and write `ARTIFACT_ROOT`.
 
 ---

@@ -1,0 +1,28 @@
+[Unit]
+Description=migrate-v2v controller web UI
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=operator
+Group=100
+WorkingDirectory=/home/operator/migrate-v2v
+Environment="HOME=/home/operator"
+Environment="PATH=/home/operator/.dib7/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="ARTIFACT_ROOT=/work/migrate-v2v"
+Environment="WEB_STATE_DIR=/work/migrate-v2v/web-state"
+Environment="VAULT_PASSWORD_FILE=/home/operator/.dib-vault-pass"
+Environment="OVFTOOL_ACCEPT_LICENSE=1"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/usr/bin/env python3 web/app.py serve --host 127.0.0.1 --port 8080
+KillMode=mixed
+TimeoutStopSec=30s
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+UMask=0022
+
+[Install]
+WantedBy=multi-user.target

@@ -45,11 +45,23 @@ dropped; the `https` (Caddy) service adds back only `NET_BIND_SERVICE`. Where th
 ## Setup
 
 [examples/compose-v2v.sh](../examples/compose-v2v.sh) automates steps 1 to 4
-below for a first-time LAN install; the steps explain what it does. It
-detects the host IPv4 address, sets `WEB_ADDRESS` to it, and always uses
-`compose.lan.yaml`. It creates `/work/migrate-v2v` (or `$ARTIFACT_ROOT`) owned
-by the invoking user and sets `HOST_UID` and `HOST_GID` from that user. You
-must still place the encrypted vaults in `vaults/` there.
+below for a first-time LAN install; the steps explain what it does. By default,
+it detects the host IPv4 address and always uses `compose.lan.yaml`; set
+`WEB_ADDRESS` to an IPv4 address assigned to the host to override detection.
+It creates `/work/migrate-v2v` (or `$ARTIFACT_ROOT`) owned by the invoking user
+and sets `HOST_UID` and `HOST_GID` from that user. Relative `ARTIFACT_ROOT`
+values are resolved from the repository root. You must still place the
+encrypted vaults in `vaults/` there.
+Both LAN setups use TCP port 8443 for HTTPS; keep it free on the controller.
+
+For a direct host install, use
+[examples/controller-v2v.sh](../examples/controller-v2v.sh). It prepares the
+Python and Ansible environment, creates the web account, and starts the web app
+and Caddy as systemd services. It installs Caddy from the official
+Debian/Ubuntu package repository if it is missing. When it installs Caddy, it
+disables the package's generic `caddy.service` in favor of its project-specific
+service. The script does not install all migration tools described in the
+top-level README.
 
 These instructions cover a new x86_64 (amd64) Ubuntu 24.04 host. Install
 Docker Engine, the Docker CLI, Buildx, and the Compose plugin from Docker's

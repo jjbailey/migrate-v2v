@@ -43,6 +43,11 @@ its login cookie is `Secure`. Two choices are independent of each other:
 - **Where Caddy runs.** In the Compose stack, or on the control host (as a
   script for testing or as a systemd service). See [caddy.md](caddy.md).
 
+For a first-time host deployment,
+[`examples/controller-v2v.sh`](../examples/controller-v2v.sh) prepares the
+host Python/Ansible environment and web account, installs Caddy if missing,
+and enables both host services.
+
 ### On the control host
 
 The Python process can use the repository dependencies installed on the host.

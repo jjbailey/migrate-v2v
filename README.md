@@ -161,6 +161,17 @@ the same path so artifacts remain available for resume.
 
 ### One-time Setup
 
+For a first-time host controller and LAN web install, run
+[`examples/controller-v2v.sh`](examples/controller-v2v.sh). If Caddy is
+missing, the script installs it from Caddy's official Debian/Ubuntu package
+repository, then installs the Python environment and Ansible
+collections, sets up the web account and artifact root, and starts the host
+services. It does not install all host migration tools such as `govc`,
+`qemu-img`, or the AWS CLI; install the ones required by your workflows using
+the steps below.
+See [Caddy on the Ansible Control Host](examples/README.md#caddy-on-the-ansible-control-host)
+for trusting the local HTTPS certificate and service details.
+
 Ubuntu 24.04 marks its system Python as externally managed. Keep Ansible and
 the `bin/` Python scripts together in a virtual environment; running the
 global `python3 -m pip install` command fails on a fresh Ubuntu installation.

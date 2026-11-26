@@ -68,9 +68,12 @@ persistent `caddy-data` volume; the root certificate is at
 
 ## Caddy on the control host
 
-Install Caddy first, following <https://caddyserver.com/docs/install>; it is not
-bundled in the repository. The web app must also run on the host (or its port
-must otherwise be reachable at `CADDY_UPSTREAM`).
+For manual host setups, install Caddy following
+<https://caddyserver.com/docs/install>; it is not bundled in the repository.
+The [host installer](../examples/controller-v2v.sh) installs Caddy from the
+official Debian/Ubuntu package repository if it is missing. The web app must
+also run on the host (or its port must otherwise be reachable at
+`CADDY_UPSTREAM`).
 
 Caddy's local CA and certificates are kept under the running user's home, by
 default `~/.local/share/caddy/pki/authorities/local/root.crt`, or under the
@@ -95,9 +98,11 @@ starts, and `CADDY_DEFAULT_SNI` to the first IPv4 address. Open
 ### As a service: systemd units
 
 [examples/README.md](../examples/README.md#caddy-on-the-ansible-control-host)
-describes the example units (`caddy.service.example`, `caddy-api.service.example`
-and `migrate-v2v-web.service.example`), including how to set `PROJECT_HOME`,
-`CADDY_HOSTS` and `CADDY_DEFAULT_SNI` in the unit.
+describes the manual units (`caddy.service`, `caddy-api.service`, and
+`migrate-v2v-web.service`) and the host installer's generated units, including
+how to set `PROJECT_HOME`, `CADDY_HOSTS` and `CADDY_DEFAULT_SNI` in the unit.
+Use only one Caddy unit for the site; stop the current Caddy unit before
+switching between the Caddyfile, API-managed, and host-installer setups.
 
 ### No Caddy (development only)
 
