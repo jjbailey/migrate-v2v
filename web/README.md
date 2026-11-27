@@ -81,8 +81,8 @@ hashes running at once. Manage accounts with `python3 web/app.py user add NAME`
 the same commands in the controller service (see [docker.md](docker.md#setup)).
 
 Jobs are stored in `WEB_STATE_DIR/jobs.sqlite3` and processed one at a time.
-`WEB_STATE_DIR` defaults to `/work/migrate-v2v/web-state`; it does not
-follow `ARTIFACT_ROOT`, so set both when the artifact root lives elsewhere.
+`WEB_STATE_DIR` defaults to `ARTIFACT_ROOT/web-state`
+(`/work/migrate-v2v/web-state`).
 Job output is stored in mode `0600` log files there. A running job stopped
 by a controller shutdown or restart is marked **interrupted** and is never
 rerun automatically. Review its log and cloud state before submitting another

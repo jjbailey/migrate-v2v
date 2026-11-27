@@ -14,13 +14,13 @@
   gather_facts: false
 
   vars_files:
+    - vars/paths.yml
     - vars/migration-common.yml
 
   vars:
     migration_target: azure
     export_format: ovf
     resume_run_id: ""
-    artifact_root: "/work/migrate-v2v"
     qemu_img_bin: qemu-img
     # Extra qemu-img convert arguments. -m keeps several coroutines in flight
     # and -W lets them write out of order, which a default single-threaded

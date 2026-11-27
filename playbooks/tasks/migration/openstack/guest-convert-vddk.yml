@@ -52,7 +52,7 @@
   environment: >-
     {{ {'LIBGUESTFS_BACKEND': 'direct',
         'LIBGUESTFS_PATH': openstack_libguestfs_path
-          | default('/work/migrate-v2v/libguestfs-appliance')}
+          | default(artifact_root ~ '/libguestfs-appliance')}
        | combine({'VIRTIO_WIN': openstack_virtio_win} if (openstack_guest_is_windows | bool) else {}) }}
   ansible.builtin.command:
     argv: >-

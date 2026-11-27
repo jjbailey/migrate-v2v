@@ -1,0 +1,17 @@
+---
+# playbooks/vars/paths.yml
+# vim: set tabstop=2 shiftwidth=2 expandtab:
+
+# Control-host data locations, shared by every playbook. Everything defaults
+# to a directory under artifact_root, which comes from -e artifact_root=,
+# else $ARTIFACT_ROOT, else /work/migrate-v2v. Each directory's own
+# environment variable, when set, wins over the artifact_root default. The
+# bin/ Python tools, vault helpers, dialogs, and web controller resolve the
+# same directories the same way.
+
+artifact_root: "{{ lookup('ansible.builtin.env', 'ARTIFACT_ROOT') | default('/work/migrate-v2v', true) }}"
+vault_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default(artifact_root ~ '/vaults', true) }}"
+catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default(artifact_root ~ '/catalogs', true) }}"
+ovftool_install_dir: "{{ lookup('ansible.builtin.env', 'OVFTOOL_INSTALL_DIR') | default(artifact_root ~ '/tools/ovftool-5.1.0', true) }}"
+openvddk_install_dir: "{{ lookup('ansible.builtin.env', 'OPENVDDK_INSTALL_DIR') | default(artifact_root ~ '/tools/openvddk', true) }}"
+

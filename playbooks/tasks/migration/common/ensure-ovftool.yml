@@ -13,9 +13,7 @@
 
 - name: Set the OVF Tool installation directory
   ansible.builtin.set_fact:
-    ovftool_install_dir_effective: >-
-      {{ lookup('ansible.builtin.env', 'OVFTOOL_INSTALL_DIR')
-         | default('/work/migrate-v2v/tools/ovftool-5.1.0', true) | expanduser }}
+    ovftool_install_dir_effective: "{{ ovftool_install_dir | expanduser }}"
   when: ovftool_check.rc != 0
 
 - name: Install OVF Tool when it is not on PATH

@@ -280,7 +280,7 @@ def main():
                         help="GCP vault for the service account when "
                              "GOOGLE_APPLICATION_CREDENTIALS is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/gcp.yml, or "
-                             "/work/migrate-v2v/vaults/gcp.yml)")
+                             "$ARTIFACT_ROOT/vaults/gcp.yml)")
     args = parser.parse_args()
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")

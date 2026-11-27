@@ -7,8 +7,9 @@
 # The per-target entry points -- aws-vault.sh, azure-vault.sh, gcp-vault.sh,
 # openstack-vault.sh, vsphere-vault.sh -- are symlinks to this
 # script; the name it was invoked as selects
-# $MIGRATE_V2V_VAULT_DIR/<target>.yml. Set VAULT to
-# edit some other file.
+# $MIGRATE_V2V_VAULT_DIR/<target>.yml (default $ARTIFACT_ROOT/vaults, and
+# ARTIFACT_ROOT defaults to /work/migrate-v2v). Set VAULT to edit some other
+# file.
 #
 # ansible-vault comes from $DIB7_VENV_BIN (default ~/.dib7/bin) if present,
 # else PATH. The vault password is looked up in this order:
@@ -30,13 +31,13 @@ if [ "$target" = "$invoked_as" ] || [ -z "$target" ] ; then
     target=""
 fi
 
-VAULT="${VAULT:-${MIGRATE_V2V_VAULT_DIR:-/work/migrate-v2v/vaults}/$target.yml}"
+VAULT="${VAULT:-${MIGRATE_V2V_VAULT_DIR:-${ARTIFACT_ROOT:-/work/migrate-v2v}/vaults}/$target.yml}"
 # Prefer the dib7 venv's ansible-vault, else whatever is on PATH.
 VENV_BIN="${DIB7_VENV_BIN:-$HOME/.dib7/bin}"
 ANSIBLE_VAULT="$VENV_BIN/ansible-vault"
 [ -x "$ANSIBLE_VAULT" ] || ANSIBLE_VAULT=$(command -v ansible-vault || true)
 
-# A relative VAULT or MIGRATE_V2V_VAULT_DIR means the current directory, as
+# A relative VAULT, MIGRATE_V2V_VAULT_DIR, or ARTIFACT_ROOT means the current directory, as
 # it does for the Python tools; the playbooks need an absolute one.
 case "$VAULT" in
     /*) ;;

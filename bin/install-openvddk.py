@@ -7,8 +7,8 @@
 The fixed-name archive is downloaded from the upstream GitHub release (or
 copied from OPENVDDK_ARCHIVE), checked against that release's SHA256SUMS file,
 and extracted outside the repository. The complete kit, including its notices,
-is kept at OPENVDDK_INSTALL_DIR so a host and a container can share it through
-/work/migrate-v2v.
+is kept at OPENVDDK_INSTALL_DIR (default $ARTIFACT_ROOT/tools/openvddk) so a
+host and a container can share it through the artifact root.
 """
 
 import argparse
@@ -29,13 +29,16 @@ FILENAME = "openvddk-runtime.tar.gz"
 RELEASE_URL = "https://github.com/openvddk/openvddk/releases/latest/download/"
 DOWNLOAD_URL = RELEASE_URL + FILENAME
 CHECKSUMS_URL = RELEASE_URL + "SHA256SUMS"
-DEFAULT_INSTALL_DIR = Path("/work/migrate-v2v/tools/openvddk")
+DEFAULT_ARTIFACT_ROOT = "/work/migrate-v2v"
 INSTALL_MARKER = ".migrate-v2v-openvddk-install"
 USER_AGENT = "migrate-v2v OpenVDDK installer"
 
 def install_dir(argument):
     value = argument or os.environ.get("OPENVDDK_INSTALL_DIR")
-    return Path(value or DEFAULT_INSTALL_DIR).expanduser().resolve()
+    if not value:
+        root = os.environ.get("ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT
+        value = Path(root) / "tools/openvddk"
+    return Path(value).expanduser().resolve()
 
 def download(url, destination, description):
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
@@ -234,8 +237,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--install-dir",
-        help="installation directory (default: OPENVDDK_INSTALL_DIR or "
-             f"{DEFAULT_INSTALL_DIR})",
+        help="installation directory (default: OPENVDDK_INSTALL_DIR, or "
+             "$ARTIFACT_ROOT/tools/openvddk; ARTIFACT_ROOT defaults to "
+             f"{DEFAULT_ARTIFACT_ROOT})",
     )
     args = parser.parse_args()
 

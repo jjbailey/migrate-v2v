@@ -13,12 +13,27 @@ a powered-on VM's disks on VMFS; use the recommended VDDK backend in that case.
 The playbooks run directly on the control host using Ansible and `govc`, plus
 `ovftool` for the standard export workflow.
 
-Runtime artifacts, catalogs, encrypted vaults, and tools downloaded on demand
-live under `/work/migrate-v2v/` by default. Set `MIGRATE_V2V_VAULT_DIR` or
-`MIGRATE_V2V_CATALOG_DIR` to move vaults or catalogs independently. Dialogs
-derive those directory defaults from `ARTIFACT_ROOT`; direct playbook runs
-accept `-e artifact_root=` for migration run directories. See
-[Artifact Root](#artifact-root).
+**Set `ARTIFACT_ROOT` before anything else.** `ARTIFACT_ROOT` (default
+`/work/migrate-v2v`) is the root of all data this project keeps on the control
+host: migration run directories and exported disks, encrypted vaults, the
+migration and deployment catalogs, the web controller's job state and inputs,
+and tools downloaded on demand. Choose its location, with room for your largest
+exported disk set, and export `ARTIFACT_ROOT` before you run the controller
+setup, create vaults, or start a migration. Moving it later means moving the
+vaults, the catalogs, and every run you may still want to resume. The directory
+is owned by the account that runs the web controller. Use that same account,
+not root, for the wrappers, dialogs, and playbooks, because web jobs run as the
+web controller's user and read and write the same tree.
+[`examples/controller-v2v.sh`](examples/controller-v2v.sh) sets this up: run
+as that account, it creates `ARTIFACT_ROOT` owned by the account with mode
+`0750` and writes the same account into the web service's `User=` line.
+
+Everything that reads or writes this data (the wrappers, dialogs, playbooks,
+`bin/` tools, vault helpers, and web controller) finds it under
+`ARTIFACT_ROOT`, so setting it once is enough. To keep one directory elsewhere,
+set its own variable, which wins over the `ARTIFACT_ROOT` default:
+`MIGRATE_V2V_VAULT_DIR`, `MIGRATE_V2V_CATALOG_DIR`, `WEB_STATE_DIR`, or
+`WEB_INPUT_DIR`. See [Artifact Root](#artifact-root).
 Upgrading from a checkout that kept vaults and catalogs in the repository
 needs a one-time move; see [Secrets](#secrets) and
 [Migration Catalog](#migration-catalog).
@@ -173,6 +188,9 @@ collections, sets up the web account and artifact root, and starts the host
 services. It does not install all host migration tools such as `govc`,
 `qemu-img`, or the AWS CLI; install the ones required by your workflows using
 the steps below.
+Run it as the account that will own the controller and `ARTIFACT_ROOT`, not as
+root, and export `ARTIFACT_ROOT` first if you are not using the default
+`/work/migrate-v2v`.
 See [Caddy on the Ansible Control Host](examples/README.md#caddy-on-the-ansible-control-host)
 for trusting the local HTTPS certificate and service details.
 
@@ -256,20 +274,32 @@ The vault helpers (`bin/*-vault.sh`) prefer the `ansible-vault` in
 
 ### Artifact Root
 
-AWS, Azure, GCP, and OpenStack migrations write their run directories under
-one artifact root, `/work/migrate-v2v` by default, laid out as
-`<artifact-root>/<target>/<vm-name>/<run-id>/` (for example
-`/work/migrate-v2v/openstack/my-vm/<run-id>/`). The workspace also holds tools
-downloaded on demand; vaults and catalogs have their own settings
-(`MIGRATE_V2V_VAULT_DIR`, `MIGRATE_V2V_CATALOG_DIR`).
+All control-host data lives under one artifact root, `/work/migrate-v2v` by
+default:
 
-Change it in whichever way matches how you start the migration:
+| Path under the artifact root   | Contents                                                   | Override                                      |
+| ------------------------------ | ---------------------------------------------------------- | --------------------------------------------- |
+| `<target>/<vm-name>/<run-id>/` | migration run directories and exported disks               | `-e migration_run_dir=`                       |
+| `vaults/`                      | encrypted vaults                                           | `MIGRATE_V2V_VAULT_DIR`                       |
+| `catalogs/`                    | migration and deployment catalogs                          | `MIGRATE_V2V_CATALOG_DIR`                     |
+| `tools/`                       | OVF Tool, OpenVDDK, and Google Cloud CLI                   | `OVFTOOL_INSTALL_DIR`, `OPENVDDK_INSTALL_DIR` |
+| `libguestfs-appliance/`        | fixed appliance for datastore-direct OpenStack conversions | `LIBGUESTFS_PATH`                             |
+| `web-state/`, `web-inputs/`    | web controller accounts, jobs, and inputs                  | `WEB_STATE_DIR`, `WEB_INPUT_DIR`              |
+
+A run directory looks like `/work/migrate-v2v/openstack/my-vm/<run-id>/`.
+Override variables are only for keeping one directory outside the root;
+normally you leave them unset.
+
+Exporting `ARTIFACT_ROOT` in the shell profile of the account that owns the
+directory covers every command-line entry point. The web controller instead
+reads it from its systemd unit's `Environment=ARTIFACT_ROOT=` line, which
+`controller-v2v.sh` writes. Per entry point:
 
 | Started with                                         | How to change the artifact root                                                                                                                   |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `bin/migrate-*-vm*.sh` wrappers                      | `ARTIFACT_ROOT=/mnt/migration-storage ./bin/migrate-openstack-vm.sh ...`                                                                          |
 | `bin/*-dialog.sh` front ends                         | export `ARTIFACT_ROOT` before starting the dialog; the generated script records it as an `export ARTIFACT_ROOT=...` line, which you can also edit |
-| `bin/run-playbook.sh` or `ansible-playbook` directly | `-e artifact_root=/mnt/migration-storage`                                                                                                         |
+| `bin/run-playbook.sh` or `ansible-playbook` directly | export `ARTIFACT_ROOT`, or pass `-e artifact_root=/mnt/migration-storage`, which applies to that playbook run only                                |
 | One run only, at an exact path                       | `-e migration_run_dir=/mnt/migration-storage/my-vm-run` (replaces the whole `<root>/<target>/<vm>/<run-id>` path)                                 |
 
 ```bash
@@ -285,12 +315,31 @@ export ARTIFACT_ROOT=/mnt/migration-storage
 
 Notes:
 
-- The directory must be writable by the user running the playbook and have
-  room for the largest exported disk set (see [OpenStack Migration](#openstack-migration));
-  it is created on first use.
+- The directory is owned by the account that runs the web controller (the
+  `User=` in `migrate-v2v-web.service`). Run wrappers, dialogs, and playbooks
+  as that same account so command-line runs and web jobs can read and resume
+  each other's runs. Running them as root or another user leaves files the web
+  controller cannot use. It needs room for the largest exported disk set (see
+  [OpenStack Migration](#openstack-migration)). The playbooks create it on
+  first use, owned by whoever runs them; to set the owner explicitly, create it
+  yourself:
+
+  ```bash
+  sudo install -d -o "$(id -un)" -g "$(id -g)" -m 0750 "$ARTIFACT_ROOT"
+  ```
 
 - A relative `ARTIFACT_ROOT` given to a wrapper is resolved against the
   directory you ran the wrapper from, not the repository.
+
+- `-e artifact_root=` moves everything that playbook run reads and writes,
+  including its vaults, catalogs, and tools. The `bin/` Python tools, such as
+  the catalog reconcilers, cannot see it, so export `ARTIFACT_ROOT` instead
+  when they must find the same data.
+
+- If an older checkout used a non-default `ARTIFACT_ROOT` only for run
+  directories and kept vaults and catalogs in `/work/migrate-v2v`, those now
+  resolve under the new root. Move them there, or set `MIGRATE_V2V_VAULT_DIR`
+  and `MIGRATE_V2V_CATALOG_DIR` to their current locations.
 
 - Resume (`resume_run_id`) and discard (`discard_failed_artifacts`,
   `DISCARD_RUN_ID`) look for the run under the current artifact root, so use

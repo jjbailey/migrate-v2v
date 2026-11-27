@@ -20,12 +20,13 @@ import stat
 import tempfile
 from pathlib import Path
 
-DEFAULT_CATALOG_DIR = Path("/work/migrate-v2v/catalogs")
+DEFAULT_ARTIFACT_ROOT = "/work/migrate-v2v"
 
 def default_catalog_path(filename):
-    """Runtime catalog path, overridable for alternate checkouts or tests."""
+    """Runtime catalog path: $MIGRATE_V2V_CATALOG_DIR, else $ARTIFACT_ROOT/catalogs."""
     catalog_dir = Path(
-        os.environ.get("MIGRATE_V2V_CATALOG_DIR") or DEFAULT_CATALOG_DIR
+        os.environ.get("MIGRATE_V2V_CATALOG_DIR")
+        or Path(os.environ.get("ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT) / "catalogs"
     ).expanduser()
     return catalog_dir / filename
 

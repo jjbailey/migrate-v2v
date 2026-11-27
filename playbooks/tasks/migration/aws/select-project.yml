@@ -7,7 +7,7 @@
 
 - name: Include the AWS vault variables
   ansible.builtin.include_vars:
-    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml"
+    file: "{{ vault_dir }}/aws.yml"
   no_log: true
 
 - name: Determine whether an AWS target project was explicitly requested
@@ -37,7 +37,7 @@
   ansible.builtin.fail:
     msg: >-
       AWS project '{{ aws_target_project_requested }}' matches no vault key,
-      account ID, or profile in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/aws.yml under aws_projects.
+      account ID, or profile in {{ vault_dir }}/aws.yml under aws_projects.
       Available: {{ aws_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
     - aws_target_project_explicit | bool

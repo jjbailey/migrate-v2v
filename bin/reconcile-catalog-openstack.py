@@ -415,7 +415,7 @@ def main():
         default=default_vault_path("openstack.yml"),
         help="OpenStack vault for credentials when OS_CLOUD/OS_* is unset "
         "(default: $MIGRATE_V2V_VAULT_DIR/openstack.yml, or "
-        "/work/migrate-v2v/vaults/openstack.yml)",
+        "$ARTIFACT_ROOT/vaults/openstack.yml)",
     )
     parser.add_argument(
         "--region-name",

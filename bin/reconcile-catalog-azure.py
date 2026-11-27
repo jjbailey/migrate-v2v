@@ -206,7 +206,7 @@ def main(argv=None):
     parser.add_argument("--vault", type=Path, default=default_vault_path("azure.yml"),
                         help="Azure vault for the service principal when AZURE_* is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/azure.yml, or "
-                             "/work/migrate-v2v/vaults/azure.yml)")
+                             "$ARTIFACT_ROOT/vaults/azure.yml)")
     args = parser.parse_args(argv)
 
     migration_catalog = read_snapshot(args.migration_catalog, "migrations")

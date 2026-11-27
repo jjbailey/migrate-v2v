@@ -41,14 +41,14 @@ MD5 = "ea1eb22fede461274eaff55a46318b63"
 SHA256 = "2c83970a212cc01262adb76ce3b9c52af396fad8340ff71acb749e33e86c8e33"
 ARTIFACT_ID = 29848
 PORTLET_ID = "SDK_AND_TOOL_DETAILS_INSTANCE_iwlk"
-DEFAULT_INSTALL_DIR = Path(
-    "/work/migrate-v2v/tools/ovftool-5.1.0"
-)
+DEFAULT_ARTIFACT_ROOT = "/work/migrate-v2v"
 USER_AGENT = "migrate-v2v OVF Tool installer"
 
 def install_dir():
     return Path(
-        os.environ.get("OVFTOOL_INSTALL_DIR") or DEFAULT_INSTALL_DIR
+        os.environ.get("OVFTOOL_INSTALL_DIR")
+        or Path(os.environ.get("ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT)
+        / f"tools/ovftool-{VERSION}"
     ).expanduser().resolve()
 
 def require_license_acceptance():

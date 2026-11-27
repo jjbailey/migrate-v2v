@@ -82,7 +82,7 @@ def print_images(entry, width):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--catalog", type=Path, default=DEFAULT_CATALOG,
-                        help="catalog JSON file (default: $MIGRATE_V2V_CATALOG_DIR/migration-catalog.json, or /work/migrate-v2v/catalogs/migration-catalog.json)")
+                        help="catalog JSON file (default: $MIGRATE_V2V_CATALOG_DIR/migration-catalog.json, or $ARTIFACT_ROOT/catalogs/migration-catalog.json)")
     parser.add_argument("--provider", "--platform", dest="provider",
                         choices=("aws", "gcp", "openstack", "azure"), help="filter by target platform")
     parser.add_argument("--vm-name", help="filter by exact source VM name")

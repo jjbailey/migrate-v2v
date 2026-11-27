@@ -12,13 +12,14 @@ from pathlib import Path
 
 import yaml
 
-DEFAULT_VAULT_DIR = Path("/work/migrate-v2v/vaults")
+DEFAULT_ARTIFACT_ROOT = "/work/migrate-v2v"
 VAULT_TIMEOUT_SECONDS = 300
 
 def default_vault_path(filename):
-    """Runtime vault path, overridable for alternate checkouts or tests."""
+    """Runtime vault path: $MIGRATE_V2V_VAULT_DIR, else $ARTIFACT_ROOT/vaults."""
     vault_dir = Path(
-        os.environ.get("MIGRATE_V2V_VAULT_DIR") or DEFAULT_VAULT_DIR
+        os.environ.get("MIGRATE_V2V_VAULT_DIR")
+        or Path(os.environ.get("ARTIFACT_ROOT") or DEFAULT_ARTIFACT_ROOT) / "vaults"
     ).expanduser()
     return vault_dir / filename
 

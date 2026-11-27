@@ -7,7 +7,7 @@
 
 - name: Include the GCP vault variables
   ansible.builtin.include_vars:
-    file: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/gcp.yml"
+    file: "{{ vault_dir }}/gcp.yml"
   no_log: true
 
 - name: Determine whether a GCP target project was explicitly requested
@@ -37,7 +37,7 @@
   ansible.builtin.fail:
     msg: >-
       GCP project '{{ gcp_target_project_requested }}' matches no vault key,
-      gcp_project, or project_id in {{ lookup('ansible.builtin.env', 'MIGRATE_V2V_VAULT_DIR') | default('/work/migrate-v2v/vaults', true) }}/gcp.yml under gcp_projects.
+      gcp_project, or project_id in {{ vault_dir }}/gcp.yml under gcp_projects.
       Available: {{ gcp_projects_by_key | default({}) | list | join(', ') or '<none>' }}.
   when:
     - gcp_target_project_explicit | bool

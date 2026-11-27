@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "playbooks" / "tasks" / "migration"
 TASKS = MIGRATION / "openstack"
+PATHS = ROOT / "playbooks" / "vars" / "paths.yml"
 TOOLS = ("ansible-playbook", "nbdkit", "qemu-img")
 
 CONVERT_PLAY = """
@@ -50,6 +51,9 @@ GUEST_PLAY = """
 - hosts: localhost
   connection: local
   gather_facts: false
+  # Every playbook loads the shared paths; the task falls back on artifact_root.
+  vars_files:
+    - {paths}
   vars:
     openstack_convert_jobs: {{}}
   tasks:
@@ -313,7 +317,7 @@ print("converted", sys.argv[1:])
         }
         env = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"}
         env.pop("VIRTIO_WIN", None)
-        played = self.playbook(GUEST_PLAY.format(tasks=TASKS), env=env, **variables)
+        played = self.playbook(GUEST_PLAY.format(tasks=TASKS, paths=PATHS), env=env, **variables)
         call = bin_dir / "v2v-call.json"
         return played, (json.loads(call.read_text()) if call.exists() else None), pending
 

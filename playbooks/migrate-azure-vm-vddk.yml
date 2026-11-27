@@ -18,6 +18,7 @@
   gather_facts: false
 
   vars_files:
+    - vars/paths.yml
     - vars/migration-common.yml
 
   vars:
@@ -31,7 +32,6 @@
     # The web recovery panel binds this to a run ID from a saved failed job;
     # in that flow, an already-clean run is a successful no-op.
     discard_allow_empty: false
-    artifact_root: "/work/migrate-v2v"
     qemu_img_bin: qemu-img
     # Extra qemu-img convert arguments. -m keeps several coroutines in flight
     # and -W lets them write out of order, which a default single-threaded
@@ -62,9 +62,7 @@
     vddk_backend: auto
     # VixDiskLib directory holding lib64/libvixDiskLib.so.8; empty uses the
     # vddk plugin's built-in default.
-    vddk_libdir: >-
-      {{ lookup('ansible.builtin.env', 'OPENVDDK_INSTALL_DIR')
-         | default('/work/migrate-v2v/tools/openvddk', true) }}
+    vddk_libdir: "{{ openvddk_install_dir }}"
     # VixDiskLib transports to try, colon-separated.
     vddk_transports: nbdssl
     # vCenter certificate SHA-1 thumbprint; empty reads it in preflight.

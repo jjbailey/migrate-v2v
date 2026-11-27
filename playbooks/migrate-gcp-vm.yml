@@ -14,6 +14,7 @@
   gather_facts: false
 
   vars_files:
+    - vars/paths.yml
     - vars/migration-common.yml
     - vars/gcp-common.yml
 
@@ -21,7 +22,6 @@
     migration_target: gcp
     export_format: ovf
     resume_run_id: ""
-    artifact_root: "/work/migrate-v2v"
     # Imports now run concurrently, so the poll delay is the tail latency on
     # every disk rather than on the run as a whole; keep it short. 960 x 15s
     # is a four-hour window, enough for a large disk.

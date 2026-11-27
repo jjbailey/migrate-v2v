@@ -39,8 +39,8 @@ sys.path.insert(0, str(ROOT / "bin"))
 from catalog_common import read_snapshot, timestamp_sort_key
 from vault_common import ansible_vault_bin  # noqa: E402
 
-STATE = Path(os.environ.get("WEB_STATE_DIR", "/work/migrate-v2v/web-state"))
 ARTIFACT_ROOT = Path(os.environ.get("ARTIFACT_ROOT", "/work/migrate-v2v"))
+STATE = Path(os.environ.get("WEB_STATE_DIR", str(ARTIFACT_ROOT / "web-state")))
 INPUT_DIR = Path(os.environ.get("WEB_INPUT_DIR", str(ARTIFACT_ROOT / "web-inputs")))
 VAULT_DIR = Path(os.environ.get("MIGRATE_V2V_VAULT_DIR", str(ARTIFACT_ROOT / "vaults")))
 CATALOG_DIR = Path(os.environ.get("MIGRATE_V2V_CATALOG_DIR", str(ARTIFACT_ROOT / "catalogs")))

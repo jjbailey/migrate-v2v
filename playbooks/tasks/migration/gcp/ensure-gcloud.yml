@@ -7,9 +7,7 @@
 # non-root controller container.
 - name: Set the GCP Cloud CLI install directory
   ansible.builtin.set_fact:
-    gcp_cloud_cli_install_root: >-
-      {{ (artifact_root | default(lookup('ansible.builtin.env', 'ARTIFACT_ROOT') | default('/work/migrate-v2v', true)))
-         }}/tools/google-cloud-cli-{{ gcp_cloud_cli_version }}
+    gcp_cloud_cli_install_root: "{{ artifact_root }}/tools/google-cloud-cli-{{ gcp_cloud_cli_version }}"
 
 - name: Set the GCP Cloud CLI binary directory
   ansible.builtin.set_fact:

@@ -191,7 +191,7 @@ def main():
     parser.add_argument("--vault", type=Path, default=default_vault_path("aws.yml"),
                         help="AWS vault for credentials when AWS_* is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/aws.yml, or "
-                             "/work/migrate-v2v/vaults/aws.yml)")
+                             "$ARTIFACT_ROOT/vaults/aws.yml)")
     parser.add_argument(
         "--project-id", "--account-id", dest="account_id",
         help="AWS account ID; verify and reconcile only this account")

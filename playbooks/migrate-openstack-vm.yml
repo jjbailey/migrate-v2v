@@ -12,6 +12,7 @@
   gather_facts: false
 
   vars_files:
+    - vars/paths.yml
     - vars/migration-common.yml
 
   vars:
@@ -22,7 +23,6 @@
     # set uefi or bios to override.
     openstack_boot_mode: ""
     resume_run_id: ""
-    artifact_root: "/work/migrate-v2v"
     openstack_import_poll_retries: 240
     openstack_import_poll_delay: 15
     # Extra qemu-img convert arguments. -m keeps several coroutines in flight

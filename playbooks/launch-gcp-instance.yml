@@ -12,6 +12,7 @@
   gather_facts: false
 
   vars_files:
+    - vars/paths.yml
     - vars/gcp-common.yml
 
   vars:
@@ -47,7 +48,6 @@
     gcp_migration_id: ""
     guest_probe_enabled: false
     guest_probe_timeout: 300
-    catalog_dir: "{{ lookup('ansible.builtin.env', 'MIGRATE_V2V_CATALOG_DIR') | default('/work/migrate-v2v/catalogs', true) }}"
     migration_catalog_path: "{{ catalog_dir }}/migration-catalog.json"
     deployment_catalog_path: "{{ catalog_dir }}/deployment-catalog.json"
 

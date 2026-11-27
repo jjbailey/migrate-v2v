@@ -5,7 +5,7 @@
 # Wrapper to run ansible-playbook with the vault password wired up.
 #
 # All credentials live in the encrypted files under
-# /work/migrate-v2v/vaults/ by default, so ansible needs
+# $ARTIFACT_ROOT/vaults/ (/work/migrate-v2v/vaults/) by default, so ansible needs
 # the vault password to load them. This wrapper
 # appends one of, in order:
 #   1. nothing, if you already passed --ask-vault-pass, --vault-password-file,
@@ -38,7 +38,7 @@ fi
 playbook_name=${1##*/}
 case "$playbook_name" in
     migrate-aws-vm.yml | migrate-azure-vm.yml | migrate-gcp-vm.yml | migrate-openstack-vm.yml)
-        OVFTOOL_INSTALL_DIR=${OVFTOOL_INSTALL_DIR:-/work/migrate-v2v/tools/ovftool-5.1.0}
+        OVFTOOL_INSTALL_DIR=${OVFTOOL_INSTALL_DIR:-${ARTIFACT_ROOT:-/work/migrate-v2v}/tools/ovftool-5.1.0}
         case "$OVFTOOL_INSTALL_DIR" in
             /*) ;;
             *) OVFTOOL_INSTALL_DIR="$PWD/$OVFTOOL_INSTALL_DIR" ;;

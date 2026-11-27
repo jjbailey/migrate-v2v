@@ -15,6 +15,7 @@
     group/amazon.aws.aws: "{{ aws_module_defaults }}"
 
   vars_files:
+    - vars/paths.yml
     - vars/migration-common.yml
     - vars/aws-common.yml
 

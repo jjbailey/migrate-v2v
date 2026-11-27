@@ -25,9 +25,7 @@
   ansible.builtin.set_fact:
     vddk_libdir_effective: "{{ vddk_libdir }}"
     vddk_install_dir_effective: >-
-      {{ vddk_libdir if (vddk_libdir | length > 0)
-         else (lookup('ansible.builtin.env', 'OPENVDDK_INSTALL_DIR')
-               | default('/work/migrate-v2v/tools/openvddk', true)) }}
+      {{ vddk_libdir if (vddk_libdir | length > 0) else openvddk_install_dir }}
 
 # --dump-plugin loads the plugin and then VixDiskLib itself, so a missing
 # plugin, a missing library, or a broken library layout all show up here.

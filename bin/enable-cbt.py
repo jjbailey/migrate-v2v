@@ -86,7 +86,7 @@ def main():
     parser.add_argument("--vault", type=Path, default=default_vault_path("vsphere.yml"),
                         help="vSphere vault for credentials when VCENTER_* is unset "
                              "(default: $MIGRATE_V2V_VAULT_DIR/vsphere.yml, or "
-                             "/work/migrate-v2v/vaults/vsphere.yml)")
+                             "$ARTIFACT_ROOT/vaults/vsphere.yml)")
     args = parser.parse_args()
     env_user = os.environ.get("VCENTER_USERNAME")
     env_password = os.environ.get("VCENTER_PASSWORD")
